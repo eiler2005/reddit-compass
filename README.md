@@ -142,6 +142,18 @@ uv run reddit-compass serve
 # → http://localhost:8900/docs (Swagger UI)
 ```
 
+### Optional residential proxy for Reddit
+
+Set `REDDIT_COMPASS_PROXIES` in `.env.secrets` to the provider-issued HTTP proxy
+URL (see `.env.example` for the placeholder format). The Reddit bootstrap request
+and public `.json` listing/comment requests then use that proxy; if the HTTP client
+receives HTML or HTTP 403, the Playwright fallback launches Chromium through the
+same configured proxy. Request pacing remains 4 seconds, with at most two 429
+retries separated by 10 seconds. Proxies are only for rate-limit mitigation —
+never for account bans, logins, posting, voting, or commenting.
+
+Keep credentials only in `.env.secrets` (gitignored); do not commit or log them.
+
 ### Nightly automation (macOS)
 
 ```bash

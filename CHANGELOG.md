@@ -17,6 +17,8 @@
   RSS — last resort. `RedditEngine` переключается автоматически при блоке (HTML/403).
 - **Proxy-ротация:** `REDDIT_COMPASS_PROXIES="http://p1:port,http://p2:port"` — round-robin
   по запросам. Только для снижения 429 (разрешено AGENTS.md).
+- README: описан маршрут public Reddit `.json` запросов через опциональный proxy,
+  4-секундный pacing, 429 retries и запрет на обход банов.
 - **`comments_for_top_n`** в настройках профиля: комментарии только для top-N постов по score
   (default 5). Сокращение объёма запросов в ~5 раз (526 → ~130 за прогон).
 - **Stealth-режим:** `--stealth` / `nightly` — jitter пауз (3–6с) + exponential backoff (429).
