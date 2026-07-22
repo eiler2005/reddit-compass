@@ -37,3 +37,11 @@
 
 - Только явный staging. Никаких `git add .` / `git add -A` / `git commit -a`.
 - Не коммитить и не пушить без явного разрешения автора в текущей сессии.
+
+## Деплой (разрешено автором)
+
+- VPS: `deploy@204.168.239.217` (HostKey «Hermes»), каталог `/opt/reddit-compass/`.
+- Деплой через `deploy/hostkey/deploy.sh` (scp + docker compose up).
+- Секреты: `deploy/hostkey/.env.secrets` (gitignored, НЕ коммитить).
+- Разрешено: ssh/scp на VPS, docker compose up/down/restart, host-cron.
+- Запрещено: трогать другие стеки на VPS (/opt/stealth, /opt/moex-futoi, /opt/cheap-intelligence).
