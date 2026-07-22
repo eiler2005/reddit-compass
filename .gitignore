@@ -2,9 +2,18 @@
 .env
 .env.*
 !.env.example
+!.env.secrets.example
 LOCAL_*.md
 *.local.md
 .claude/settings.local.json
+.qwen/
+
+# Deploy secrets (НЕ коммитить)
+deploy/**/.env
+deploy/**/.env.secrets
+deploy/**/secrets/
+*.pem
+id_rsa*
 
 # Python
 .venv/
