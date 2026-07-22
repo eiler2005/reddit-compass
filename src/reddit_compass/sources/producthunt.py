@@ -45,24 +45,32 @@ async def fetch_producthunt(
 
         root = ET.fromstring(text)
 
-        # RSS 2.0: <rss><channel><item>
-        for item in list(root.iter("item"))[:limit]:
-            title_el = item.find("title")
+        # Atom: <feed><entry> (namespace http://www.w3.org/2005/Atom)
+        ns = {"atom": "http://www.w3.org/2005/Atom"}
+        entries = root.findall("atom:entry", ns)
+
+        for entry in entries[:limit]:
+            title_el = entry.find("atom:title", ns)
             title = title_el.text.strip() if title_el is not None and title_el.text else ""
             if not title:
                 continue
 
-            link_el = item.find("link")
-            link = link_el.text.strip() if link_el is not None and link_el.text else ""
+            link_el = entry.find("atom:link", ns)
+            link = link_el.get("href", "") if link_el is not None else ""
 
-            desc_el = item.find("description")
-            desc = _strip_html(desc_el.text or "") if desc_el is not None else ""
+            content_el = entry.find("atom:content", ns)
+            desc = _strip_html(content_el.text or "") if content_el is not None else ""
 
-            pub_el = item.find("pubDate")
+            pub_el = entry.find("atom:published", ns)
             pub_date = pub_el.text.strip() if pub_el is not None and pub_el.text else None
 
-            # Извлекаем ID из URL
-            post_id = link.split("/")[-1] if link else title[:20]
+            # Извлекаем ID из Atom id (tag:www.producthunt.com,2005:Post/1202630)
+            id_el = entry.find("atom:id", ns)
+            post_id = ""
+            if id_el is not None and id_el.text:
+                post_id = id_el.text.split("/")[-1]
+            if not post_id:
+                post_id = link.split("/")[-1] if link else title[:20]
 
             cards.append(
                 PostCard(
