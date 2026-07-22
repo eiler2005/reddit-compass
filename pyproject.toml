@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reddit-compass"
+version = "0.1.0"
+description = "Compass for Reddit trends — collects the voice of the street and points where to look"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "playwright>=1.40,<2",
+  "aiohttp>=3.9,<4",
+]
+
+[project.scripts]
+reddit-compass = "reddit_compass.cli:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.16,<2",
+  "pre-commit>=4.2,<5",
+  "pytest>=8.4,<9",
+  "pytest-cov>=6.2,<7",
+  "ruff>=0.12,<1",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reddit_compass"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# Кодовая база двуязычная (русские докстринги/строки); RUF001-003 дают ложные
+# срабатывания на кириллице (а/с/о/е…), поэтому отключены.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["playwright.*", "aiohttp.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --cov=reddit_compass --cov-report=term-missing --cov-fail-under=60"
+testpaths = ["tests"]
+
+[tool.coverage.run]
+branch = true
+source = ["reddit_compass"]
+# Сеть/браузер/оркестрация исключены из порога на старте; поднимать по мере роста тестов.
+# Порог держит честную планку на чистой логике: config, models, detect_virality, export.
+omit = [
+  "*/client.py",
+  "*/fetch_subreddits.py",
+  "*/search_keywords.py",
+  "*/track_threads.py",
+  "*/cli.py",
+  "*/trends_analysis.py",
+]

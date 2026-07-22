@@ -1,0 +1,34 @@
+# App-owned Compose stack for /opt/reddit-compass on vps-hostkey-hermes.
+# Изолирован от /opt/stealth, /opt/moex-futoi, /opt/cheap-intelligence (своя сеть + volume).
+# Это BATCH-job: без публичного порта. Ночной прогон запускается host-cron через
+#   docker compose -f /opt/reddit-compass/docker-compose.yml run --rm reddit-compass nightly
+# Публичный порт/Caddy SNI появятся только с веб-дашбордом (Roadmap Phase 5).
+services:
+  reddit-compass:
+    build: ../..
+    image: reddit-compass:0.1.0
+    container_name: rc-collector
+    env_file: [.env]
+    environment:
+      DATA_DIR: /data
+    restart: "no"
+    volumes:
+      - rc_data:/data
+    networks: [rc_net]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
+
+networks:
+  rc_net:
+    name: reddit-compass_net
+    driver: bridge
+
+volumes:
+  rc_data:
+    name: reddit-compass_data

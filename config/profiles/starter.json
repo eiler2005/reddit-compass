@@ -1,0 +1,19 @@
+{
+  "subreddits": {
+    "example_cluster": [
+      "artificial",
+      "technology"
+    ]
+  },
+  "keywords": [],
+  "tracked_threads": [],
+  "settings": {
+    "posts_per_subreddit": 25,
+    "top_comments_per_post": 5,
+    "time_filter": "week",
+    "search_sort": "relevance",
+    "search_time_filter": "week",
+    "virality_score_threshold": 1000,
+    "virality_crosspost_min": 2
+  }
+}

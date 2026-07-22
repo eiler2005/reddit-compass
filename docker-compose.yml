@@ -1,0 +1,17 @@
+# Автономный локальный запуск reddit-compass. Данные — в именованном volume.
+#   docker compose run --rm reddit-compass all       # полный цикл сбора
+#   docker compose run --rm reddit-compass nightly   # + ночной разбор трендов
+services:
+  reddit-compass:
+    build: .
+    image: reddit-compass:0.1.0
+    env_file:
+      - .env
+    environment:
+      DATA_DIR: /data
+    restart: "no"
+    volumes:
+      - reddit-compass-data:/data
+
+volumes:
+  reddit-compass-data:

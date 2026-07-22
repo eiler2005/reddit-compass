@@ -1,0 +1,48 @@
+{
+  "data": {
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc123",
+          "title": "AI agents replacing jobs at scale",
+          "author": "user1",
+          "subreddit": "artificial",
+          "score": 1500,
+          "upvote_ratio": 0.95,
+          "num_comments": 342,
+          "url": "https://www.reddit.com/r/artificial/comments/abc123/",
+          "permalink": "/r/artificial/comments/abc123/ai_agents/",
+          "selftext": "Some body text",
+          "link_flair_text": "Discussion",
+          "is_self": true,
+          "created_utc": 1753000000,
+          "is_video": false,
+          "over_18": false,
+          "stickied": false,
+          "crosspost_parent_list": []
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "def456",
+          "title": "Deepfake fraud rising",
+          "author": "user2",
+          "subreddit": "deepfakes",
+          "score": 800,
+          "upvote_ratio": 0.9,
+          "num_comments": 120,
+          "url": "https://example.com/x",
+          "permalink": "/r/deepfakes/comments/def456/deepfake/",
+          "selftext": "",
+          "link_flair_text": null,
+          "is_self": false,
+          "created_utc": 1753000100,
+          "crosspost_parent_list": [{"id": "p1"}, {"id": "p2"}]
+        }
+      },
+      {"kind": "more", "data": {"id": "ignored"}}
+    ]
+  }
+}

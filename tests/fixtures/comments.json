@@ -1,0 +1,14 @@
+[
+  {"kind": "Listing", "data": {"children": []}},
+  {
+    "data": {
+      "children": [
+        {"kind": "t1", "data": {"id": "c1", "author": "cuser1", "score": 500, "body": "This is the top comment", "created_utc": 1753000200, "is_submitter": false, "stickied": false}},
+        {"kind": "t1", "data": {"id": "c2", "author": "cuser2", "score": 900, "body": "Higher scored comment", "created_utc": 1753000300, "is_submitter": true, "stickied": false}},
+        {"kind": "t1", "data": {"id": "c3", "author": "modbot", "score": 10, "body": "Sticky rules", "stickied": true}},
+        {"kind": "t1", "data": {"id": "c4", "author": "x", "score": 5, "body": "[removed]"}},
+        {"kind": "more", "data": {}}
+      ]
+    }
+  }
+]

@@ -1,0 +1,3 @@
+# Нормализуем переносы строк: в репозитории всегда LF (важно для Docker/Linux).
+* text=auto eol=lf
+uv.lock -text

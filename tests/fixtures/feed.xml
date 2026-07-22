@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <title>Test RSS post title that is reasonably long</title>
+    <author><name>/u/rssuser</name></author>
+    <link href="https://www.reddit.com/r/technology/comments/xyz789/test_rss_post/?utm=1"/>
+    <id>t3_xyz789</id>
+    <category term="technology" label="r/technology"/>
+    <published>2026-07-21T11:04:52+00:00</published>
+    <updated>2026-07-21T11:05:00+00:00</updated>
+    <content type="html">&lt;p&gt;body&lt;/p&gt;</content>
+  </entry>
+</feed>

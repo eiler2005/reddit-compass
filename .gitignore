@@ -1,0 +1,31 @@
+# Local credentials and overrides
+.env
+.env.*
+!.env.example
+LOCAL_*.md
+*.local.md
+.claude/settings.local.json
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime data (snapshots, harvests, reports) — everything except the placeholder
+data/*
+!data/.gitkeep
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+
+# Temporary files
+tmp/
+scratch/
+*.log

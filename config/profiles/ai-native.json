@@ -1,0 +1,57 @@
+{
+  "subreddits": {
+    "ai_work_business": [
+      "artificial",
+      "singularity",
+      "ChatGPT",
+      "AI_Agents",
+      "LocalLLaMA",
+      "smallbusiness",
+      "Entrepreneur"
+    ],
+    "trust_authenticity": [
+      "changemyview",
+      "deepfakes",
+      "MachineLearning"
+    ],
+    "vibe_coding_agents": [
+      "vibecoding",
+      "cursor",
+      "LangChain",
+      "AutoGPT",
+      "crewAI"
+    ],
+    "layoffs_labor": [
+      "AskReddit",
+      "technology",
+      "jobs",
+      "cscareerquestions"
+    ]
+  },
+  "keywords": [
+    "AI agents replacing jobs",
+    "AI layoffs",
+    "deepfake fraud",
+    "vibe coding",
+    "AI agent workflow",
+    "one person company AI",
+    "AI trust verification",
+    "cognitive debt AI",
+    "AI outcome pricing",
+    "digital employee audit"
+  ],
+  "tracked_threads": [
+    "https://www.reddit.com/r/AskReddit/comments/1qeb533/people_who_got_laid_off_because_of_ai_what_was_your_job/",
+    "https://www.reddit.com/r/changemyview/comments/1k8b2hj/meta_unauthorized_experiment_on_cmv_involving/",
+    "https://www.reddit.com/r/changemyview/comments/1kgdraw/meta_cmv_ai_experiment_update_apology_received/"
+  ],
+  "settings": {
+    "posts_per_subreddit": 25,
+    "top_comments_per_post": 5,
+    "time_filter": "week",
+    "search_sort": "relevance",
+    "search_time_filter": "week",
+    "virality_score_threshold": 1000,
+    "virality_crosspost_min": 2
+  }
+}
