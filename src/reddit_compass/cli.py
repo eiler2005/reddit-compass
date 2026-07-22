@@ -316,6 +316,66 @@ async def _cmd_hn(args: argparse.Namespace) -> None:
     print(f"✅ HN: {len(cards)} stories → {snap_dir / 'hackernews.jsonl'}")
 
 
+async def _cmd_rss(args: argparse.Namespace) -> None:
+    """RSS: BBC, Guardian, Reuters, TechCrunch, Verge, Ars Technica."""
+    config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
+    snapshot_date = _today()
+
+    from .sources.rss import fetch_all_rss
+
+    print("📡 RSS: загрузка 6 источников...")
+    cards = await fetch_all_rss(snapshot_date=snapshot_date)
+
+    snap_dir = _snapshots_dir(args) / snapshot_date
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    from .export import write_posts_jsonl
+
+    write_posts_jsonl(cards, snap_dir / "rss.jsonl")
+    print(f"✅ RSS: {len(cards)} статей → {snap_dir / 'rss.jsonl'}")
+
+
+async def _cmd_ladder(args: argparse.Namespace) -> None:
+    """Ladder: NYT, WaPo, FT, Wired, Medium + остальные (paywall bypass)."""
+    config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
+    snapshot_date = _today()
+
+    from .sources.ladder import fetch_all_ladder
+
+    print("🪜 Ladder: загрузка 12 paywall-источников...")
+    cards = await fetch_all_ladder(snapshot_date=snapshot_date)
+
+    snap_dir = _snapshots_dir(args) / snapshot_date
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    from .export import write_posts_jsonl
+
+    write_posts_jsonl(cards, snap_dir / "ladder.jsonl")
+    print(f"✅ Ladder: {len(cards)} страниц → {snap_dir / 'ladder.jsonl'}")
+
+
+async def _cmd_ph(args: argparse.Namespace) -> None:
+    """ProductHunt: топ продуктов через GraphQL API."""
+    config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
+    snapshot_date = _today()
+
+    from .sources.producthunt import fetch_producthunt
+
+    print("🚀 ProductHunt: загрузка топ продуктов...")
+    cards = await fetch_producthunt(snapshot_date=snapshot_date)
+
+    snap_dir = _snapshots_dir(args) / snapshot_date
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    from .export import write_posts_jsonl
+
+    write_posts_jsonl(cards, snap_dir / "producthunt.jsonl")
+    print(f"✅ ProductHunt: {len(cards)} продуктов → {snap_dir / 'producthunt.jsonl'}")
+
+
 def _cmd_serve_sync(args: argparse.Namespace) -> None:
     """Запуск REST API (FastAPI/uvicorn). Синхронный — uvicorn сам управляет event loop."""
     import uvicorn
@@ -403,6 +463,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("signals", parents=[common], help="LLM-анализ (Qwen API): pain points, темы")
     sub.add_parser("hn", parents=[common], help="Hacker News: AI-stories через Algolia API")
+    sub.add_parser(
+        "rss", parents=[common], help="RSS: BBC, Guardian, Reuters, TechCrunch, Verge, Ars"
+    )
+    sub.add_parser(
+        "ladder", parents=[common], help="Ladder: NYT, WaPo, FT, Wired, Medium (paywall)"
+    )
+    sub.add_parser("ph", parents=[common], help="ProductHunt: топ продуктов (GraphQL API)")
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
 
     db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats")
@@ -426,6 +493,9 @@ def main() -> None:
         "nightly": _cmd_nightly,
         "signals": _cmd_signals,
         "hn": _cmd_hn,
+        "rss": _cmd_rss,
+        "ladder": _cmd_ladder,
+        "ph": _cmd_ph,
         "serve": _cmd_serve,
         "db": _cmd_db,
     }

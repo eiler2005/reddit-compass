@@ -78,4 +78,7 @@ omit = [
   "*/trends_analysis.py",
   "*/signals.py",
   "*/sources/hackernews.py",
+  "*/sources/rss.py",
+  "*/sources/ladder.py",
+  "*/sources/producthunt.py",
 ]
