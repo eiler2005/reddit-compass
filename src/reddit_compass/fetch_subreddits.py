@@ -1,4 +1,4 @@
-"""Сбор hot/top постов по сабреддитам через Playwright JSON API."""
+"""Сбор hot/top постов по сабреддитам через Reddit JSON API."""
 
 from __future__ import annotations
 
@@ -8,8 +8,7 @@ from html import unescape
 from typing import TYPE_CHECKING, Any
 
 from .client import (
-    RedditBrowser,
-    _check_playwright,
+    RedditEngine,
     fetch_rss_aiohttp,
     parse_comments_json,
     parse_listing_json,
@@ -66,7 +65,7 @@ def _json_to_card(
 
 
 async def _fetch_comments(
-    browser: RedditBrowser,
+    engine: RedditEngine,
     permalink: str,
     limit: int,
 ) -> list[CommentCard]:
@@ -74,7 +73,7 @@ async def _fetch_comments(
     if limit <= 0 or not permalink:
         return []
     url = f"https://www.reddit.com{permalink}.json?limit={limit + 10}&sort=top"
-    data = await browser.fetch_json(url)
+    data = await engine.fetch_json(url)
     if data is None:
         return []
     raw_comments = parse_comments_json(data, limit)
@@ -94,19 +93,24 @@ async def _fetch_comments(
 
 
 async def fetch_subreddit_posts(
-    browser: RedditBrowser,
+    engine: RedditEngine,
     subreddit_name: str,
     config: MonitorConfig,
     snapshot_date: str,
     modes: list[str] | None = None,
 ) -> list[PostCard]:
-    """Собирает посты из одного сабреддита: hot + top."""
+    """Собирает посты из одного сабреддита: hot + top.
+
+    Комментарии загружаются только для top-N постов по score (comments_for_top_n),
+    что сокращает объём запросов в ~5 раз.
+    """
     if modes is None:
         modes = ["hot", "top"]
 
     settings = config.settings
     limit = settings.posts_per_subreddit
     comment_limit = settings.top_comments_per_post
+    comments_top_n = settings.comments_for_top_n
     time_filter = settings.time_filter
 
     cards: list[PostCard] = []
@@ -124,7 +128,7 @@ async def fetch_subreddit_posts(
         else:
             continue
 
-        data = await browser.fetch_json(url)
+        data = await engine.fetch_json(url)
         posts = parse_listing_json(data)
 
         for post in posts:
@@ -132,16 +136,19 @@ async def fetch_subreddit_posts(
             if pid in seen_ids or post.get("stickied"):
                 continue
             seen_ids.add(pid)
-
-            top_comments = await _fetch_comments(browser, post["permalink"], comment_limit)
-            card = _json_to_card(post, mode, snapshot_date, top_comments=top_comments)
+            card = _json_to_card(post, mode, snapshot_date)
             cards.append(card)
 
         await rate_limit_pause()
 
-    logger.info(
-        "r/%s: собрано %d постов (Playwright %s)", subreddit_name, len(cards), "+".join(modes)
-    )
+    # Комментарии — только для top-N по score (экономия запросов)
+    if comment_limit > 0 and comments_top_n > 0 and cards:
+        ranked = sorted(cards, key=lambda c: c.score, reverse=True)
+        for card in ranked[:comments_top_n]:
+            card.top_comments = await _fetch_comments(engine, card.permalink, comment_limit)
+            await rate_limit_pause()
+
+    logger.info("r/%s: собрано %d постов (%s)", subreddit_name, len(cards), "+".join(modes))
     return cards
 
 
@@ -150,20 +157,23 @@ async def fetch_all_subreddits(
     snapshot_date: str,
     modes: list[str] | None = None,
 ) -> list[PostCard]:
-    """Собирает посты из всех сабреддитов через Playwright."""
-    if not _check_playwright():
-        return await _fetch_all_subreddits_rss(config, snapshot_date)
-
-    browser = RedditBrowser()
-    await browser.start()
+    """Собирает посты из всех сабреддитов (aiohttp → Playwright → RSS)."""
+    engine = RedditEngine()
+    await engine.start()
     all_cards: list[PostCard] = []
     try:
         for name in config.all_subreddits:
-            cards = await fetch_subreddit_posts(browser, name, config, snapshot_date, modes)
+            cards = await fetch_subreddit_posts(engine, name, config, snapshot_date, modes)
             all_cards.extend(cards)
             await rate_limit_pause()
     finally:
-        await browser.close()
+        await engine.close()
+
+    # Если aiohttp+Playwright не дали данных — RSS fallback
+    if not all_cards:
+        logger.warning("JSON API недоступен — fallback на RSS")
+        return await _fetch_all_subreddits_rss(config, snapshot_date)
+
     return all_cards
 
 

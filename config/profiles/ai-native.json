@@ -48,6 +48,7 @@
   "settings": {
     "posts_per_subreddit": 25,
     "top_comments_per_post": 5,
+    "comments_for_top_n": 5,
     "time_filter": "week",
     "search_sort": "relevance",
     "search_time_filter": "week",

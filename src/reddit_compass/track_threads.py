@@ -1,4 +1,4 @@
-"""Мониторинг конкретных тредов через Playwright JSON API."""
+"""Мониторинг конкретных тредов через Reddit JSON API."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .client import (
-    RedditBrowser,
-    _check_playwright,
+    RedditEngine,
     rate_limit_pause,
 )
 from .models import TrackedThreadState
@@ -34,7 +33,7 @@ def parse_thread_url(url: str) -> tuple[str, str] | None:
 
 
 async def check_thread(
-    browser: RedditBrowser,
+    engine: RedditEngine,
     url: str,
     snapshot_date: str,
     prev_state: TrackedThreadState | None = None,
@@ -47,7 +46,7 @@ async def check_thread(
     subreddit_name, post_id = parsed
     json_url = f"https://www.reddit.com/r/{subreddit_name}/comments/{post_id}.json?limit=1"
 
-    data = await browser.fetch_json(json_url)
+    data = await engine.fetch_json(json_url)
     if data is None or not isinstance(data, list) or len(data) < 1:
         logger.warning("JSON треда недоступен: %s", url)
         return prev_state
@@ -105,22 +104,22 @@ async def track_all_threads(
     if state_file is not None:
         prev_states = load_previous_states(state_file)
 
-    if not _check_playwright():
-        logger.info("Playwright недоступен — track пропущен")
-        return list(prev_states.values())
-
-    browser = RedditBrowser()
-    await browser.start()
+    engine = RedditEngine()
+    await engine.start()
     results: list[TrackedThreadState] = []
     try:
         for url in config.tracked_threads:
             prev = prev_states.get(url)
-            state = await check_thread(browser, url, snapshot_date, prev)
+            state = await check_thread(engine, url, snapshot_date, prev)
             if state is not None:
                 results.append(state)
             await rate_limit_pause()
     finally:
-        await browser.close()
+        await engine.close()
+
+    if not results and config.tracked_threads:
+        logger.info("JSON API недоступен для track — возвращены предыдущие состояния")
+        return list(prev_states.values())
 
     logger.info("Tracked threads: проверено %d из %d", len(results), len(config.tracked_threads))
     return results

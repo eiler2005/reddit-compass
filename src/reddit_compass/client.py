@@ -1,15 +1,17 @@
-"""Reddit клиент: Playwright JSON API (основной) + RSS (fallback).
+"""Reddit клиент: aiohttp JSON API (primary) + Playwright (fallback) + RSS (last resort).
 
-Playwright открывает headless Chromium → fetch() к Reddit JSON API из браузера.
-Это даёт полные данные (score, комментарии, top/rising/search) без API credentials.
+Основной движок — лёгкий aiohttp: GET к Reddit `.json` endpoints с браузерным User-Agent.
+Если Reddit блокирует (HTML вместо JSON, 403) — fallback на Playwright headless Chromium.
+Если Playwright не установлен — RSS (только hot, без score).
 
-Если Playwright не установлен — fallback на Atom RSS (только hot, без score).
+Proxy-ротация (опционально): REDDIT_COMPASS_PROXIES="http://p1:port,http://p2:port".
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
@@ -25,7 +27,140 @@ REQUEST_PAUSE = 4.0
 MAX_RETRIES = 2
 RETRY_PAUSE = 10.0
 
-# ── Playwright engine ──────────────────────────────────────────────────────
+# ── Proxy rotation ─────────────────────────────────────────────────────────
+
+
+def _load_proxies() -> list[str]:
+    """Загружает список proxy из REDDIT_COMPASS_PROXIES (comma-separated)."""
+    raw = os.environ.get("REDDIT_COMPASS_PROXIES", "")
+    if not raw.strip():
+        return []
+    proxies = [p.strip() for p in raw.split(",") if p.strip()]
+    if proxies:
+        logger.info("Загружено %d proxy для ротации", len(proxies))
+    return proxies
+
+
+class ProxyRotator:
+    """Round-robin ротация proxy."""
+
+    def __init__(self, proxies: list[str] | None = None) -> None:
+        self._proxies = proxies if proxies is not None else _load_proxies()
+        self._index = 0
+
+    @property
+    def enabled(self) -> bool:
+        return len(self._proxies) > 0
+
+    def next(self) -> str | None:
+        if not self._proxies:
+            return None
+        proxy = self._proxies[self._index % len(self._proxies)]
+        self._index += 1
+        return proxy
+
+
+# ── aiohttp engine (primary) ───────────────────────────────────────────────
+
+
+class RedditHttpClient:
+    """Лёгкий HTTP-клиент: aiohttp + Reddit .json API."""
+
+    def __init__(self, proxy_rotator: ProxyRotator | None = None) -> None:
+        self._session: Any = None
+        self._proxy_rotator = proxy_rotator or ProxyRotator()
+        self._blocked = False
+
+    @property
+    def blocked(self) -> bool:
+        """True если Reddit вернул HTML/403 — нужен fallback на Playwright."""
+        return self._blocked
+
+    async def start(self) -> None:
+        import aiohttp
+
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            "Accept-Language": "en-US,en;q=0.9",
+        }
+        self._session = aiohttp.ClientSession(
+            headers=headers,
+            cookie_jar=aiohttp.CookieJar(),
+            timeout=aiohttp.ClientTimeout(total=30),
+        )
+        # Первый запрос к reddit.com для получения cookies
+        try:
+            proxy = self._proxy_rotator.next()
+            async with self._session.get(
+                "https://www.reddit.com/",
+                proxy=proxy,
+                allow_redirects=True,
+            ) as resp:
+                if resp.status == 200:
+                    logger.info("Reddit HTTP-сессия открыта (cookies получены)")
+                else:
+                    logger.warning("Reddit HTTP: статус %d при инициализации", resp.status)
+        except Exception as exc:
+            logger.warning("Не удалось открыть reddit.com через aiohttp: %s", exc)
+
+    async def fetch_json(self, url: str) -> Any | None:
+        """Загружает JSON через aiohttp GET."""
+        if self._session is None or self._blocked:
+            return None
+
+        for attempt in range(MAX_RETRIES + 1):
+            try:
+                proxy = self._proxy_rotator.next()
+                async with self._session.get(url, proxy=proxy) as resp:
+                    if resp.status == 429:
+                        if attempt < MAX_RETRIES:
+                            logger.warning(
+                                "HTTP %s: 429, retry %d/%d", url, attempt + 1, MAX_RETRIES
+                            )
+                            await asyncio.sleep(RETRY_PAUSE)
+                            continue
+                        logger.warning("HTTP %s: 429, исчерпаны retries", url)
+                        return None
+
+                    if resp.status == 403:
+                        logger.warning(
+                            "HTTP %s: 403 — Reddit блокирует, fallback на Playwright", url
+                        )
+                        self._blocked = True
+                        return None
+
+                    if resp.status != 200:
+                        logger.warning("HTTP %s: HTTP %d", url, resp.status)
+                        return None
+
+                    content_type = resp.headers.get("Content-Type", "")
+                    text = await resp.text()
+
+                    # Reddit может вернуть HTML вместо JSON (блок без cookies)
+                    if "text/html" in content_type or text.strip().startswith("<!"):
+                        logger.warning(
+                            "HTTP %s: получен HTML вместо JSON — fallback на Playwright", url
+                        )
+                        self._blocked = True
+                        return None
+
+                    import json
+
+                    return json.loads(text)
+
+            except Exception as exc:
+                logger.warning("HTTP fetch error for %s: %s", url, exc)
+                return None
+        return None
+
+    async def close(self) -> None:
+        if self._session:
+            await self._session.close()
+        self._session = None
+
+
+# ── Playwright engine (fallback) ───────────────────────────────────────────
 
 _playwright_available: bool | None = None
 
@@ -48,26 +183,32 @@ def _check_playwright() -> bool:
 
 
 class RedditBrowser:
-    """Headless Chromium для Reddit JSON API."""
+    """Headless Chromium для Reddit JSON API (fallback)."""
 
-    def __init__(self) -> None:
+    def __init__(self, proxy_rotator: ProxyRotator | None = None) -> None:
         self._pw: Any = None
         self._browser: Any = None
         self._page: Any = None
+        self._proxy_rotator = proxy_rotator or ProxyRotator()
 
     async def start(self) -> None:
         from playwright.async_api import async_playwright
 
         self._pw = await async_playwright().start()
-        self._browser = await self._pw.chromium.launch(headless=True)
+
+        launch_args: dict[str, Any] = {"headless": True}
+        proxy = self._proxy_rotator.next()
+        if proxy:
+            launch_args["proxy"] = {"server": proxy}
+
+        self._browser = await self._pw.chromium.launch(**launch_args)
         self._page = await self._browser.new_page(user_agent=USER_AGENT)
-        # Открываем Reddit для получения cookies
         try:
             await self._page.goto(
                 "https://www.reddit.com/", wait_until="domcontentloaded", timeout=30000
             )
             await asyncio.sleep(2)
-            logger.info("Reddit browser session открыта")
+            logger.info("Reddit browser session открыта (Playwright fallback)")
         except Exception as exc:
             logger.warning("Не удалось открыть reddit.com: %s", exc)
 
@@ -124,6 +265,67 @@ class RedditBrowser:
         self._page = None
         self._browser = None
         self._pw = None
+
+
+# ── Unified engine interface ───────────────────────────────────────────────
+
+
+class RedditEngine:
+    """Унифицированный движок: aiohttp → Playwright → RSS.
+
+    Использовать как async context manager:
+        async with RedditEngine() as engine:
+            data = await engine.fetch_json(url)
+    """
+
+    def __init__(self, proxy_rotator: ProxyRotator | None = None) -> None:
+        self._rotator = proxy_rotator or ProxyRotator()
+        self._http: RedditHttpClient | None = None
+        self._browser: RedditBrowser | None = None
+        self._use_browser = False
+
+    async def start(self) -> None:
+        self._http = RedditHttpClient(self._rotator)
+        await self._http.start()
+
+    async def fetch_json(self, url: str) -> Any | None:
+        # Пробуем aiohttp
+        if self._http and not self._http.blocked:
+            result = await self._http.fetch_json(url)
+            if result is not None:
+                return result
+            # Если aiohttp заблокирован — переключаемся на Playwright
+            if self._http.blocked and not self._use_browser:
+                logger.info("aiohttp заблокирован Reddit — переключаюсь на Playwright")
+                await self._start_browser()
+
+        # Fallback: Playwright
+        if self._browser:
+            return await self._browser.fetch_json(url)
+
+        return None
+
+    async def _start_browser(self) -> None:
+        if not _check_playwright():
+            return
+        self._use_browser = True
+        self._browser = RedditBrowser(self._rotator)
+        await self._browser.start()
+
+    async def close(self) -> None:
+        if self._http:
+            await self._http.close()
+        if self._browser:
+            await self._browser.close()
+        self._http = None
+        self._browser = None
+
+    async def __aenter__(self) -> RedditEngine:
+        await self.start()
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        await self.close()
 
 
 # ── JSON parsing ───────────────────────────────────────────────────────────

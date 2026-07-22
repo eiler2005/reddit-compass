@@ -59,20 +59,28 @@ reddit-compass
 
 ## 5. Движки сбора
 
-| Движок | Что даёт | Зависимости |
-|---|---|---|
-| **Playwright** (основной) | hot, top, rising, search, score, комментарии | playwright, chromium |
-| **RSS** (fallback) | только hot, без score/комментариев | aiohttp |
+| Движок | Что даёт | Зависимости | Приоритет |
+|---|---|---|---|
+| **aiohttp** (primary) | hot, top, rising, search, score, комментарии; лёгкий HTTP | aiohttp | 1 |
+| **Playwright** (fallback) | то же, через headless Chromium | playwright, chromium | 2 |
+| **RSS** (last resort) | только hot, без score/комментариев | aiohttp | 3 |
 
-Playwright открывает headless Chromium и делает `fetch()` к Reddit JSON API из контекста браузера —
-полные данные без API credentials. OAuth (asyncpraw) — опциональный движок на будущее (см. ROADMAP).
+`RedditEngine` (унифицированный интерфейс) пробует aiohttp → при блоке (HTML/403) переключается
+на Playwright → если оба недоступны, вызывающий код использует RSS.
+
+Proxy-ротация (опционально): `REDDIT_COMPASS_PROXIES="http://p1:port,http://p2:port"` — round-robin
+по запросам. Без proxy сервис работает как раньше.
+
+Оптимизация объёма: комментарии загружаются только для top-N постов по score
+(`comments_for_top_n` в профиле, default 5) — сокращение запросов в ~5 раз.
 
 ## 6. Rate limiting и этика
 
-- Пауза между запросами: 4 c (Playwright), 15 c (RSS).
+- Пауза между запросами: 4 c.
 - Retry при HTTP 429: до 2 раз с паузой 10 c.
 - Read-only: сервис не публикует, не голосует, не комментирует.
 - Данные: только публичные посты и комментарии.
+- Proxy-ротация: только для снижения 429, не для обхода банов/аккаунтов.
 
 ## 7. Перенос / деплой
 
