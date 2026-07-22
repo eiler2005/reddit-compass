@@ -1,0 +1,22 @@
+# reddit-compass API — slim image (без Playwright/Chromium).
+# Только Python + FastAPI + uvicorn. Для batch-коллектора — основной Dockerfile.
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Устанавливаем пакет (без Playwright — API не нужен браузер).
+COPY pyproject.toml README.md ./
+COPY src ./src
+COPY config ./config
+RUN pip install --no-cache-dir .
+
+# Non-root user
+RUN useradd -m reddit && mkdir -p /data && chown -R reddit:reddit /data /app
+USER reddit
+
+ENV DATA_DIR=/data
+VOLUME ["/data"]
+
+EXPOSE 8900
+
+CMD ["reddit-compass", "serve"]

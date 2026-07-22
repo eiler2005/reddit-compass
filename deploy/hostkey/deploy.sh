@@ -31,13 +31,22 @@ fi
 
 # 1. Создаём каталог на VPS
 echo "📁 Создаю ${REMOTE_DIR} на VPS..."
-ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}"
+ssh "${VPS_USER}@${VPS_HOST}" "sudo mkdir -p ${REMOTE_DIR} && sudo chown ${VPS_USER}:${VPS_USER} ${REMOTE_DIR}"
 
-# 2. Копируем файлы
-echo "📦 Копирую compose + Caddyfile + secrets..."
+# 2. Копируем файлы (build context + compose + secrets)
+echo "📦 Копирую исходники + compose + Caddyfile + secrets..."
+ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/src ${REMOTE_DIR}/config"
 scp "${SCRIPT_DIR}/docker-compose.yml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/Caddyfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp "${SCRIPT_DIR}/Dockerfile.api" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/.env.secrets" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.env"
+# Build context для Docker
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+scp "${PROJECT_ROOT}/Dockerfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp "${PROJECT_ROOT}/README.md" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp -r "${PROJECT_ROOT}/src/reddit_compass" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/src/"
+scp -r "${PROJECT_ROOT}/config/profiles" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/config/"
 
 # 3. Запускаем сервисы
 echo "🐳 Запускаю api + caddy..."

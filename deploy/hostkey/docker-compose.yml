@@ -13,7 +13,7 @@
 
 services:
   reddit-compass:
-    build: ../..
+    build: .
     image: reddit-compass:latest
     container_name: rc-collector
     env_file: [.env]
@@ -33,7 +33,9 @@ services:
       options: {max-size: "10m", max-file: "3"}
 
   api:
-    build: ../..
+    build:
+      context: .
+      dockerfile: Dockerfile.api
     image: reddit-compass:latest
     container_name: rc-api
     command: ["reddit-compass", "serve"]

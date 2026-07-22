@@ -316,8 +316,8 @@ async def _cmd_hn(args: argparse.Namespace) -> None:
     print(f"✅ HN: {len(cards)} stories → {snap_dir / 'hackernews.jsonl'}")
 
 
-async def _cmd_serve(args: argparse.Namespace) -> None:
-    """Запуск REST API (FastAPI/uvicorn)."""
+def _cmd_serve_sync(args: argparse.Namespace) -> None:
+    """Запуск REST API (FastAPI/uvicorn). Синхронный — uvicorn сам управляет event loop."""
     import uvicorn
 
     from .api.app import create_app
@@ -325,7 +325,12 @@ async def _cmd_serve(args: argparse.Namespace) -> None:
     app = create_app()
     print("🚀 reddit-compass API: http://127.0.0.1:8900")
     print("   Docs: http://127.0.0.1:8900/docs")
-    uvicorn.run(app, host="127.0.0.1", port=8900, log_level="info")
+    uvicorn.run(app, host="0.0.0.0", port=8900, log_level="info")
+
+
+async def _cmd_serve(args: argparse.Namespace) -> None:
+    """Обёртка для совместимости с async handler."""
+    _cmd_serve_sync(args)
 
 
 async def _cmd_db(args: argparse.Namespace) -> None:
@@ -430,7 +435,11 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        asyncio.run(handler(args))
+        if args.command == "serve":
+            # uvicorn управляет event loop сам — без asyncio.run()
+            _cmd_serve_sync(args)
+        else:
+            asyncio.run(handler(args))
     except KeyboardInterrupt:
         print("\n⏹ Прервано пользователем.")
         sys.exit(130)
