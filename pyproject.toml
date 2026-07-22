@@ -43,6 +43,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # B008: Depends() в аргументах — стандартный паттерн FastAPI.
 ignore = ["RUF001", "RUF002", "RUF003", "B008"]
 
+[tool.ruff.lint.per-file-ignores]
+# HTML/CSS шаблон — длинные строки неизбежны
+"src/reddit_compass/api/dashboard.py" = ["E501"]
+
 [tool.ruff.format]
 quote-style = "double"
 
@@ -73,4 +77,5 @@ omit = [
   "*/cli.py",
   "*/trends_analysis.py",
   "*/signals.py",
+  "*/sources/hackernews.py",
 ]

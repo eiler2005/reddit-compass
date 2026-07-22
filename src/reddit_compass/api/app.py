@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from ..db import get_db, query_posts, query_signals, query_snapshots, query_stats
@@ -71,6 +72,16 @@ def create_app() -> FastAPI:
     @app.get("/health", tags=["system"])
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "reddit-compass"}
+
+    # ── Dashboard (read-only, без auth) ─────────────────────────────────────
+
+    @app.get("/dashboard", response_class=HTMLResponse, tags=["system"])
+    def dashboard(db: sqlite3.Connection = Depends(_get_db)) -> str:
+        from .dashboard import render_dashboard
+
+        stats = query_stats(db)
+        posts = query_posts(db, limit=15)
+        return render_dashboard(stats, posts)
 
     # ── OAuth2 token ────────────────────────────────────────────────────────
 

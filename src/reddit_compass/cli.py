@@ -296,6 +296,26 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
     print(f"   Report: {report_path}")
 
 
+async def _cmd_hn(args: argparse.Namespace) -> None:
+    """Hacker News: AI-stories через Algolia API."""
+    config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
+    snapshot_date = _today()
+
+    from .sources.hackernews import fetch_hn_stories
+
+    print("📡 Hacker News: загрузка AI-stories (Algolia API)...")
+    cards = await fetch_hn_stories(snapshot_date=snapshot_date)
+
+    snap_dir = _snapshots_dir(args) / snapshot_date
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    from .export import write_posts_jsonl
+
+    write_posts_jsonl(cards, snap_dir / "hackernews.jsonl")
+    print(f"✅ HN: {len(cards)} stories → {snap_dir / 'hackernews.jsonl'}")
+
+
 async def _cmd_serve(args: argparse.Namespace) -> None:
     """Запуск REST API (FastAPI/uvicorn)."""
     import uvicorn
@@ -377,6 +397,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("signals", parents=[common], help="LLM-анализ (Qwen API): pain points, темы")
+    sub.add_parser("hn", parents=[common], help="Hacker News: AI-stories через Algolia API")
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
 
     db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats")
@@ -399,6 +420,7 @@ def main() -> None:
         "all": _cmd_all,
         "nightly": _cmd_nightly,
         "signals": _cmd_signals,
+        "hn": _cmd_hn,
         "serve": _cmd_serve,
         "db": _cmd_db,
     }
