@@ -72,4 +72,5 @@ omit = [
   "*/track_threads.py",
   "*/cli.py",
   "*/trends_analysis.py",
+  "*/signals.py",
 ]

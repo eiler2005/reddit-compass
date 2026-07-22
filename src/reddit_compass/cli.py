@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 from datetime import UTC, datetime
@@ -67,8 +68,40 @@ def _snapshots_dir(args: argparse.Namespace) -> Path:
 # ── Subcommand handlers ────────────────────────────────────────────────────
 
 
+def _dry_run_report(config: MonitorConfig, args: argparse.Namespace) -> bool:
+    """Если --dry-run: печатает план сбора и возвращает True (early exit)."""
+    if not getattr(args, "dry_run", False):
+        return False
+    settings = config.settings
+    n_sub = len(config.all_subreddits)
+    n_kw = len(config.keywords)
+    n_threads = len(config.tracked_threads)
+    # Оценка: 2 listing на сабреддит + comments_top_n на сабреддит + keywords + threads
+    est_requests = n_sub * 2 + n_sub * settings.comments_for_top_n + n_kw + n_threads
+    est_time_min = est_requests * (5 if settings.stealth else 4) / 60
+
+    print("🔍 DRY RUN — сетевые запросы НЕ выполняются, данные НЕ пишутся")
+    print(f"{'=' * 60}")
+    print(f"Сабреддиты ({n_sub}):")
+    for cluster, subs in config.subreddit_clusters.items():
+        print(f"  [{cluster}] {', '.join(subs)}")
+    print(f"Ключевые слова ({n_kw}): {', '.join(config.keywords[:5])}{'...' if n_kw > 5 else ''}")
+    print(f"Tracked threads: {n_threads}")
+    print(
+        f"Настройки: {settings.posts_per_subreddit} постов/саб, "
+        f"comments для top-{settings.comments_for_top_n}, "
+        f"time_filter={settings.time_filter}"
+    )
+    print(f"Stealth: {'да' if settings.stealth else 'нет'}")
+    print(f"{'=' * 60}")
+    print(f"Оценка: ~{est_requests} запросов, ~{est_time_min:.0f} мин")
+    return True
+
+
 async def _cmd_fetch(args: argparse.Namespace) -> None:
     config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
     snapshot_date = _today()
     cards = await fetch_all_subreddits(config, snapshot_date)
     snap_dir = _snapshots_dir(args) / snapshot_date
@@ -81,6 +114,8 @@ async def _cmd_fetch(args: argparse.Namespace) -> None:
 
 async def _cmd_search(args: argparse.Namespace) -> None:
     config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
     snapshot_date = _today()
     cards = await search_all_keywords(config, snapshot_date)
     snap_dir = _snapshots_dir(args) / snapshot_date
@@ -161,6 +196,8 @@ async def _cmd_report(args: argparse.Namespace) -> None:
 
 async def _cmd_all(args: argparse.Namespace) -> None:
     config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
     snapshot_date = _today()
     output_dir = _snapshots_dir(args)
     state_file = output_dir.parent / "tracked-threads-state.jsonl"
@@ -216,6 +253,47 @@ async def _cmd_nightly(args: argparse.Namespace) -> None:
     output_path = harvests_dir / f"reddit-compass-{snapshot_date}.md"
     generate_trends_analysis(snap_dir, output_path, config, snapshot_date)
     print(f"📊 Trends analysis: {output_path}")
+
+
+async def _cmd_signals(args: argparse.Namespace) -> None:
+    """LLM-анализ сигналов (Qwen API): pain points, relevance, темы."""
+    config = _load_config(args)
+    if _dry_run_report(config, args):
+        return
+    snapshot_date = _today()
+    snap_dir = _snapshots_dir(args) / snapshot_date
+    posts_file = snap_dir / "posts.jsonl"
+
+    if not posts_file.exists():
+        print(f"❌ Snapshot не найден: {posts_file}. Сначала запустите fetch.")
+        sys.exit(1)
+
+    from .signals import analyze_posts, render_signals_report, synthesize, write_signals_jsonl
+
+    # Загружаем посты
+    cards: list[PostCard] = []
+    for line in posts_file.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            cards.append(PostCard.from_dict(json.loads(line)))
+
+    print(f"🤖 LLM-анализ {len(cards)} постов (Qwen API)...")
+    signals = await analyze_posts(cards)
+    print(f"   Извлечено {len(signals)} сигналов")
+
+    # Синтез
+    synthesis = await synthesize(signals, snapshot_date, len(cards))
+    if synthesis.top_themes:
+        print(f"   Топ-темы: {', '.join(synthesis.top_themes[:3])}")
+
+    # Запись
+    signals_path = snap_dir / "signals.jsonl"
+    write_signals_jsonl(signals, signals_path)
+
+    report = render_signals_report(signals, synthesis, snapshot_date)
+    report_path = snap_dir / "signals-report.md"
+    report_path.write_text(report, encoding="utf-8")
+    print(f"✅ Signals: {signals_path}")
+    print(f"   Report: {report_path}")
 
 
 async def _cmd_serve(args: argparse.Namespace) -> None:
@@ -276,6 +354,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Jitter пауз + exponential backoff (для ночного прогона)",
     )
+    common.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Показать что соберётся, без записи и сетевых запросов",
+    )
 
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("fetch", parents=[common], help="Hot/top по сабреддитам")
@@ -293,6 +376,7 @@ def build_parser() -> argparse.ArgumentParser:
         "nightly", parents=[common], help="Ночной прогон: all + trends analysis → harvests/"
     )
 
+    sub.add_parser("signals", parents=[common], help="LLM-анализ (Qwen API): pain points, темы")
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
 
     db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats")
@@ -314,6 +398,7 @@ def main() -> None:
         "report": _cmd_report,
         "all": _cmd_all,
         "nightly": _cmd_nightly,
+        "signals": _cmd_signals,
         "serve": _cmd_serve,
         "db": _cmd_db,
     }
