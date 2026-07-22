@@ -126,3 +126,44 @@ reddit-compass уникален в нише **«мониторинг тренд�
 - [ ] **URS** (⭐1009) — comprehensive CLI: какие команды, как устроен конфиг, есть ли trends?
 - [ ] **bulk-downloader-for-reddit** (⭐2592) — архитектура, тесты, CI/CD. Образец зрелого
       Python-проекта в Reddit-нише.
+
+---
+
+## 8. Ladder (⭐8.7k) — мульти-источники и paywall bypass
+
+**Ladder** (github.com/everywall/ladder) — self-hosted HTTP-proxy (Go), альтернатива 12ft.io.
+Per-domain ruleset: подмена UA, cookies, удаление paywall-блоков, FlareSolverr для Cloudflare.
+
+### СМИ в ruleset Ladder
+
+| Группа | Сайты | Метод |
+|---|---|---|
+| **США (top)** | nytimes.com, washingtonpost.com, time.com | Googlebot UA + cookie + JS-удаление paywall |
+| **Финансы** | ft.com, americanbanker.com | Referer-трюк, удаление gate |
+| **Condé Nast** | wired.com, newyorker.com, vanityfair.com, gq.com, vogue.com + 4 | Удаление paywall-бара |
+| **Массовые** | usatoday.com, foxnews.com, foxbusiness.com | Удаление рекламы/видео |
+| **Спорт** | theathletic.com | Удаление overlay |
+| **Платформы** | medium.com | Referer t.co/amp |
+| **Европа** | tagesspiegel.de, nzz.ch, thestar.com + 6 CA, 3 BE | AMP / Googlebot / расшифровка |
+
+### Чего НЕТ (серверный paywall — Ladder не поможет)
+
+WSJ, Bloomberg, The Economist, Reuters (бесплатен, не нужен).
+
+### Что взять для reddit-compass (Phase 6)
+
+1. **Ladder на HostKey** — Docker-контейнер, loopback:8080. Ruleset: NYT, WaPo, FT, Wired, Medium.
+2. **Source-адаптеры** — `sources/hackernews/` (Algolia API), `sources/news/` (через Ladder).
+3. **Единый JSONL** — поле `source`, общий `trends_analysis.py`.
+4. **Hacker News** — первый кандидат (бесплатно, без ключей, без paywall, ~1 дн).
+
+### Результаты интеграционного теста (2026-07-22)
+
+Полный прогон `reddit-compass fetch` (19 сабреддитов, Playwright):
+
+- **15/16** доступных сабреддитов вернули данные (622 поста)
+- **1 × 429** (r/AskReddit, восстановлен retry 1/2) — vs 15/19 до оптимизации
+- **r/deepfakes** — 404 (мёртвый, убрать из профиля)
+- **aiohttp** — 403 сразу (Reddit блокирует без cookies); Playwright — de facto движок
+- **Время:** ~35с/сабреддит, полные 19 ≈ 12 мин
+- **Вывод:** proxy пока не нужен; stealth (jitter + backoff) на nightly снизит остаточный 429

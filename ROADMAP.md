@@ -59,10 +59,41 @@ reddit-compass растёт от автономного коллектора т�
 - Read-only просмотр отчётов и сигналов в editorial-стиле (спокойный, статусный).
 - Тогда к batch-стеку добавляется веб-контейнер: loopback-порт + внешний Caddy SNI `:443`.
 
+## Phase 6 — мульти-источники
+
+Расширение за пределы Reddit: единый конвейер «сбор → JSONL → trends analysis» для нескольких
+источников. Деплой — на VPS HostKey «Hermes» (app-owned стек, рядом с reddit-compass).
+
+**Источники (приоритет):**
+
+| # | Источник | API/доступ | Ценность |
+|---|---|---|---|
+| 1 | **Hacker News** | Algolia API (бесплатно, без ключей) | AI-стартапы, «голос разработчика» |
+| 2 | **NYT / WaPo / FT / Wired** | Ladder proxy (paywall bypass) | Бизнес-нарратив, «что пишут СМИ» |
+| 3 | **Medium** | Referer-трюк (t.co/amp) | Лонгриды про AI, кейсы |
+| 4 | **ProductHunt** | GraphQL API (бесплатно) | Новые AI-продукты |
+| 5 | **IndieHackers** | RSS + HTML parse | «Один человек + AI = компания» |
+
+**Инфраструктура:**
+
+- **Ladder** (⭐8.7k, Go) — self-hosted proxy на HostKey: per-domain ruleset (UA, cookies,
+  paywall removal, FlareSolverr для Cloudflare). Docker-контейнер, loopback-порт.
+- Source-адаптеры: `sources/reddit/`, `sources/hackernews/`, `sources/news/` — каждый со своим
+  клиентом, общий выход в JSONL (поле `source`).
+- `trends_analysis.py` уже source-agnostic (читает JSONL) — расширение минимально.
+
+**Ограничения:**
+
+- WSJ / Bloomberg / The Economist — серверный paywall, Ladder не поможет. Только RSS-заголовки
+  или подписка.
+- Twitter/X — API платный ($100/мес). Отложить до обоснования ROI.
+
 ## Технический долг
 
 - Поднять порог покрытия тестами (сейчас гейт 60%, реально ~75%; сеть/браузер/оркестрация вне гейта).
 - Опциональный движок OAuth (asyncpraw) как альтернатива Playwright для 100% ToS-чистоты.
 - **Exploratory subreddits:** если пост из нового сабреддита виральный → предложить добавить
   в monitoring (вдохновлено Reddit_Scrapper ⭐198). Опция, не ядро.
-- Proxies — **не добавлять** (запрет AGENTS.md); альтернатива для 429 — OAuth API.
+- Proxy-ротация реализована (9d912d8); при 429 на VPS — SSH-туннель через HostKey или
+  tinyproxy. OAuth API — когда Reddit одобрит заявку.
+- Убрать r/deepfakes из профиля (404, мёртвый сабреддит).
