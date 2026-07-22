@@ -9,7 +9,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
 COPY config ./config
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . && playwright install chromium
 
 # Каталог данных (в проде монтируется volume поверх).
 RUN mkdir -p /data && useradd -m reddit && chown -R reddit:reddit /data /app
