@@ -1,95 +1,257 @@
-# reddit-compass 🧭
+# 🧭 reddit-compass
 
-Компас по трендам Reddit. Автономный сервис, который собирает «голос улицы» — живые
-реакции, кейсы, боли и нарративы — и показывает **куда смотреть**: не просто выгружает ленту,
-а ранжирует по score/обсуждаемости, ловит виральность и делает ночной разбор трендов.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-green.svg)](https://www.python.org/)
+[![CI](https://github.com/eiler2005/reddit-compass/actions/workflows/ci.yml/badge.svg)](https://github.com/eiler2005/reddit-compass/actions)
+[![Docker](https://github.com/eiler2005/reddit-compass/actions/workflows/docker.yml/badge.svg)](https://github.com/eiler2005/reddit-compass/actions)
 
-**Не требует Reddit API credentials** — работает через Playwright (headless Chromium → Reddit
-JSON API), с fallback на Atom RSS. Полностью config-driven и автономен: ничего не импортирует из
-внешних проектов, вся связь с потребителями — через файлы (JSONL + Markdown).
+**Your AI trend radar. 21 sources. One compass that shows where to look.**
 
-Границы и контракты — в [ARCHITECTURE.md](ARCHITECTURE.md). Планы развития — в [ROADMAP.md](ROADMAP.md).
+---
 
-## Быстрый старт
+You're writing a book about how AI is changing work. Or running a column. Or building a product and need to know what the market *actually* thinks — not what press releases say.
 
-```bash
-uv sync --dev
-uv run playwright install chromium      # один раз, для движка Playwright
+So you check Reddit. Then Hacker News. Then NYT. Then Wired. Then FT. Then TechCrunch. Then Medium. Then ProductHunt. Every. Single. Morning.
 
-uv run reddit-compass all               # полный цикл: fetch + search + track + virality + report
-uv run reddit-compass nightly           # + ночной разбор трендов → data/harvests/
-```
+That's 45 minutes of tab-switching before your first coffee. And you *still* miss the thread that went viral at 2 AM — the one where 400 laid-off engineers described exactly the pain your product solves.
 
-Без `playwright install` сервис использует RSS fallback (только hot, без score/комментариев).
+**reddit-compass does this for you. Every night. Across 21 sources. With LLM analysis that tells you not just *what* happened, but *why it matters* for your work.**
 
-## CLI
+---
 
-```
-uv run reddit-compass <command> [options]
-```
+## What reddit-compass does for you
 
-| Команда | Что делает |
-|---------|------------|
-| `fetch` | Hot/top по сабреддитам профиля (Playwright JSON API) |
-| `search` | Keyword search по Reddit |
-| `track` | Мониторинг tracked threads (Δ score, Δ comments) |
-| `virality` | Cross-posting / всплески score / multi-subreddit |
-| `report` | Markdown-отчёт из готового snapshot |
-| `all` | Полный цикл: fetch + search + track + virality + report |
-| `nightly` | `all` + подробный разбор трендов → `data/harvests/` |
+### Every night, on its own
 
-Опции: `--config PATH` (профиль), `--output-dir PATH`, `--limit N`, `--time-filter day|week|month|year|all`, `-v`.
+| Cadence | What happens | Why you care |
+|---|---|---|
+| 03:17 nightly | Collects 400+ posts from 18 Reddit subreddits (Playwright, stealth mode) | The "voice of the street" — raw, unfiltered, real |
+| 03:30 nightly | Pulls 50+ stories from Hacker News (Algolia API) | What developers are building and arguing about |
+| 03:45 nightly | Fetches 50+ articles from BBC, Guardian, Reuters, TechCrunch, Verge, Ars (RSS) | The mainstream narrative — what the masses hear tomorrow |
+| 04:00 nightly | Bypasses paywalls on NYT, WaPo, FT, Wired, Medium + 7 more (Ladder proxy) | The *real* analysis behind the paywall |
+| 04:15 nightly | Qwen LLM reads all posts → pain points, business relevance (1–10), themes | Not just data — *intelligence* |
+| 04:30 nightly | Cross-source synthesis: "This theme appeared in Reddit + HN + NYT" | **Strong signal** = topic in 3+ sources |
+| 04:30 nightly | Syncs to VPS → REST API serves it to your tools | Your Practicum, digest, or notebook gets fresh data |
 
-## Профили
+You wake up to a report that says:
 
-Что собирать — задаётся профилем в `config/profiles/*.json` (сабреддиты по кластерам, keywords,
-tracked threads, настройки). По умолчанию — `config/profiles/ai-native.json` (готовый AI-фокус:
-работа/бизнес, доверие/подлинность, vibe coding/агенты, рынок труда). Нейтральный шаблон —
-`config/profiles/starter.json`.
+> **Top themes today:**
+> 1. "AI replaced my job, then they rehired humans" — viral on r/AskReddit + HN + NYT
+> 2. "Vibe coding fixes one thing, breaks ten" — r/vibecoding + Ars Technica
+> 3. "One person + AI = $1M company" — Medium + ProductHunt + r/Entrepreneur
+>
+> **Column ideas:** [3 specific angles with source links]
+> **Pain points:** [12 extracted from today's posts]
+
+### When you ask it
 
 ```bash
-uv run reddit-compass all --config config/profiles/starter.json
-# или через окружение:
-REDDIT_COMPASS_CONFIG=config/profiles/ai-native.json uv run reddit-compass all
+reddit-compass fetch --stealth     # Reddit: 18 subreddits, stealth mode
+reddit-compass hn                  # Hacker News: AI stories
+reddit-compass rss                 # RSS: 6 free sources
+reddit-compass ladder              # Paywall: 12 sources via Ladder
+reddit-compass ph                  # ProductHunt: top products
+reddit-compass signals             # LLM analysis (Qwen API)
+reddit-compass serve               # REST API on :8900
+reddit-compass db stats            # SQLite history
+reddit-compass fetch --dry-run     # Preview without network
 ```
 
-Добавить сабреддит/keyword/тред — правкой JSON-профиля, без изменения кода.
+### What it will NOT do — by design
 
-## Данные
+Written into [`AGENTS.md`](AGENTS.md). The service refuses, by architecture:
 
-Всё пишется внутрь проекта (git-ignored), каталог переопределяется через `DATA_DIR`:
+- **Post, vote, or comment** on Reddit. (Read-only. Always.)
+- **Bypass account bans** or impersonate users. (Proxy is for rate limits only.)
+- **Train ML models** on collected content. (Explicitly forbidden.)
+- **Expose secrets** in git, logs, or API responses. (detect-secrets pre-commit gate.)
+- **Touch other services** on the VPS. (Isolated network + volume.)
+
+> **Trust is built in what a system *won't* do.** A scraper that posts is a liability. A scraper that *can't* post is a tool you can leave running at 3 AM.
+
+---
+
+## Architecture
 
 ```
-data/
-  snapshots/YYYY-MM-DD/
-    posts.jsonl            карточки постов (score, комментарии, flair)
-    keyword-search.jsonl   keyword search
-    tracked-threads.jsonl  состояние тредов
-    virality.jsonl         сигналы виральности
-    trends-report.md       сводный отчёт
-  harvests/
-    reddit-compass-YYYY-MM-DD.md   ночной разбор с темами
-  tracked-threads-state.jsonl      состояние между запусками
+    🌐 Reddit (18 sub)     💬 Hacker News      📰 RSS (6)         🪜 Ladder (12)      🚀 ProductHunt
+    Playwright + JSON      Algolia API         aiohttp + XML      Ladder proxy        GraphQL API
+         │                      │                   │                   │                   │
+         ▼                      ▼                   ▼                   ▼                   ▼
+    ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
+    │                          reddit-compass (unified pipeline)                                   │
+    │                                                                                             │
+    │    collect ──► store ──► analyze (Qwen LLM) ──► report ──► notify ──► serve (API)           │
+    └─────────────────────────────────────────────────────────────────────────────────────────────┘
+         │                      │                        │                      │
+         ▼                      ▼                        ▼                      ▼
+    posts.jsonl            compass.db              signals.jsonl          REST API :8900
+    (JSONL exchange)       (SQLite history)        (LLM synthesis)        (FastAPI + OAuth2)
 ```
 
-## Docker
+**21 sources → 5 clusters → 1 unified schema → LLM intelligence → API**
+
+Full architecture with deployment diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+
+---
+
+## Sources (21, five clusters)
+
+| Cluster | Sources | Access |
+|---|---|---|
+| 📰 **Mainstream** | NYT, WaPo, Time, USA Today, BBC, Guardian | Ladder + RSS |
+| 💰 **Business** | FT, American Banker, Fox Business, Reuters | Ladder + RSS |
+| 🔬 **Tech/Culture** | Wired, New Yorker, Vanity Fair, TechCrunch, Verge, Ars Technica | Ladder + RSS |
+| 🗣 **Voices** | Reddit (18 subreddits), Hacker News, Medium | Playwright + Algolia + Ladder |
+| 📊 **Pulse** | Fox News, ProductHunt | Ladder + GraphQL |
+
+Full source map: [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md)
+
+---
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.12+, [`uv`](https://docs.astral.sh/uv/)
+- Playwright: `uv run playwright install chromium`
+- (Optional) Docker for VPS deployment
+
+### Install
 
 ```bash
-docker compose run --rm reddit-compass all       # полный цикл в контейнере
-docker compose run --rm reddit-compass nightly   # + ночной разбор
+git clone https://github.com/eiler2005/reddit-compass.git
+cd reddit-compass
+uv sync
 ```
 
-Данные — в volume `reddit-compass-data`. Деплой на VPS (HostKey) — см. [deploy/hostkey/](deploy/hostkey/).
-
-## Этика
-
-Read-only: сервис не постит, не голосует, не комментирует. Только публичные посты и комментарии,
-с паузами между запросами и retry на 429. Подробнее — [AGENTS.md](AGENTS.md).
-
-## Разработка
+### First run
 
 ```bash
-uv run ruff check . && uv run ruff format --check .
-uv run mypy src
-uv run pytest
+# Preview what will be collected (no network):
+uv run reddit-compass fetch --dry-run
+
+# Collect Reddit posts:
+uv run reddit-compass fetch
+
+# Collect everything (Reddit + HN + RSS):
+uv run reddit-compass all
+
+# Start the API:
+uv run reddit-compass serve
+# → http://localhost:8900/docs (Swagger UI)
 ```
+
+### Nightly automation (macOS)
+
+```bash
+cp scripts/com.reddit-compass.nightly.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.reddit-compass.nightly.plist
+# Runs at 03:17 daily: fetch + HN + RSS + LLM + sync to VPS
+```
+
+### VPS deployment
+
+```bash
+./deploy/hostkey/deploy.sh
+# Deploys: API (FastAPI) + Caddy (reverse proxy) + batch collector
+# → http://VPS_IP:8900/health
+```
+
+---
+
+## API
+
+OAuth2 client credentials → JWT. CORS-configured for external consumers.
+
+```bash
+# Get token:
+curl -X POST http://localhost:8900/oauth/token \
+  -H "Content-Type: application/json" \
+  -d '{"client_id":"practicum","client_secret":"<secret>"}'
+
+# Query posts:
+curl -H "Authorization: Bearer <token>" \
+  "http://localhost:8900/api/v1/posts?date=2026-07-22&subreddit=artificial&limit=10"
+```
+
+| Endpoint | Auth | Description |
+|---|---|---|
+| `GET /health` | — | Liveness probe |
+| `GET /dashboard` | — | HTML dashboard (editorial style) |
+| `GET /docs` | — | Swagger UI |
+| `POST /oauth/token` | — | Client credentials → JWT |
+| `GET /api/v1/snapshots` | Bearer | List snapshot dates |
+| `GET /api/v1/posts` | Bearer | Posts with filters + pagination |
+| `GET /api/v1/signals` | Bearer | LLM-extracted signals |
+| `GET /api/v1/stats` | Bearer | Aggregated statistics |
+
+---
+
+## LLM Analysis (Qwen API)
+
+Not just collection — **intelligence**.
+
+```bash
+export DASHSCOPE_API_KEY=sk-...
+uv run reddit-compass signals
+```
+
+For each post, the LLM extracts:
+- **Pain points** — what problems people describe
+- **Buying intent** — is someone looking to buy an AI product?
+- **Business relevance** (1–10) — how relevant for enterprise AI
+- **Book relevance** (1–10) — how relevant for the narrative
+- **Themes** — key topics (1–3 per post)
+
+Then synthesizes: **top 5 themes**, **3 column ideas**, **narrative shifts**.
+
+---
+
+## Security Model
+
+| Layer | Mechanism |
+|---|---|
+| **Secrets** | `.env.secrets` (gitignored) + `detect-secrets` pre-commit |
+| **API auth** | OAuth2 client credentials → JWT (1h expiry) |
+| **Network** | Loopback only, Caddy reverse proxy |
+| **Containers** | `read_only`, `no-new-privileges`, `cap_drop: ALL` |
+| **Reddit** | Read-only, rate-limited, public data only |
+| **Git** | Secret scan on every commit, no `--no-verify` |
+
+Full rules: [`AGENTS.md`](AGENTS.md)
+
+---
+
+## Documentation
+
+| Document | Topic |
+|---|---|
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full system architecture with diagrams |
+| [`ROADMAP.md`](ROADMAP.md) | Phases 2–6, status |
+| [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | 21 sources, 5 clusters |
+| [`docs/COMPETITIVE_ANALYSIS.md`](docs/COMPETITIVE_ANALYSIS.md) | GitHub landscape, Ladder |
+| [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) | Ranked improvement plan |
+| [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog |
+| [`AGENTS.md`](AGENTS.md) | LLM agent contract |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Language | Python 3.12, strict mypy |
+| Collection | Playwright, aiohttp, Ladder proxy |
+| Storage | JSONL + SQLite |
+| LLM | Qwen API (qwen-plus + qwen-max) |
+| API | FastAPI + uvicorn + JWT |
+| Deploy | Docker + Caddy + host-cron |
+| Quality | ruff, mypy strict, pytest (84%), detect-secrets |
+| CI/CD | GitHub Actions → GHCR |
+
+---
+
+## License
+
+[MIT](LICENSE) © 2026 Denis Ermilov
