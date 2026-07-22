@@ -18,5 +18,5 @@ USER reddit
 ENV DATA_DIR=/data
 VOLUME ["/data"]
 
-# По умолчанию — полный цикл сбора.
-CMD ["reddit-compass", "all"]
+ENTRYPOINT ["reddit-compass"]
+CMD ["all"]

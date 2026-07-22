@@ -19,4 +19,5 @@ VOLUME ["/data"]
 
 EXPOSE 8900
 
-CMD ["reddit-compass", "serve"]
+ENTRYPOINT ["reddit-compass"]
+CMD ["serve"]
