@@ -35,6 +35,7 @@ class MonitorSettings:
     posts_per_subreddit: int = 25
     top_comments_per_post: int = 5
     comments_for_top_n: int = 5
+    stealth: bool = False
     time_filter: str = "week"
     search_sort: str = "relevance"
     search_time_filter: str = "week"
@@ -75,6 +76,7 @@ class MonitorConfig:
             posts_per_subreddit=int(settings_raw.get("posts_per_subreddit", 25)),
             top_comments_per_post=int(settings_raw.get("top_comments_per_post", 5)),
             comments_for_top_n=int(settings_raw.get("comments_for_top_n", 5)),
+            stealth=bool(settings_raw.get("stealth", False)),
             time_filter=str(settings_raw.get("time_filter", "week")),
             search_sort=str(settings_raw.get("search_sort", "relevance")),
             search_time_filter=str(settings_raw.get("search_time_filter", "week")),

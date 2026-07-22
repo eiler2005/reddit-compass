@@ -55,6 +55,8 @@ def _load_config(args: argparse.Namespace) -> MonitorConfig:
         config.settings.posts_per_subreddit = args.limit
     if args.time_filter:
         config.settings.time_filter = args.time_filter
+    if getattr(args, "stealth", False):
+        config.settings.stealth = True
     return config
 
 
@@ -199,7 +201,8 @@ async def _cmd_all(args: argparse.Namespace) -> None:
 
 
 async def _cmd_nightly(args: argparse.Namespace) -> None:
-    """Ночной прогон: all + trends analysis → harvests/."""
+    """Ночной прогон: all + trends analysis → harvests/. Stealth включён."""
+    args.stealth = True
     await _cmd_all(args)
 
     from .trends_analysis import generate_trends_analysis
@@ -230,6 +233,11 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--limit", type=int, default=None, help="Постов на сабреддит")
     common.add_argument(
         "--time-filter", type=str, default=None, choices=["day", "week", "month", "year", "all"]
+    )
+    common.add_argument(
+        "--stealth",
+        action="store_true",
+        help="Jitter пауз + exponential backoff (для ночного прогона)",
     )
 
     sub = parser.add_subparsers(dest="command", required=True)

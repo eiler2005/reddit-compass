@@ -51,7 +51,7 @@ async def search_keyword(
         ranked = sorted(cards, key=lambda c: c.score, reverse=True)
         for card in ranked[:comments_top_n]:
             card.top_comments = await _fetch_comments(engine, card.permalink, comment_limit)
-            await rate_limit_pause()
+            await rate_limit_pause(config.settings.stealth)
 
     logger.info("Keyword %r: найдено %d постов", keyword, len(cards))
     return cards
@@ -62,14 +62,15 @@ async def search_all_keywords(
     snapshot_date: str,
 ) -> list[PostCard]:
     """Ищет посты по всем ключевым словам."""
-    engine = RedditEngine()
+    stealth = config.settings.stealth
+    engine = RedditEngine(stealth=stealth)
     await engine.start()
     all_cards: list[PostCard] = []
     try:
         for keyword in config.keywords:
             cards = await search_keyword(engine, keyword, config, snapshot_date)
             all_cards.extend(cards)
-            await rate_limit_pause()
+            await rate_limit_pause(stealth)
     finally:
         await engine.close()
 

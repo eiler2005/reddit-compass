@@ -104,7 +104,7 @@ async def track_all_threads(
     if state_file is not None:
         prev_states = load_previous_states(state_file)
 
-    engine = RedditEngine()
+    engine = RedditEngine(stealth=config.settings.stealth)
     await engine.start()
     results: list[TrackedThreadState] = []
     try:
@@ -113,7 +113,7 @@ async def track_all_threads(
             state = await check_thread(engine, url, snapshot_date, prev)
             if state is not None:
                 results.append(state)
-            await rate_limit_pause()
+            await rate_limit_pause(config.settings.stealth)
     finally:
         await engine.close()
 

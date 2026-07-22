@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from typing import Any
@@ -66,10 +67,11 @@ class ProxyRotator:
 class RedditHttpClient:
     """Лёгкий HTTP-клиент: aiohttp + Reddit .json API."""
 
-    def __init__(self, proxy_rotator: ProxyRotator | None = None) -> None:
+    def __init__(self, proxy_rotator: ProxyRotator | None = None, stealth: bool = False) -> None:
         self._session: Any = None
         self._proxy_rotator = proxy_rotator or ProxyRotator()
         self._blocked = False
+        self._stealth = stealth
 
     @property
     def blocked(self) -> bool:
@@ -115,10 +117,15 @@ class RedditHttpClient:
                 async with self._session.get(url, proxy=proxy) as resp:
                     if resp.status == 429:
                         if attempt < MAX_RETRIES:
+                            pause = RETRY_PAUSE * (2**attempt) if self._stealth else RETRY_PAUSE
                             logger.warning(
-                                "HTTP %s: 429, retry %d/%d", url, attempt + 1, MAX_RETRIES
+                                "HTTP %s: 429, retry %d/%d (пауза %.0fс)",
+                                url,
+                                attempt + 1,
+                                MAX_RETRIES,
+                                pause,
                             )
-                            await asyncio.sleep(RETRY_PAUSE)
+                            await asyncio.sleep(pause)
                             continue
                         logger.warning("HTTP %s: 429, исчерпаны retries", url)
                         return None
@@ -185,11 +192,12 @@ def _check_playwright() -> bool:
 class RedditBrowser:
     """Headless Chromium для Reddit JSON API (fallback)."""
 
-    def __init__(self, proxy_rotator: ProxyRotator | None = None) -> None:
+    def __init__(self, proxy_rotator: ProxyRotator | None = None, stealth: bool = False) -> None:
         self._pw: Any = None
         self._browser: Any = None
         self._page: Any = None
         self._proxy_rotator = proxy_rotator or ProxyRotator()
+        self._stealth = stealth
 
     async def start(self) -> None:
         from playwright.async_api import async_playwright
@@ -238,10 +246,15 @@ class RedditBrowser:
                 if isinstance(result, dict):
                     if result.get("__status") == 429:
                         if attempt < MAX_RETRIES:
+                            pause = RETRY_PAUSE * (2**attempt) if self._stealth else RETRY_PAUSE
                             logger.warning(
-                                "JSON %s: 429, retry %d/%d", url, attempt + 1, MAX_RETRIES
+                                "JSON %s: 429, retry %d/%d (пауза %.0fс)",
+                                url,
+                                attempt + 1,
+                                MAX_RETRIES,
+                                pause,
                             )
-                            await asyncio.sleep(RETRY_PAUSE)
+                            await asyncio.sleep(pause)
                             continue
                         logger.warning("JSON %s: 429, исчерпаны retries", url)
                         return None
@@ -278,14 +291,15 @@ class RedditEngine:
             data = await engine.fetch_json(url)
     """
 
-    def __init__(self, proxy_rotator: ProxyRotator | None = None) -> None:
+    def __init__(self, proxy_rotator: ProxyRotator | None = None, stealth: bool = False) -> None:
         self._rotator = proxy_rotator or ProxyRotator()
+        self._stealth = stealth
         self._http: RedditHttpClient | None = None
         self._browser: RedditBrowser | None = None
         self._use_browser = False
 
     async def start(self) -> None:
-        self._http = RedditHttpClient(self._rotator)
+        self._http = RedditHttpClient(self._rotator, stealth=self._stealth)
         await self._http.start()
 
     async def fetch_json(self, url: str) -> Any | None:
@@ -309,7 +323,7 @@ class RedditEngine:
         if not _check_playwright():
             return
         self._use_browser = True
-        self._browser = RedditBrowser(self._rotator)
+        self._browser = RedditBrowser(self._rotator, stealth=self._stealth)
         await self._browser.start()
 
     async def close(self) -> None:
@@ -513,5 +527,9 @@ async def fetch_rss_aiohttp(url: str, subreddit: str) -> list[RSSEntry]:
         return []
 
 
-async def rate_limit_pause() -> None:
-    await asyncio.sleep(REQUEST_PAUSE)
+async def rate_limit_pause(stealth: bool = False) -> None:
+    """Пауза между запросами. stealth: jitter 3–6с вместо фикс 4с."""
+    if stealth:
+        await asyncio.sleep(REQUEST_PAUSE + random.uniform(-1.0, 2.0))
+    else:
+        await asyncio.sleep(REQUEST_PAUSE)

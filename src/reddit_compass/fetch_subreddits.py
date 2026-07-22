@@ -111,6 +111,7 @@ async def fetch_subreddit_posts(
     limit = settings.posts_per_subreddit
     comment_limit = settings.top_comments_per_post
     comments_top_n = settings.comments_for_top_n
+    stealth = settings.stealth
     time_filter = settings.time_filter
 
     cards: list[PostCard] = []
@@ -139,14 +140,14 @@ async def fetch_subreddit_posts(
             card = _json_to_card(post, mode, snapshot_date)
             cards.append(card)
 
-        await rate_limit_pause()
+        await rate_limit_pause(stealth)
 
     # Комментарии — только для top-N по score (экономия запросов)
     if comment_limit > 0 and comments_top_n > 0 and cards:
         ranked = sorted(cards, key=lambda c: c.score, reverse=True)
         for card in ranked[:comments_top_n]:
             card.top_comments = await _fetch_comments(engine, card.permalink, comment_limit)
-            await rate_limit_pause()
+            await rate_limit_pause(stealth)
 
     logger.info("r/%s: собрано %d постов (%s)", subreddit_name, len(cards), "+".join(modes))
     return cards
@@ -158,14 +159,15 @@ async def fetch_all_subreddits(
     modes: list[str] | None = None,
 ) -> list[PostCard]:
     """Собирает посты из всех сабреддитов (aiohttp → Playwright → RSS)."""
-    engine = RedditEngine()
+    stealth = config.settings.stealth
+    engine = RedditEngine(stealth=stealth)
     await engine.start()
     all_cards: list[PostCard] = []
     try:
         for name in config.all_subreddits:
             cards = await fetch_subreddit_posts(engine, name, config, snapshot_date, modes)
             all_cards.extend(cards)
-            await rate_limit_pause()
+            await rate_limit_pause(stealth)
     finally:
         await engine.close()
 
