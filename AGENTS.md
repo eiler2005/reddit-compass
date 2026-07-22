@@ -33,6 +33,20 @@
 - Значимые изменения отражать в `README.md`, релевантных доках и `CHANGELOG.md`.
 - Секреты (`.env`, токены, ключи) не читать, не печатать, не коммитить.
 
+## Защита секретов (обязательно)
+
+- **Pre-commit scan:** `detect-secrets` + `detect-private-key` — каждый коммит проходит проверку.
+  Не обходить (`--no-verify` запрещено).
+- **Gitignore:** `.env`, `.env.*`, `deploy/**/.env*`, `*.pem`, `id_rsa*` — НЕ попадают в git.
+- **Перед пушем:** убедиться что `git diff --cached` не содержит паттернов:
+  `sk-`, `token=`, `password=`, `secret=`, `Bearer `, приватных ключей.
+- **Ключи API** (DASHSCOPE, TELEGRAM, RC_API_SECRET) — только в `.env.secrets` (gitignored)
+  и на VPS. Никогда в коде, доках, тестах, логах.
+- **При добавлении нового секрета:** обновить `.env.example` (шаблон без значения) +
+  `.secrets.baseline` (если detect-secrets ругается на ложное срабатывание).
+- **При компрометации:** немедленно ротировать ключ, `git filter-branch` / BFG для удаления
+  из истории.
+
 ## Git
 
 - Только явный staging. Никаких `git add .` / `git add -A` / `git commit -a`.
