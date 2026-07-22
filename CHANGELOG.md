@@ -3,6 +3,19 @@
 Формат — [Keep a Changelog](https://keepachangelog.com/ru/1.1.0/);
 версионирование — [SemVer](https://semver.org/lang/ru/).
 
+## [Unreleased]
+
+### Added
+
+- `docs/COMPETITIVE_ANALYSIS.md` — конкурентный анализ: ландшафт GitHub (2454 репо, топ-7),
+  таблицы фич reddit-universal-scraper / yars / Reddit_Scrapper, вывод об уникальности ниши,
+  направления для дальнейшего изучения.
+- `docs/IMPROVEMENTS.md` — ранжированный план улучшений по итогам анализа конкурентов:
+  LLM-анализ, SQLite, уведомления, dry run, Docker CI/CD, exploratory subreddits;
+  секция по легальности скрапинга.
+- ROADMAP: новые фазы 2.5 (dry run), 3.5 (SQLite); дополнения в Phase 2 (Docker CI/CD),
+  Phase 3 (multi-dimensional scoring), техдолг (exploratory subreddits, запрет proxies).
+
 ## [0.1.0] — 2026-07-22
 
 ### Added

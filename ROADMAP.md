@@ -3,6 +3,10 @@
 reddit-compass растёт от автономного коллектора трендов к «навигатору сигналов». Фазы независимы;
 порядок — ориентир, не жёсткая последовательность.
 
+> Ранжированный план улучшений (анализ конкурентов, источники, rationale) —
+> в [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md). Конкурентный анализ (ландшафт GitHub,
+> таблицы фич) — в [docs/COMPETITIVE_ANALYSIS.md](docs/COMPETITIVE_ANALYSIS.md).
+
 ## v0.1 — ядро (готово)
 
 - Выделение в отдельный репозиторий, отвязка от монорепо, config-driven профили.
@@ -19,6 +23,12 @@ reddit-compass растёт от автономного коллектора т�
 - Расписание — host-cron: `docker compose run --rm reddit-compass nightly`.
 - Регистрация владельца/контейнера/volume/backup в `vps_management`.
 - Скелет: [deploy/hostkey/](deploy/hostkey/). Включение — по подтверждению, со сверкой живого HostKey.
+- **Docker CI/CD:** GitHub Actions → build & push образа в GHCR; VPS тянет из registry.
+
+## Phase 2.5 — dry run
+
+- `--dry-run` для `fetch / search / all`: показать, что соберётся (субреддиты, ключевые слова,
+  примерный объём), без записи в `data/`. Быстрый win для проверки изменений профиля.
 
 ## Phase 3 — LLM-анализ сигналов (`signals.py`)
 
@@ -28,6 +38,16 @@ reddit-compass растёт от автономного коллектора т�
 - Anthropic SDK; модель — последняя (Haiku 4.5 для bulk-классификации, Sonnet 5 для синтеза), ID
   сверять через актуальную документацию. Ключ — `ANTHROPIC_API_KEY`.
 - Заодно: сделать `trends_analysis.py` полностью profile-driven (редакторские подсказки — в профиль).
+- **Multi-dimensional scoring:** бизнес-релевантность, связь с темой книги, техническая глубина —
+  оценки LLM по шкале 1–10 поверх score/num_comments (вдохновлено Reddit_Scrapper ⭐198).
+
+## Phase 3.5 — SQLite-хранилище
+
+- Аддитивно к JSONL (JSONL остаётся как формат обмена): `data/compass.db`.
+- Таблицы: posts, comments, virality_signals, signals (LLM), snapshots.
+- Запросы: «все посты по AI за месяц», «топ по score за неделю», «тренды по неделям»,
+  «динамика нарратива за 3 месяца». Исторические данные для книги.
+- CLI: `reddit-compass db init / migrate / query`.
 
 ## Phase 4 — уведомления
 
@@ -43,3 +63,6 @@ reddit-compass растёт от автономного коллектора т�
 
 - Поднять порог покрытия тестами (сейчас гейт 60%, реально ~75%; сеть/браузер/оркестрация вне гейта).
 - Опциональный движок OAuth (asyncpraw) как альтернатива Playwright для 100% ToS-чистоты.
+- **Exploratory subreddits:** если пост из нового сабреддита виральный → предложить добавить
+  в monitoring (вдохновлено Reddit_Scrapper ⭐198). Опция, не ядро.
+- Proxies — **не добавлять** (запрет AGENTS.md); альтернатива для 429 — OAuth API.
