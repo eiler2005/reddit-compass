@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 dependencies = [
   "playwright>=1.40,<2",
   "aiohttp>=3.9,<4",
+  "fastapi>=0.115,<1",
+  "uvicorn[standard]>=0.34,<1",
+  "python-jose[cryptography]>=3.3,<4",
 ]
 
 [project.scripts]
@@ -18,6 +21,7 @@ reddit-compass = "reddit_compass.cli:main"
 
 [dependency-groups]
 dev = [
+  "httpx>=0.28,<1",
   "mypy>=1.16,<2",
   "pre-commit>=4.2,<5",
   "pytest>=8.4,<9",
@@ -36,7 +40,8 @@ target-version = "py312"
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # Кодовая база двуязычная (русские докстринги/строки); RUF001-003 дают ложные
 # срабатывания на кириллице (а/с/о/е…), поэтому отключены.
-ignore = ["RUF001", "RUF002", "RUF003"]
+# B008: Depends() в аргументах — стандартный паттерн FastAPI.
+ignore = ["RUF001", "RUF002", "RUF003", "B008"]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -48,7 +53,7 @@ warn_unused_configs = true
 files = ["src"]
 
 [[tool.mypy.overrides]]
-module = ["playwright.*", "aiohttp.*"]
+module = ["playwright.*", "aiohttp.*", "jose.*", "uvicorn.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -7,27 +7,31 @@
 
 ### Added
 
+- **SQLite-хранилище** (`db.py`): `data/compass.db`, таблицы posts/comments/signals/threads.
+  Аддитивно к JSONL. CLI: `reddit-compass db init / stats`.
+- **REST API** (FastAPI + OAuth2 client credentials): `/api/v1/snapshots|posts|signals|stats`,
+  `/oauth/token` (JWT 1h), `/health`. CORS для Vercel-практикума. CLI: `reddit-compass serve`.
+- **Уведомления-заготовки** (`notify.py`): `prepare_telegram_digest()`, `prepare_email_digest()` —
+  формируют данные БЕЗ отправки, пишут в `data/notifications/`.
 - **aiohttp JSON-клиент** (primary): лёгкий HTTP-движок без браузера. Playwright — fallback,
   RSS — last resort. `RedditEngine` переключается автоматически при блоке (HTML/403).
 - **Proxy-ротация:** `REDDIT_COMPASS_PROXIES="http://p1:port,http://p2:port"` — round-robin
   по запросам. Только для снижения 429 (разрешено AGENTS.md).
 - **`comments_for_top_n`** в настройках профиля: комментарии только для top-N постов по score
   (default 5). Сокращение объёма запросов в ~5 раз (526 → ~130 за прогон).
-- `docs/COMPETITIVE_ANALYSIS.md` — конкурентный анализ: ландшафт GitHub (2454 репо, топ-7),
-  таблицы фич reddit-universal-scraper / yars / Reddit_Scrapper, вывод об уникальности ниши,
-  направления для дальнейшего изучения.
-- `docs/IMPROVEMENTS.md` — ранжированный план улучшений по итогам анализа конкурентов:
-  LLM-анализ, SQLite, уведомления, dry run, Docker CI/CD, exploratory subreddits;
-  секция по легальности скрапинга.
-- ROADMAP: новые фазы 2.5 (dry run), 3.5 (SQLite); дополнения в Phase 2 (Docker CI/CD),
-  Phase 3 (multi-dimensional scoring), техдолг (exploratory subreddits, запрет proxies).
-- Тесты: ProxyRotator, RedditHttpClient, comments_for_top_n (11 новых).
+- **Stealth-режим:** `--stealth` / `nightly` — jitter пауз (3–6с) + exponential backoff (429).
+- `docs/COMPETITIVE_ANALYSIS.md` — конкурентный анализ: ландшафт GitHub, Ladder (⭐8.7k), СМИ.
+- `docs/IMPROVEMENTS.md` — ранжированный план улучшений.
+- `docs/MULTI_SOURCE_PLAN.md` — детальный план мульти-источников (Phase 6).
+- ROADMAP: фазы 2.5, 3.5, 6; дополнения в Phase 2/3.
+- Тесты: db (12), api (10), notify (7), engine (11) — итого 69 тестов, coverage 84%.
 
 ### Changed
 
-- AGENTS.md: proxy-ротация разрешена (только для 429); движок — aiohttp primary.
-- ARCHITECTURE.md: обновлена секция движков (3 уровня), rate limiting, proxy.
-- `fetch_subreddits.py`, `search_keywords.py`, `track_threads.py`: переход на `RedditEngine`.
+- AGENTS.md: proxy разрешены (только 429); движок — aiohttp primary.
+- ARCHITECTURE.md: 3 движка, rate limiting, proxy.
+- Убран r/deepfakes из профиля (404, мёртвый сабреддит).
+- Зависимости: +fastapi, +uvicorn, +python-jose, +httpx (dev).
 
 ## [0.1.0] — 2026-07-22
 

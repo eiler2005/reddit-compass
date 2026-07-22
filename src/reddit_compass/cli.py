@@ -218,6 +218,43 @@ async def _cmd_nightly(args: argparse.Namespace) -> None:
     print(f"📊 Trends analysis: {output_path}")
 
 
+async def _cmd_serve(args: argparse.Namespace) -> None:
+    """Запуск REST API (FastAPI/uvicorn)."""
+    import uvicorn
+
+    from .api.app import create_app
+
+    app = create_app()
+    print("🚀 reddit-compass API: http://127.0.0.1:8900")
+    print("   Docs: http://127.0.0.1:8900/docs")
+    uvicorn.run(app, host="127.0.0.1", port=8900, log_level="info")
+
+
+async def _cmd_db(args: argparse.Namespace) -> None:
+    """SQLite: init / stats."""
+    from .db import get_db, query_stats
+
+    db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+    action = args.db_action
+
+    if action == "init":
+        conn = get_db(db_path)
+        conn.close()
+        print(f"✅ SQLite инициализирована: {db_path}")
+    elif action == "stats":
+        conn = get_db(db_path)
+        stats = query_stats(conn)
+        conn.close()
+        print(f"📊 Snapshots: {stats['total_snapshots']}")
+        print(f"   Posts: {stats['total_posts']}")
+        print(f"   Signals: {stats['total_signals']}")
+        print(f"   Latest: {stats['latest_snapshot']}")
+        if stats["top_subreddits"]:
+            print("   Top subreddits:")
+            for s in stats["top_subreddits"][:5]:
+                print(f"     r/{s['subreddit']}: {s['cnt']} постов, avg score {s['avg_score']:.0f}")
+
+
 # ── CLI parser ─────────────────────────────────────────────────────────────
 
 
@@ -256,6 +293,11 @@ def build_parser() -> argparse.ArgumentParser:
         "nightly", parents=[common], help="Ночной прогон: all + trends analysis → harvests/"
     )
 
+    sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
+
+    db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats")
+    db_p.add_argument("db_action", choices=["init", "stats"], help="Действие с БД")
+
     return parser
 
 
@@ -272,6 +314,8 @@ def main() -> None:
         "report": _cmd_report,
         "all": _cmd_all,
         "nightly": _cmd_nightly,
+        "serve": _cmd_serve,
+        "db": _cmd_db,
     }
     handler = handlers.get(args.command)
     if handler is None:
