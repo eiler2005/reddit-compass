@@ -19,6 +19,8 @@
   по запросам. Только для снижения 429 (разрешено AGENTS.md).
 - README: описан маршрут public Reddit `.json` запросов через опциональный proxy,
   4-секундный pacing, 429 retries и запрет на обход банов.
+- README: непубличный proxy для не-Reddit задач остаётся только в gitignored
+  операционных заметках и secrets-файлах.
 - **`comments_for_top_n`** в настройках профиля: комментарии только для top-N постов по score
   (default 5). Сокращение объёма запросов в ~5 раз (526 → ~130 за прогон).
 - **Stealth-режим:** `--stealth` / `nightly` — jitter пауз (3–6с) + exponential backoff (429).

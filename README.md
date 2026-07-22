@@ -153,6 +153,9 @@ retries separated by 10 seconds. Proxies are only for rate-limit mitigation —
 never for account bans, logins, posting, voting, or commenting.
 
 Keep credentials only in `.env.secrets` (gitignored); do not commit or log them.
+An optional local proxy for other approved public read-only sources is documented
+only in gitignored operations notes and secret files; never move it into tracked
+configuration or `REDDIT_COMPASS_PROXIES`.
 
 ### Nightly automation (macOS)
 
