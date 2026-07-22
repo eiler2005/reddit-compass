@@ -239,6 +239,17 @@ class SignalCard:
 | Proxy | Только для снижения 429, не для обхода банов |
 | ML-обучение | Запрещено использовать контент для обучения моделей |
 
+### Reddit Official API: доступ не получен
+
+Заявка на Reddit Data API подана 2026-07-22. Статус: **SUBMITTED_AWAITING_REDDIT_REVIEW**
+(фактически — без ответа). Reddit не предоставил OAuth-доступ.
+
+Сервис работает через **Playwright JSON API** (headless Chromium → публичные .json endpoints,
+без credentials). Это легально для личного research (публичные данные, read-only, rate-limited).
+
+При одобрении заявки — переход на `asyncpraw` (100 req/min, 100% ToS-чистота).
+До тех пор: Playwright + residential IP + stealth + proxy (для 429).
+
 ---
 
 ## 8. CLI: все команды

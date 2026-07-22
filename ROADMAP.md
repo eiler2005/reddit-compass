@@ -94,7 +94,10 @@ reddit-compass растёт от автономного коллектора т�
 ## Технический долг
 
 - Поднять порог покрытия тестами (сейчас гейт 60%, реально ~75%; сеть/браузер/оркестрация вне гейта).
-- Опциональный движок OAuth (asyncpraw) как альтернатива Playwright для 100% ToS-чистоты.
+- **Reddit Official API: ДОСТУП НЕ ПОЛУЧЕН.** Заявка на Reddit Data API подана 2026-07-22
+  (статус: SUBMITTED_AWAITING_REDDIT_REVIEW → фактически игнорируется Reddit). Сервис работает
+  через Playwright JSON API (публичные данные, без credentials). При одобрении — переход на
+  asyncpraw (100 req/min, 100% ToS). До тех пор: Playwright + residential IP + stealth.
 - **Exploratory subreddits:** если пост из нового сабреддита виральный → предложить добавить
   в monitoring (вдохновлено Reddit_Scrapper ⭐198). Опция, не ядро.
 - Proxy-ротация реализована (9d912d8); при 429 на VPS — SSH-туннель через HostKey или
