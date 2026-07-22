@@ -64,6 +64,9 @@ reddit-compass растёт от автономного коллектора т�
 Расширение за пределы Reddit: единый конвейер «сбор → JSONL → trends analysis» для нескольких
 источников. Деплой — на VPS HostKey «Hermes» (app-owned стек, рядом с reddit-compass).
 
+> **Детальный план:** [docs/MULTI_SOURCE_PLAN.md](docs/MULTI_SOURCE_PLAN.md) — архитектура,
+> все СМИ из Ladder ruleset, пошаговая реализация, деплой, метрики успеха.
+
 **Источники (приоритет):**
 
 | # | Источник | API/доступ | Ценность |
