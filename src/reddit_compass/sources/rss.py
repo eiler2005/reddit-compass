@@ -60,7 +60,7 @@ RSS_SOURCES: list[RSSSource] = [
         cluster="business",
         country="US",
         feeds=[
-            "https://www.reutersagency.com/feed/?taxonomy=best-sectors&post_type=best",
+            "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en",
         ],
     ),
     # Кластер 3: Tech/культура
