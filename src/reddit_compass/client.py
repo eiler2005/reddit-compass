@@ -207,13 +207,24 @@ class RedditBrowser:
         launch_args: dict[str, Any] = {"headless": True}
         proxy = self._proxy_rotator.next()
         if proxy:
-            launch_args["proxy"] = {"server": proxy}
+            # Playwright требует раздельный формат: server + username + password
+            from urllib.parse import urlparse
+
+            parsed = urlparse(proxy)
+            proxy_config: dict[str, str] = {
+                "server": f"{parsed.scheme}://{parsed.hostname}:{parsed.port}"
+            }
+            if parsed.username:
+                proxy_config["username"] = parsed.username
+            if parsed.password:
+                proxy_config["password"] = parsed.password
+            launch_args["proxy"] = proxy_config
 
         self._browser = await self._pw.chromium.launch(**launch_args)
         self._page = await self._browser.new_page(user_agent=USER_AGENT)
         try:
             await self._page.goto(
-                "https://www.reddit.com/", wait_until="domcontentloaded", timeout=30000
+                "https://www.reddit.com/", wait_until="domcontentloaded", timeout=60000
             )
             await asyncio.sleep(2)
             logger.info("Reddit browser session открыта (Playwright fallback)")
