@@ -41,13 +41,19 @@ async def fetch_hn_stories(
     queries: list[str] | None = None,
     hits_per_query: int = 20,
     snapshot_date: str = "",
+    days_back: int = 7,
 ) -> list[PostCard]:
-    """Загружает stories из HN по AI-запросам через Algolia API."""
+    """Загружает stories из HN по запросам через Algolia API (последние N дней)."""
+    import time as _time
+
     import aiohttp
 
     queries = queries or DEFAULT_QUERIES
     cards: list[PostCard] = []
     seen_ids: set[str] = set()
+
+    # Фильтр: только последние N дней
+    since_ts = int(_time.time()) - (days_back * 86400)
 
     headers = {"User-Agent": "reddit-compass/0.2 (trend monitor)"}
 
@@ -57,6 +63,7 @@ async def fetch_hn_stories(
                 f"{ALGOLIA_BASE}/search"
                 f"?query={query.replace(' ', '+')}"
                 f"&tags=story&hitsPerPage={hits_per_query}"
+                f"&numericFilters=created_at_i>{since_ts}"
             )
             try:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:

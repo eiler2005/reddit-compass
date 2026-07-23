@@ -179,10 +179,21 @@ def render_dashboard(
     stats: dict[str, Any], posts: list[dict[str, Any]], manifest: dict[str, Any] | None = None
 ) -> str:
     """Рендерит интерактивный дашборд с ссылками по кластерам."""
-    # Разделяем по источникам
-    reddit = [p for p in posts if p.get("source") == "reddit"]
-    hn = [p for p in posts if p.get("source") == "hackernews"]
-    rss = [p for p in posts if p.get("source") == "rss"]
+
+    # Разделяем по источникам (определяем по subreddit или source)
+    def _get_source(p: dict[str, Any]) -> str:
+        sub = p.get("subreddit", "")
+        if sub == "hackernews" or p.get("source") == "hackernews":
+            return "hackernews"
+        if sub == "producthunt" or p.get("source") == "producthunt":
+            return "producthunt"
+        if p.get("source") == "rss" or p.get("monitoring_type") == "rss":
+            return "rss"
+        return "reddit"
+
+    reddit = [p for p in posts if _get_source(p) == "reddit"]
+    hn = [p for p in posts if _get_source(p) == "hackernews"]
+    rss = [p for p in posts if _get_source(p) == "rss"]
 
     # Кластеры Reddit
     ai_subs = {
