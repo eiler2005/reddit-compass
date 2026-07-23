@@ -1,7 +1,7 @@
 """LLM-анализ сигналов: Qwen API → pain points, business relevance, темы для колонок.
 
 Вход: posts.jsonl (snapshot). Выход: signals.jsonl + секция в отчёте.
-API: DashScope OpenAI-compatible (Qwen). Ключ: DASHSCOPE_API_KEY.
+API: QwenCloud OpenAI-compatible (Qwen). Ключ: DASHSCOPE_API_KEY (pay-as-you-go).
 Модель: qwen-plus (bulk-классификация), qwen-max (синтез).
 """
 
@@ -19,7 +19,9 @@ from .models import PostCard
 
 logger = logging.getLogger("reddit_compass")
 
-DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DASHSCOPE_BASE_URL = os.environ.get(
+    "DASHSCOPE_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+)
 DEFAULT_MODEL = "qwen-plus"
 SYNTHESIS_MODEL = "qwen-max"
 BATCH_SIZE = 10  # постов на один LLM-запрос
@@ -66,7 +68,7 @@ def _get_api_key() -> str:
     key = os.environ.get("DASHSCOPE_API_KEY", "")
     if not key:
         raise ValueError(
-            "DASHSCOPE_API_KEY не установлен. Получите ключ: https://dashscope.console.aliyun.com/"
+            "DASHSCOPE_API_KEY не установлен. Получите ключ: https://home.qwencloud.com/api-keys"
         )
     return key
 
@@ -333,5 +335,111 @@ def render_signals_report(
         for pain in all_pains[:15]:
             lines.append(f"- {pain}")
         lines.append("")
+
+    return "\n".join(lines)
+
+
+def render_trend_radar(
+    snap_dir: Path,
+    snapshot_date: str,
+    top_n: int = 10,
+) -> str:
+    """Генерирует полный трендовый радар с ссылками из данных snapshot.
+
+    Читает posts.jsonl, hackernews.jsonl, rss.jsonl из snap_dir.
+    Включает: топ постов с URL, статистику, секцию «Читать».
+    """
+    import json as _json
+
+    lines: list[str] = [
+        f"# 🤖 Трендовый радар: {snapshot_date}",
+        "",
+    ]
+
+    # Загружаем данные
+    reddit_posts: list[dict[str, Any]] = []
+    hn_posts: list[dict[str, Any]] = []
+    rss_posts: list[dict[str, Any]] = []
+
+    posts_file = snap_dir / "posts.jsonl"
+    if posts_file.exists():
+        for line in posts_file.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                reddit_posts.append(_json.loads(line))
+
+    hn_file = snap_dir / "hackernews.jsonl"
+    if hn_file.exists():
+        for line in hn_file.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                hn_posts.append(_json.loads(line))
+
+    rss_file = snap_dir / "rss.jsonl"
+    if rss_file.exists():
+        for line in rss_file.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                rss_posts.append(_json.loads(line))
+
+    total = len(reddit_posts) + len(hn_posts) + len(rss_posts)
+    n_subs = len({p.get("subreddit", "") for p in reddit_posts})
+
+    lines.append(
+        f"> Reddit: {len(reddit_posts)} постов ({n_subs} сабреддитов) | "
+        f"HN: {len(hn_posts)} stories | RSS: {len(rss_posts)} статей | "
+        f"**Итого: {total}**"
+    )
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Reddit top
+    if reddit_posts:
+        reddit_posts.sort(key=lambda p: p.get("score", 0), reverse=True)
+        lines.append(f"## 📰 Reddit: топ-{top_n} (голос улицы)")
+        lines.append("")
+        lines.append("| # | Score | Subreddit | Title | Ссылка |")
+        lines.append("|---|---|---|---|---|")
+        for i, p in enumerate(reddit_posts[:top_n], 1):
+            permalink = p.get("permalink", "")
+            url = f"https://www.reddit.com{permalink}" if permalink else p.get("url", "")
+            title = p.get("title", "")[:60]
+            lines.append(
+                f"| {i} | {p.get('score', 0)} | r/{p.get('subreddit', '')} "
+                f"| {title} | [link]({url}) |"
+            )
+        lines.append("")
+
+    # HN top
+    if hn_posts:
+        hn_posts.sort(key=lambda p: p.get("score", 0), reverse=True)
+        lines.append(f"## 💬 Hacker News: топ-{top_n} (голос разработчика)")
+        lines.append("")
+        lines.append("| # | Score | Title | Ссылка |")
+        lines.append("|---|---|---|---|")
+        for i, p in enumerate(hn_posts[:top_n], 1):
+            url = p.get("url") or f"https://news.ycombinator.com/item?id={p.get('post_id', '')}"
+            title = p.get("title", "")[:70]
+            lines.append(f"| {i} | {p.get('score', 0)} | {title} | [link]({url}) |")
+        lines.append("")
+
+    # RSS top
+    if rss_posts:
+        lines.append(f"## 📡 RSS: топ-{top_n} (голос СМИ)")
+        lines.append("")
+        lines.append("| # | Источник | Title | Ссылка |")
+        lines.append("|---|---|---|---|")
+        for i, p in enumerate(rss_posts[:top_n], 1):
+            src = p.get("subreddit", "rss")
+            title = p.get("title", "")[:70]
+            url = p.get("url", "")
+            lines.append(f"| {i} | {src} | {title} | [link]({url}) |")
+        lines.append("")
+
+    # Footer
+    lines.append("---")
+    lines.append("")
+    lines.append(
+        f"*Сгенерировано: {snapshot_date} | reddit-compass v0.2 | "
+        f"{total} единиц из {3 if rss_posts else 2} источников*"
+    )
 
     return "\n".join(lines)

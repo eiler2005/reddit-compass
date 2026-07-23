@@ -295,6 +295,14 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
     print(f"✅ Signals: {signals_path}")
     print(f"   Report: {report_path}")
 
+    # Trend radar с ссылками
+    from .signals import render_trend_radar
+
+    radar = render_trend_radar(snap_dir, snapshot_date)
+    radar_path = snap_dir / "trend-radar.md"
+    radar_path.write_text(radar, encoding="utf-8")
+    print(f"   Radar: {radar_path}")
+
 
 async def _cmd_hn(args: argparse.Namespace) -> None:
     """Hacker News: AI-stories через Algolia API."""
@@ -314,6 +322,23 @@ async def _cmd_hn(args: argparse.Namespace) -> None:
 
     write_posts_jsonl(cards, snap_dir / "hackernews.jsonl")
     print(f"✅ HN: {len(cards)} stories → {snap_dir / 'hackernews.jsonl'}")
+
+
+async def _cmd_radar(args: argparse.Namespace) -> None:
+    """Trend radar: отчёт с ссылками из собранных данных (без LLM)."""
+    snapshot_date = _today()
+    snap_dir = _snapshots_dir(args) / snapshot_date
+
+    if not snap_dir.exists():
+        print(f"❌ Snapshot не найден: {snap_dir}. Сначала соберите данные.")
+        sys.exit(1)
+
+    from .signals import render_trend_radar
+
+    radar = render_trend_radar(snap_dir, snapshot_date)
+    radar_path = snap_dir / "trend-radar.md"
+    radar_path.write_text(radar, encoding="utf-8")
+    print(f"✅ Trend radar: {radar_path}")
 
 
 async def _cmd_rss(args: argparse.Namespace) -> None:
@@ -462,6 +487,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("signals", parents=[common], help="LLM-анализ (Qwen API): pain points, темы")
+    sub.add_parser("radar", parents=[common], help="Trend radar: отчёт с ссылками (без LLM)")
     sub.add_parser("hn", parents=[common], help="Hacker News: AI-stories через Algolia API")
     sub.add_parser(
         "rss", parents=[common], help="RSS: BBC, Guardian, Reuters, TechCrunch, Verge, Ars"
@@ -492,6 +518,7 @@ def main() -> None:
         "all": _cmd_all,
         "nightly": _cmd_nightly,
         "signals": _cmd_signals,
+        "radar": _cmd_radar,
         "hn": _cmd_hn,
         "rss": _cmd_rss,
         "ladder": _cmd_ladder,
