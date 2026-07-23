@@ -141,13 +141,52 @@ def _extract_description(html: str) -> str:
     return m.group(1).strip()[:1000] if m else ""
 
 
-def _extract_article_text(html: str) -> str:
-    """Извлекает текст статьи (грубо: <article> или первые 2000 символов текста)."""
-    m = ARTICLE_RE.search(html)
-    if m:
-        return HTML_TAG_RE.sub(" ", m.group(1)).strip()[:3000]
-    text = HTML_TAG_RE.sub(" ", html)
-    return text.strip()[:2000]
+# Паттерн для извлечения ссылок на статьи из listing-страниц
+LINK_RE = re.compile(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', re.DOTALL | re.IGNORECASE)
+# URL-паттерны статей (даты, /article/, /story/, /news/, /2026/, /2025/)
+ARTICLE_URL_RE = re.compile(
+    r"(/\d{4}/\d{2}/|/article/|/story/|/news/|/p/|/post/|/blog/)", re.IGNORECASE
+)
+
+
+def _extract_articles_from_listing(html: str, base_url: str) -> list[dict[str, str]]:
+    """Извлекает статьи (title + url) из HTML listing-страницы."""
+    articles: list[dict[str, str]] = []
+    seen_urls: set[str] = set()
+
+    for match in LINK_RE.finditer(html):
+        href = match.group(1).strip()
+        inner_html = match.group(2)
+        # Очищаем title от HTML-тегов
+        title = HTML_TAG_RE.sub("", inner_html).strip()
+
+        # Фильтры: только статьи с нормальным заголовком
+        if not title or len(title) < 15:
+            continue
+        if href.startswith(("#", "javascript:", "mailto:")):
+            continue
+
+        # Полный URL
+        if href.startswith("/"):
+            full_url = f"{base_url}{href}"
+        elif href.startswith("http"):
+            full_url = href
+        else:
+            continue
+
+        # Только article-like URL
+        if not ARTICLE_URL_RE.search(full_url):
+            continue
+
+        # Дедупликация
+        clean_url = full_url.split("?")[0].split("#")[0]
+        if clean_url in seen_urls:
+            continue
+        seen_urls.add(clean_url)
+
+        articles.append({"title": title[:200], "url": clean_url})
+
+    return articles
 
 
 async def fetch_ladder_page(url: str) -> str | None:
@@ -176,8 +215,9 @@ async def fetch_ladder_source(
     snapshot_date: str,
     max_pages: int = 2,
 ) -> list[PostCard]:
-    """Загружает секции источника через Ladder."""
+    """Загружает статьи источника через Ladder (парсинг listing-страниц)."""
     cards: list[PostCard] = []
+    seen_urls: set[str] = set()
 
     for path in source.search_paths[:max_pages]:
         url = f"{source.base_url}{path}"
@@ -185,33 +225,40 @@ async def fetch_ladder_source(
         if not html:
             continue
 
-        # Извлекаем заголовки и описания из listing-страницы
-        title = _extract_title(html)
-        desc = _extract_description(html)
+        # Извлекаем статьи из listing-страницы
+        articles = _extract_articles_from_listing(html, source.base_url)
 
-        if title:
+        for article in articles[:20]:  # макс 20 статей на секцию
+            article_url = article["url"]
+            if article_url in seen_urls:
+                continue
+            seen_urls.add(article_url)
+
+            # ID из URL
+            post_id = article_url.rstrip("/").split("/")[-1][:50]
+
             cards.append(
                 PostCard(
                     subreddit=source.name,
-                    post_id=f"{source.name}-{path.replace('/', '-')[:30]}",
-                    title=title,
+                    post_id=post_id,
+                    title=article["title"],
                     author=source.name,
                     created_utc=None,
                     score=0,
                     upvote_ratio=0.0,
                     num_comments=0,
-                    url=url,
-                    selftext=desc or _extract_article_text(html)[:500],
+                    url=article_url,
+                    selftext="",
                     link_flair_text=source.cluster,
-                    is_self=True,
-                    permalink=url,
+                    is_self=False,
+                    permalink=article_url,
                     monitoring_type="ladder",
                     snapshot_date=snapshot_date,
                     keyword=source.cluster,
                 )
             )
 
-    logger.info("Ladder %s: %d страниц", source.name, len(cards))
+    logger.info("Ladder %s: %d статей", source.name, len(cards))
     return cards
 
 
@@ -226,5 +273,5 @@ async def fetch_all_ladder(
     for source in sources:
         cards = await fetch_ladder_source(source, snapshot_date, max_pages)
         all_cards.extend(cards)
-    logger.info("Ladder total: %d страниц из %d источников", len(all_cards), len(sources))
+    logger.info("Ladder total: %d статей из %d источников", len(all_cards), len(sources))
     return all_cards
