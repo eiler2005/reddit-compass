@@ -39,7 +39,7 @@ services:
       dockerfile: Dockerfile.api
     image: reddit-compass:latest
     container_name: rc-api
-    command: ["reddit-compass", "serve"]
+    command: ["serve"]
     env_file: [.env]
     environment:
       DATA_DIR: /data
@@ -68,8 +68,8 @@ services:
     container_name: rc-caddy
     restart: always
     ports:
-      - "127.0.0.1:8900:80"
-      - "127.0.0.1:8943:443"
+      - "8900:80"
+      - "8943:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
