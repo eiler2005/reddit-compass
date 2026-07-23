@@ -81,7 +81,21 @@ def create_app() -> FastAPI:
 
         stats = query_stats(db)
         posts = query_posts(db, limit=1000)
-        return render_dashboard(stats, posts)
+
+        # Загружаем манифест последнего snapshot
+        manifest_data = None
+        latest = stats.get("latest_snapshot")
+        if latest:
+            from pathlib import Path as _Path
+
+            from ..manifest import load_manifest
+
+            snap_dir = _Path(os.environ.get("DATA_DIR", "data")) / "snapshots" / latest
+            m = load_manifest(snap_dir)
+            if m:
+                manifest_data = m.to_dict()
+
+        return render_dashboard(stats, posts, manifest_data)
 
     # ── OAuth2 token ────────────────────────────────────────────────────────
 

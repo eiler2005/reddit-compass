@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -202,19 +203,61 @@ async def _cmd_all(args: argparse.Namespace) -> None:
     output_dir = _snapshots_dir(args)
     state_file = output_dir.parent / "tracked-threads-state.jsonl"
 
+    from .manifest import SourceResult, new_manifest, save_manifest
+
+    manifest = new_manifest()
+    snap_dir_path = output_dir / snapshot_date
+
     logger.info("=== Fetch: hot/top по сабреддитам ===")
+    t0 = time.time()
     cards = await fetch_all_subreddits(config, snapshot_date)
+    manifest.add_source(
+        SourceResult(
+            name="reddit-fetch",
+            status="ok" if cards else "empty",
+            count=len(cards),
+            duration_sec=round(time.time() - t0, 1),
+            note=f"{len(config.all_subreddits)} сабреддитов",
+        )
+    )
 
     logger.info("=== Search: keyword search ===")
+    t0 = time.time()
     search_cards = await search_all_keywords(config, snapshot_date)
+    manifest.add_source(
+        SourceResult(
+            name="reddit-search",
+            status="ok" if search_cards else "empty",
+            count=len(search_cards),
+            duration_sec=round(time.time() - t0, 1),
+            note=f"{len(config.keywords)} keywords",
+        )
+    )
 
     logger.info("=== Track: мониторинг тредов ===")
+    t0 = time.time()
     thread_states = await track_all_threads(config, snapshot_date, state_file)
+    manifest.add_source(
+        SourceResult(
+            name="reddit-track",
+            status="ok" if thread_states else "empty",
+            count=len(thread_states),
+            duration_sec=round(time.time() - t0, 1),
+            note=f"{len(config.tracked_threads)} тредов",
+        )
+    )
 
     all_cards = cards + search_cards
 
     logger.info("=== Virality: детекция виральности ===")
     signals = detect_virality(all_cards, config, snapshot_date)
+    manifest.add_source(
+        SourceResult(
+            name="virality",
+            status="ok" if signals else "empty",
+            count=len(signals),
+        )
+    )
 
     logger.info("=== Export: запись snapshot ===")
     snap_dir = write_snapshot(
@@ -225,6 +268,9 @@ async def _cmd_all(args: argparse.Namespace) -> None:
 
     write_threads_jsonl(thread_states, state_file)
 
+    manifest.finish()
+    save_manifest(manifest, snap_dir_path)
+
     print(f"\n{'=' * 60}")
     print(f"✅ reddit-compass — snapshot {snapshot_date}")
     print(f"{'=' * 60}")
@@ -234,6 +280,7 @@ async def _cmd_all(args: argparse.Namespace) -> None:
     print(f"  Virality signals:     {len(signals)}")
     print(f"  Snapshot:             {snap_dir}")
     print(f"  Отчёт:                {snap_dir / 'trends-report.md'}")
+    print(f"  Манифест:             {snap_dir_path / 'run-manifest.json'}")
     print(f"{'=' * 60}")
 
 

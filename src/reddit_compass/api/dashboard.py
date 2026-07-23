@@ -79,6 +79,7 @@ nav a:hover { background: var(--border); }
 </div>
 
 <nav>
+  <a href="#status">📋 Статус</a>
   <a href="#mega">🔥 Мега-тренды</a>
   <a href="#ai">🤖 AI/Tech</a>
   <a href="#surveillance">👁 Surveillance</a>
@@ -129,7 +130,54 @@ def _post_row(p: dict[str, Any]) -> str:
     )
 
 
-def render_dashboard(stats: dict[str, Any], posts: list[dict[str, Any]]) -> str:
+def _status_icon(status: str) -> str:
+    return {"ok": "✅", "error": "❌", "empty": "⚠️", "skipped": "⏭"}.get(status, "❓")
+
+
+def _render_manifest(manifest: dict[str, Any] | None) -> str:
+    """Панель статуса последнего запуска."""
+    if not manifest:
+        return (
+            '<h2 id="status">📋 Статус запуска</h2>\n'
+            '<p class="meta">Манифест не найден — запуск ещё не производился '
+            "или данные не синхронизированы.</p>\n"
+        )
+
+    status = manifest.get("status", "unknown")
+    status_label = {
+        "done": "✅ завершён",
+        "partial": "⚠️ частично",
+        "running": "⏳ выполняется",
+    }.get(status, status)
+    started = manifest.get("started_at", "—")[:19].replace("T", " ")
+    duration = manifest.get("duration_sec", 0)
+
+    html = '<h2 id="status">📋 Статус запуска</h2>\n'
+    html += (
+        f'<p class="meta">Запуск: <b>{started} UTC</b> · '
+        f"статус: <b>{status_label}</b> · длительность: <b>{duration:.0f}с</b> · "
+        f"всего: <b>{manifest.get('total_items', 0)}</b> items</p>\n"
+    )
+    html += "<table>\n<tr><th>Источник</th><th>Статус</th><th>Собрано</th><th>Время</th><th>Заметка</th></tr>\n"
+    for s in manifest.get("sources", []):
+        icon = _status_icon(s.get("status", ""))
+        errors = "; ".join(s.get("errors", [])[:2])
+        note = s.get("note", "")
+        note_full = f"{note} {errors}".strip()
+        html += (
+            f"<tr><td>{s.get('name', '')}</td>"
+            f"<td>{icon} {s.get('status', '')}</td>"
+            f"<td class='score'>{s.get('count', 0)}</td>"
+            f"<td>{s.get('duration_sec', 0):.0f}с</td>"
+            f"<td class='sub'>{note_full}</td></tr>\n"
+        )
+    html += "</table>\n"
+    return html
+
+
+def render_dashboard(
+    stats: dict[str, Any], posts: list[dict[str, Any]], manifest: dict[str, Any] | None = None
+) -> str:
     """Рендерит интерактивный дашборд с ссылками по кластерам."""
     # Разделяем по источникам
     reddit = [p for p in posts if p.get("source") == "reddit"]
@@ -199,6 +247,9 @@ def render_dashboard(stats: dict[str, Any], posts: list[dict[str, Any]]) -> str:
     html = html.replace("{hn_count}", str(len(hn)))
     html = html.replace("{rss_count}", str(len(rss)))
     html = html.replace("{subreddits_count}", str(n_subs))
+
+    # Статус запуска (манифест)
+    html += _render_manifest(manifest)
 
     # Мега-тренды
     html += '<h2 id="mega">🔥 Мега-тренды (топ через все источники)</h2>\n'
