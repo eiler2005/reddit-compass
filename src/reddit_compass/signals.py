@@ -26,16 +26,25 @@ MAX_CONCURRENT = 3
 _TOKEN_PLAN_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 _DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
+# Модельная пирамида (цена/качество):
+#   qwen3.8-max-preview — синтез (сложное, мало вызовов, скидка 17:00–03:00 МСК)
+#   qwen3.7-plus        — классификация постов (баланс цена/качество, массово)
+#   qwen3.6-flash       — простые задачи (фильтрация, саммаризация) — самый дешёвый
+_MODEL_SYNTHESIS = "qwen3.8-max-preview"  # сложное → дорогая модель
+_MODEL_CLASSIFY = "qwen3.7-plus"  # массовая классификация → баланс
+_MODEL_CHEAP = "qwen3.6-flash"  # простое → самая дешёвая
+
 
 def _get_api_config() -> tuple[str, str, str, str]:
     """Возвращает (api_key, base_url, classification_model, synthesis_model).
 
     Приоритет: QWEN_TOKEN_PLAN_KEY (token-plan) → QWEN_Pay_As_You_Go / DASHSCOPE_API_KEY.
+    Пирамида моделей: классификация=qwen3.7-plus, синтез=qwen3.8-max-preview.
     """
-    # Token-plan ключ (qwen3.7 модели)
+    # Token-plan ключ (пирамида qwen3.7-plus / qwen3.8-max-preview)
     token_plan_key = os.environ.get("QWEN_TOKEN_PLAN_KEY", "")
     if token_plan_key:
-        return token_plan_key, _TOKEN_PLAN_URL, "qwen3.7-plus", "qwen3.7-max"
+        return token_plan_key, _TOKEN_PLAN_URL, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
     # Pay-as-you-go / стандартный ключ (qwen-plus/max)
     for var in ("DASHSCOPE_API_KEY", "QWEN_Pay_As_You_Go_PLAN_KEY"):
         key = os.environ.get(var, "")

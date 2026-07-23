@@ -82,6 +82,7 @@ nav a:hover { background: var(--border); }
 <nav>
   <a href="#status">📋 Статус</a>
   <a href="#sources">📚 Источники</a>
+  <a href="#themes">🎯 Темы</a>
   <a href="#mega">🔥 Мега-тренды</a>
   <a href="#ai">🤖 AI/Tech</a>
   <a href="#surveillance">👁 Surveillance</a>
@@ -242,8 +243,64 @@ def load_posts_from_snapshot(snap_dir: Any) -> list[dict[str, Any]]:
     return posts
 
 
+def load_signals_from_snapshot(snap_dir: Any) -> list[dict[str, Any]]:
+    """Загружает LLM-сигналы из signals.jsonl."""
+    import json as _json
+    from pathlib import Path
+
+    fp = Path(snap_dir) / "signals.jsonl"
+    if not fp.exists():
+        return []
+    signals: list[dict[str, Any]] = []
+    for line in fp.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            signals.append(_json.loads(line))
+        except _json.JSONDecodeError:
+            continue
+    return signals
+
+
+def render_themes_section(
+    signals: list[dict[str, Any]], posts_by_id: dict[str, dict[str, Any]]
+) -> str:
+    """Секция 'Темы и посты': группировка постов по LLM-темам."""
+    if not signals:
+        return ""
+
+    # Группируем посты по темам
+    theme_posts: dict[str, list[dict[str, Any]]] = {}
+    for sig in signals:
+        post_id = sig.get("post_id", "")
+        post = posts_by_id.get(post_id)
+        if not post:
+            continue
+        for theme in sig.get("themes", []):
+            theme_posts.setdefault(theme, []).append(post)
+
+    if not theme_posts:
+        return ""
+
+    # Сортируем темы по числу постов
+    sorted_themes = sorted(theme_posts.items(), key=lambda x: -len(x[1]))
+
+    html = '<h2 id="themes">🎯 Темы и посты (LLM-разметка)</h2>\n'
+    html += '<p class="meta">Посты, сгруппированные по темам, выделенным LLM:</p>\n'
+    for theme, tposts in sorted_themes[:15]:
+        tposts_sorted = sorted(tposts, key=lambda p: p.get("score", 0), reverse=True)
+        html += f"<details><summary><b>{theme}</b> ({len(tposts)} постов)</summary>\n"
+        for p in tposts_sorted[:8]:
+            html += _post_row(p)
+        html += "</details>\n"
+    return html
+
+
 def render_dashboard(
-    stats: dict[str, Any], posts: list[dict[str, Any]], manifest: dict[str, Any] | None = None
+    stats: dict[str, Any],
+    posts: list[dict[str, Any]],
+    manifest: dict[str, Any] | None = None,
+    signals: list[dict[str, Any]] | None = None,
 ) -> str:
     """Рендерит интерактивный дашборд с ссылками по кластерам."""
 
@@ -380,6 +437,11 @@ def render_dashboard(
         html += f"<tr><td>{src}</td><td>{status}</td><td class='score'>{count or '—'}</td></tr>\n"
     html += f"<tr><td><b>Итого</b></td><td></td><td class='score'><b>{len(posts)}</b></td></tr>\n"
     html += "</table>\n"
+
+    # Темы и посты (LLM-разметка)
+    if signals:
+        posts_by_id = {p.get("post_id", ""): p for p in posts}
+        html += render_themes_section(signals, posts_by_id)
 
     # Мега-тренды
     html += '<h2 id="mega">🔥 Мега-тренды (топ через все источники)</h2>\n'

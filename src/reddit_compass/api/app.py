@@ -220,7 +220,11 @@ details summary { cursor:pointer; color:var(--accent); }
         from pathlib import Path as _Path
 
         from ..manifest import load_manifest
-        from .dashboard import load_posts_from_snapshot, render_dashboard
+        from .dashboard import (
+            load_posts_from_snapshot,
+            load_signals_from_snapshot,
+            render_dashboard,
+        )
 
         data_dir = _Path(os.environ.get("DATA_DIR", "data"))
         snap_dir = data_dir / "snapshots" / date
@@ -231,6 +235,7 @@ details summary { cursor:pointer; color:var(--accent); }
             )
 
         posts = load_posts_from_snapshot(snap_dir)
+        signals = load_signals_from_snapshot(snap_dir)
         manifest = load_manifest(snap_dir)
         manifest_data = manifest.to_dict() if manifest else None
 
@@ -243,12 +248,12 @@ details summary { cursor:pointer; color:var(--accent); }
         stats = {
             "total_posts": len(posts),
             "total_snapshots": 1,
-            "total_signals": 0,
+            "total_signals": len(signals),
             "latest_snapshot": date,
             "top_subreddits": [],
         }
 
-        html = render_dashboard(stats, posts, manifest_data)
+        html = render_dashboard(stats, posts, manifest_data, signals)
         # Добавляем навигацию назад
         html = html.replace(
             "<h1>🧭 reddit-compass</h1>",
