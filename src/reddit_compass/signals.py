@@ -344,15 +344,15 @@ def render_trend_radar(
     snapshot_date: str,
     top_n: int = 10,
 ) -> str:
-    """Генерирует полный трендовый радар с ссылками из данных snapshot.
+    """Генерирует полный трендовый радар по кластерам с ссылками.
 
-    Читает posts.jsonl, hackernews.jsonl, rss.jsonl из snap_dir.
-    Включает: топ постов с URL, статистику, секцию «Читать».
+    Структура: AI/Tech → Surveillance → Труд → Бизнес → Общество → HN → RSS.
+    Каждый кластер: топ постов с URL.
     """
     import json as _json
 
     lines: list[str] = [
-        f"# 🤖 Трендовый радар: {snapshot_date}",
+        f"# 🧭 Трендовый радар: {snapshot_date}",
         "",
     ]
 
@@ -383,63 +383,186 @@ def render_trend_radar(
     n_subs = len({p.get("subreddit", "") for p in reddit_posts})
 
     lines.append(
-        f"> Reddit: {len(reddit_posts)} постов ({n_subs} сабреддитов) | "
-        f"HN: {len(hn_posts)} stories | RSS: {len(rss_posts)} статей | "
-        f"**Итого: {total}**"
+        f"> **{total} единиц** | Reddit: {len(reddit_posts)} ({n_subs} sub) "
+        f"| HN: {len(hn_posts)} | RSS: {len(rss_posts)}"
     )
     lines.append("")
     lines.append("---")
     lines.append("")
 
-    # Reddit top
-    if reddit_posts:
-        reddit_posts.sort(key=lambda p: p.get("score", 0), reverse=True)
-        lines.append(f"## 📰 Reddit: топ-{top_n} (голос улицы)")
+    # ── Кластеры Reddit ──────────────────────────────────────────────────────
+
+    clusters: list[tuple[str, str, list[str]]] = [
+        (
+            "🤖 AI и технологии",
+            "ai_tech",
+            [
+                "artificial",
+                "singularity",
+                "ChatGPT",
+                "AI_Agents",
+                "LocalLLaMA",
+                "MachineLearning",
+                "vibecoding",
+                "cursor",
+                "LangChain",
+                "AutoGPT",
+                "crewAI",
+            ],
+        ),
+        (
+            "👁 Surveillance и приватность",
+            "surveillance",
+            [
+                "technology",  # фильтруется по ключевым словам
+            ],
+        ),
+        (
+            "💼 Труд и карьера",
+            "labor",
+            [
+                "jobs",
+                "cscareerquestions",
+            ],
+        ),
+        (
+            "🏪 Бизнес и предпринимательство",
+            "business",
+            [
+                "Entrepreneur",
+                "smallbusiness",
+            ],
+        ),
+        (
+            "🌍 Общество и политика",
+            "society",
+            [
+                "AskReddit",
+                "changemyview",
+            ],
+        ),
+    ]
+
+    surveillance_keywords = [
+        "flock",
+        "camera",
+        "surveillance",
+        "privacy",
+        "track",
+        "palantir",
+        "ice",
+        "data center",
+        "eminent domain",
+    ]
+
+    for cluster_name, _cluster_id, subreddits in clusters:
+        if _cluster_id == "surveillance":
+            # Специальный фильтр: r/technology + ключевые слова
+            cluster_posts = [
+                p
+                for p in reddit_posts
+                if p.get("subreddit") == "technology"
+                and any(kw in p.get("title", "").lower() for kw in surveillance_keywords)
+            ]
+        elif _cluster_id == "ai_tech":
+            cluster_posts = [p for p in reddit_posts if p.get("subreddit") in subreddits]
+        else:
+            cluster_posts = [p for p in reddit_posts if p.get("subreddit") in subreddits]
+
+        if not cluster_posts:
+            continue
+
+        cluster_posts.sort(key=lambda p: p.get("score", 0), reverse=True)
+        lines.append(f"## {cluster_name}")
         lines.append("")
-        lines.append("| # | Score | Subreddit | Title | Ссылка |")
+        lines.append("| # | Score | r/ | Title | Ссылка |")
         lines.append("|---|---|---|---|---|")
-        for i, p in enumerate(reddit_posts[:top_n], 1):
+        for i, p in enumerate(cluster_posts[:top_n], 1):
             permalink = p.get("permalink", "")
             url = f"https://www.reddit.com{permalink}" if permalink else p.get("url", "")
-            title = p.get("title", "")[:60]
-            lines.append(
-                f"| {i} | {p.get('score', 0)} | r/{p.get('subreddit', '')} "
-                f"| {title} | [link]({url}) |"
-            )
+            title = p.get("title", "")[:65]
+            sub = p.get("subreddit", "")
+            lines.append(f"| {i} | {p.get('score', 0)} | {sub} | {title} | [→]({url}) |")
         lines.append("")
 
-    # HN top
+    # ── r/technology: остальное (не AI, не surveillance) ─────────────────────
+
+    tech_other = [
+        p
+        for p in reddit_posts
+        if p.get("subreddit") == "technology"
+        and not any(kw in p.get("title", "").lower() for kw in surveillance_keywords)
+        and not any(w in p.get("title", "").lower() for w in ["ai", "gpt", "llm", "openai"])
+    ]
+    if tech_other:
+        tech_other.sort(key=lambda p: p.get("score", 0), reverse=True)
+        lines.append("## 📱 Технологии (общее)")
+        lines.append("")
+        lines.append("| # | Score | Title | Ссылка |")
+        lines.append("|---|---|---|---|")
+        for i, p in enumerate(tech_other[:top_n], 1):
+            permalink = p.get("permalink", "")
+            url = f"https://www.reddit.com{permalink}" if permalink else p.get("url", "")
+            title = p.get("title", "")[:70]
+            lines.append(f"| {i} | {p.get('score', 0)} | {title} | [→]({url}) |")
+        lines.append("")
+
+    # ── Hacker News ──────────────────────────────────────────────────────────
+
     if hn_posts:
         hn_posts.sort(key=lambda p: p.get("score", 0), reverse=True)
-        lines.append(f"## 💬 Hacker News: топ-{top_n} (голос разработчика)")
+        lines.append("## 💬 Hacker News (голос разработчика)")
         lines.append("")
         lines.append("| # | Score | Title | Ссылка |")
         lines.append("|---|---|---|---|")
         for i, p in enumerate(hn_posts[:top_n], 1):
             url = p.get("url") or f"https://news.ycombinator.com/item?id={p.get('post_id', '')}"
             title = p.get("title", "")[:70]
-            lines.append(f"| {i} | {p.get('score', 0)} | {title} | [link]({url}) |")
+            lines.append(f"| {i} | {p.get('score', 0)} | {title} | [→]({url}) |")
         lines.append("")
 
-    # RSS top
+    # ── RSS (СМИ) ────────────────────────────────────────────────────────────
+
     if rss_posts:
-        lines.append(f"## 📡 RSS: топ-{top_n} (голос СМИ)")
-        lines.append("")
-        lines.append("| # | Источник | Title | Ссылка |")
-        lines.append("|---|---|---|---|")
-        for i, p in enumerate(rss_posts[:top_n], 1):
-            src = p.get("subreddit", "rss")
-            title = p.get("title", "")[:70]
-            url = p.get("url", "")
-            lines.append(f"| {i} | {src} | {title} | [link]({url}) |")
-        lines.append("")
+        # Разделяем на AI и не-AI
+        rss_ai = [
+            p
+            for p in rss_posts
+            if any(
+                w in p.get("title", "").lower() for w in ["ai", "gpt", "llm", "openai", "anthropic"]
+            )
+        ]
+        rss_other = [p for p in rss_posts if p not in rss_ai]
 
-    # Footer
+        if rss_ai:
+            lines.append("## 📡 СМИ: AI и технологии")
+            lines.append("")
+            lines.append("| # | Источник | Title | Ссылка |")
+            lines.append("|---|---|---|---|")
+            for i, p in enumerate(rss_ai[:top_n], 1):
+                title = p.get("title", "")[:65]
+                url = p.get("url", "")
+                lines.append(f"| {i} | {p.get('subreddit', '')} | {title} | [→]({url}) |")
+            lines.append("")
+
+        if rss_other:
+            lines.append("## 📡 СМИ: общее")
+            lines.append("")
+            lines.append("| # | Источник | Title | Ссылка |")
+            lines.append("|---|---|---|---|")
+            for i, p in enumerate(rss_other[:top_n], 1):
+                title = p.get("title", "")[:65]
+                url = p.get("url", "")
+                lines.append(f"| {i} | {p.get('subreddit', '')} | {title} | [→]({url}) |")
+            lines.append("")
+
+    # ── Footer ───────────────────────────────────────────────────────────────
+
     lines.append("---")
     lines.append("")
     lines.append(
-        f"*Сгенерировано: {snapshot_date} | reddit-compass v0.2 | "
-        f"{total} единиц из {3 if rss_posts else 2} источников*"
+        f"*reddit-compass v0.2 | {snapshot_date} | "
+        f"{total} единиц из {n_subs} сабреддитов + HN + RSS*"
     )
 
     return "\n".join(lines)
