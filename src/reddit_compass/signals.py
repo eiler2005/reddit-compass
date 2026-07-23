@@ -65,12 +65,15 @@ class SynthesisResult:
 
 
 def _get_api_key() -> str:
-    key = os.environ.get("DASHSCOPE_API_KEY", "")
-    if not key:
-        raise ValueError(
-            "DASHSCOPE_API_KEY не установлен. Получите ключ: https://home.qwencloud.com/api-keys"
-        )
-    return key
+    # Проверяем несколько имён ключа (QwenCloud / DashScope)
+    for var in ("DASHSCOPE_API_KEY", "QWEN_Pay_As_You_Go_PLAN_KEY", "QWEN_TOKEN_PLAN_KEY"):
+        key = os.environ.get(var, "")
+        if key:
+            return key
+    raise ValueError(
+        "Ключ Qwen не установлен. Задайте DASHSCOPE_API_KEY "
+        "(или QWEN_Pay_As_You_Go_PLAN_KEY). Получить: https://home.qwencloud.com/api-keys"
+    )
 
 
 async def _call_qwen(
