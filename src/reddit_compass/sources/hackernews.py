@@ -16,8 +16,9 @@ logger = logging.getLogger("reddit_compass")
 
 ALGOLIA_BASE = "https://hn.algolia.com/api/v1"
 
-# Запросы для мониторинга AI-трендов на HN
+# Запросы для мониторинга трендов на HN (AI + общие)
 DEFAULT_QUERIES = [
+    # AI и технологии
     "AI agents",
     "LLM",
     "AI layoffs",
@@ -26,6 +27,13 @@ DEFAULT_QUERIES = [
     "GPT",
     "Claude",
     "open source AI",
+    # Общие тренды
+    "startup funding",
+    "privacy surveillance",
+    "tech layoffs",
+    "remote work",
+    "open source",
+    "cybersecurity",
 ]
 
 

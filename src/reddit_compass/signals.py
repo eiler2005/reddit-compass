@@ -390,6 +390,44 @@ def render_trend_radar(
     lines.append("---")
     lines.append("")
 
+    # ── Мега-тренды: топ через ВСЕ источники ─────────────────────────────────
+
+    all_items: list[dict[str, Any]] = []
+    for p in reddit_posts:
+        permalink = p.get("permalink", "")
+        url = f"https://www.reddit.com{permalink}" if permalink else p.get("url", "")
+        all_items.append(
+            {
+                "score": p.get("score", 0),
+                "title": p.get("title", ""),
+                "source": f"r/{p.get('subreddit', '')}",
+                "url": url,
+            }
+        )
+    for p in hn_posts:
+        hn_url = p.get("url") or f"https://news.ycombinator.com/item?id={p.get('post_id', '')}"
+        all_items.append(
+            {
+                "score": p.get("score", 0),
+                "title": p.get("title", ""),
+                "source": "HN",
+                "url": hn_url,
+            }
+        )
+
+    all_items.sort(key=lambda x: x["score"], reverse=True)
+    if all_items:
+        lines.append("## 🔥 Мега-тренды (топ через все источники)")
+        lines.append("")
+        lines.append("| # | Score | Источник | Title | Ссылка |")
+        lines.append("|---|---|---|---|---|")
+        for i, item in enumerate(all_items[:15], 1):
+            title = item["title"][:65]
+            lines.append(
+                f"| {i} | {item['score']} | {item['source']} | {title} | [→]({item['url']}) |"
+            )
+        lines.append("")
+
     # ── Кластеры Reddit ──────────────────────────────────────────────────────
 
     clusters: list[tuple[str, str, list[str]]] = [

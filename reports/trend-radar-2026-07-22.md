@@ -4,6 +4,26 @@
 
 ---
 
+## 🔥 Мега-тренды (топ через все источники)
+
+| # | Score | Источник | Title | Ссылка |
+|---|---|---|---|---|
+| 1 | 39297 | r/technology | China bans AI “boyfriends” and “girlfriends” over addiction and b | [→](https://www.reddit.com/r/technology/comments/1v0u3wv/china_bans_ai_boyfriends_and_girlfriends_over/) |
+| 2 | 30535 | r/technology | SpaceX stock drops to a new low and loses $1 trillion in value in | [→](https://www.reddit.com/r/technology/comments/1uz6zsr/spacex_stock_drops_to_a_new_low_and_loses_1/) |
+| 3 | 30298 | r/technology | Americans hate AI so much that politicians are starting to lose t | [→](https://www.reddit.com/r/technology/comments/1v1yjbl/americans_hate_ai_so_much_that_politicians_are/) |
+| 4 | 28043 | r/technology | Five tech giants are hiding $1.65tn in AI debt, using the trick t | [→](https://www.reddit.com/r/technology/comments/1v2pmg5/five_tech_giants_are_hiding_165tn_in_ai_debt/) |
+| 5 | 26104 | r/technology | Redditors Are Celebrating the Cutting Down of Flock Surveillance  | [→](https://www.reddit.com/r/technology/comments/1uzhnhb/redditors_are_celebrating_the_cutting_down_of/) |
+| 6 | 24164 | r/technology | Spotify Deleted 75 Million AI-Generated Tracks – and It’s Not Don | [→](https://www.reddit.com/r/technology/comments/1uzyfgn/spotify_deleted_75_million_aigenerated_tracks_and/) |
+| 7 | 23575 | r/technology | Kevin O’Leary claimed opposition to his Utah data center was fuel | [→](https://www.reddit.com/r/technology/comments/1uzac76/kevin_oleary_claimed_opposition_to_his_utah_data/) |
+| 8 | 20197 | r/technology | Flock Said Its Cameras Don't Track People. Then a Reporter Proved | [→](https://www.reddit.com/r/technology/comments/1uz5y37/flock_said_its_cameras_dont_track_people_then_a/) |
+| 9 | 19864 | r/technology | US administration calls for an end to "Transgender Chips" aiming  | [→](https://www.reddit.com/r/technology/comments/1v0py68/us_administration_calls_for_an_end_to_transgender/) |
+| 10 | 19726 | r/technology | Mamdani is targeting deceptive AI-made apartment listings | [→](https://www.reddit.com/r/technology/comments/1uybxvi/mamdani_is_targeting_deceptive_aimade_apartment/) |
+| 11 | 18589 | r/technology | Erin Brockovich's crusade against data centers is going crowd-sou | [→](https://www.reddit.com/r/technology/comments/1v2fq0a/erin_brockovichs_crusade_against_data_centers_is/) |
+| 12 | 17187 | r/technology | People Keep Destroying Flock Cameras Across America. The Paperwor | [→](https://www.reddit.com/r/technology/comments/1v0a6eu/people_keep_destroying_flock_cameras_across/) |
+| 13 | 17073 | r/technology | Nintendo says it has no legal obligation to pass U.S. tariff refu | [→](https://www.reddit.com/r/technology/comments/1v2hhyj/nintendo_says_it_has_no_legal_obligation_to_pass/) |
+| 14 | 16694 | r/technology | US president says ABC and NBC should lose broadcast licenses beca | [→](https://www.reddit.com/r/technology/comments/1uyxfmg/us_president_says_abc_and_nbc_should_lose/) |
+| 15 | 16445 | r/technology | SpaceX stock closes at fresh low of just below $120, after seven  | [→](https://www.reddit.com/r/technology/comments/1v22g7p/spacex_stock_closes_at_fresh_low_of_just_below/) |
+
 ## 🤖 AI и технологии
 
 | # | Score | r/ | Title | Ссылка |
