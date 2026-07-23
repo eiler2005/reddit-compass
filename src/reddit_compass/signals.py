@@ -75,7 +75,7 @@ class SignalCard:
 class SynthesisResult:
     """Результат синтеза: топ-темы для колонок/книги."""
 
-    top_themes: list[str] = field(default_factory=list)
+    top_themes: list[Any] = field(default_factory=list)  # str или {theme, explanation}
     column_ideas: list[str] = field(default_factory=list)
     narrative_shifts: list[str] = field(default_factory=list)
     model: str = ""
@@ -113,7 +113,7 @@ async def _call_qwen(
     async with (
         aiohttp.ClientSession() as session,
         session.post(
-            url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=60)
+            url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)
         ) as resp,
     ):
         if resp.status != 200:
@@ -144,17 +144,23 @@ CLASSIFICATION_PROMPT = (
 
 SYNTHESIS_PROMPT = (
     'Ты — главный редактор книги "Когда интеллект стал дешёвым"'
-    " (3 тома: Человек, Бизнес, Общество).\n\n"
-    "На основе проанализированных сигналов из Reddit"
+    " (3 тома: Человек, Бизнес, Общество). Пиши на русском.\n\n"
+    "На основе проанализированных сигналов из Reddit и СМИ"
     " ({total_posts} постов, {date}):\n\n"
-    "1. **top_themes**: Топ-5 тем (короткие формулировки)\n"
+    "1. **top_themes**: Топ-5 КОНКРЕТНЫХ тем дня. НЕ общие категории"
+    ' (не "AI ethics"), а конкретные сюжеты (например: "AI-агенты'
+    ' выходят из-под контроля: побеги из песочниц и взломы компаний").'
+    " Для каждой темы дай:\n"
+    '   - "theme": конкретная формулировка темы (на русском)\n'
+    '   - "explanation": 2-3 предложения пояснения — что происходит,'
+    " какие посты это показывают, почему это важно для книги/колонок\n"
     "2. **column_ideas**: 3 идеи для колонок в РБК"
-    " (конкретные углы подачи)\n"
+    " (конкретные углы подачи, на русском)\n"
     "3. **narrative_shifts**: Сдвиги в нарративе"
-    " (что изменилось в восприятии AI)\n\n"
-    "Верни JSON с полями top_themes, column_ideas,"
-    " narrative_shifts (массивы строк).\n"
-    "ТОЛЬКО JSON, без пояснений.\n\n"
+    " (что изменилось в восприятии AI, на русском)\n\n"
+    "Верни JSON: top_themes (массив объектов {{theme, explanation}}),"
+    " column_ideas (массив строк), narrative_shifts (массив строк).\n"
+    "ТОЛЬКО JSON, без пояснений вне JSON.\n\n"
     "Сигналы:\n{signals_json}"
 )
 
@@ -319,7 +325,14 @@ def render_signals_report(
     if synthesis.top_themes:
         lines.append("### Топ-темы")
         for i, theme in enumerate(synthesis.top_themes, 1):
-            lines.append(f"{i}. {theme}")
+            if isinstance(theme, dict):
+                title = theme.get("theme", "")
+                explanation = theme.get("explanation", "")
+                lines.append(f"{i}. **{title}**")
+                if explanation:
+                    lines.append(f"   {explanation}")
+            else:
+                lines.append(f"{i}. {theme}")
         lines.append("")
 
     if synthesis.column_ideas:
