@@ -81,6 +81,7 @@ nav a:hover { background: var(--border); }
 
 <nav>
   <a href="#status">📋 Статус</a>
+  <a href="#sources">📚 Источники</a>
   <a href="#mega">🔥 Мега-тренды</a>
   <a href="#ai">🤖 AI/Tech</a>
   <a href="#surveillance">👁 Surveillance</a>
@@ -101,12 +102,46 @@ _PAGE_BOTTOM = """
 </body>
 </html>"""
 
+# Читаемые названия источников
+SOURCE_LABELS = {
+    "nytimes": "NYT",
+    "washingtonpost": "Washington Post",
+    "wired": "Wired",
+    "time": "Time",
+    "vanityfair": "Vanity Fair",
+    "newyorker": "New Yorker",
+    "americanbanker": "American Banker",
+    "foxnews": "Fox News",
+    "ft": "Financial Times",
+    "bbc": "BBC",
+    "guardian": "Guardian",
+    "reuters": "Reuters",
+    "techcrunch": "TechCrunch",
+    "verge": "The Verge",
+    "arstechnica": "Ars Technica",
+    "usatoday": "USA Today",
+    "foxbusiness": "Fox Business",
+    "medium": "Medium",
+    "hackernews": "Hacker News",
+    "producthunt": "ProductHunt",
+}
+
+
+def _source_label(p: dict[str, Any]) -> str:
+    """Читаемое название источника для поста."""
+    source = p.get("source", "reddit")
+    sub = p.get("subreddit", "")
+    if source == "reddit":
+        return f"r/{sub}"
+    # Для ladder/rss: subreddit содержит имя источника
+    label = SOURCE_LABELS.get(sub) or SOURCE_LABELS.get(source) or sub or source
+    return str(label)
+
 
 def _post_row(p: dict[str, Any]) -> str:
     """Одна строка поста с кликабельной ссылкой."""
     score = p.get("score", 0)
     title = p.get("title", "")[:80]
-    sub = p.get("subreddit", "")
     source = p.get("source", "reddit")
     permalink = p.get("permalink", "")
     url = p.get("url", "")
@@ -118,7 +153,7 @@ def _post_row(p: dict[str, Any]) -> str:
     else:
         link = "#"
 
-    src_label = f"r/{sub}" if source == "reddit" else source
+    src_label = _source_label(p)
     comments = p.get("num_comments", 0)
     comments_str = f"💬{comments}" if comments else ""
 
@@ -298,6 +333,20 @@ def render_dashboard(
 
     # Статус запуска (манифест)
     html += _render_manifest(manifest)
+
+    # Сводка проверенных источников (какие СМИ + сколько ссылок)
+    source_counts: dict[str, int] = {}
+    for p in posts:
+        label = _source_label(p)
+        source_counts[label] = source_counts.get(label, 0) + 1
+    if source_counts:
+        html += '<h2 id="sources">📚 Проверенные источники</h2>\n'
+        html += '<p class="meta">Сколько материалов собрано из каждого источника:</p>\n'
+        html += "<table>\n<tr><th>Источник</th><th>Материалов</th></tr>\n"
+        for label, count in sorted(source_counts.items(), key=lambda x: -x[1]):
+            html += f"<tr><td>{label}</td><td class='score'>{count}</td></tr>\n"
+        html += f"<tr><td><b>Итого</b></td><td class='score'><b>{len(posts)}</b></td></tr>\n"
+        html += "</table>\n"
 
     # Мега-тренды
     html += '<h2 id="mega">🔥 Мега-тренды (топ через все источники)</h2>\n'

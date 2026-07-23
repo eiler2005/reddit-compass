@@ -83,4 +83,5 @@ omit = [
   "*/sources/ladder.py",
   "*/sources/producthunt.py",
   "*/api/app.py",
+  "*/api/dashboard.py",
 ]
