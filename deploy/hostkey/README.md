@@ -1,49 +1,122 @@
-# Деплой reddit-compass на HostKey «Hermes» (Roadmap Phase 2)
+# Деплой reddit-compass на HostKey «Hermes»
 
-> Это runbook с обязательными границами, а не набор команд для слепого копирования. Перед любым
-> изменением сверить живое состояние HostKey и актуальные правила в `vps_management` и
-> `router_configuration`. Скелет создан заранее; включать деплой — только по явному подтверждению.
+> Рабочий runbook. Стек развёрнут и работает с 2026-07-22.
 
-## Жёсткие границы
+## Архитектура: VPS + Mac
 
-1. Разворачивать **только на `vps-hostkey-hermes`**. `vps-hetzner-prod` и любые сервисы на Hetzner
-   не трогать.
-2. Отдельный app-owned стек `/opt/reddit-compass`, изолированный от `/opt/stealth`,
-   `/opt/moex-futoi`, `/opt/cheap-intelligence` (своя сеть + volume). Не добавлять сервис в чужие
-   compose-файлы.
-3. **Никаких публичных портов.** reddit-compass — batch-job: пишет в volume, наружу ничего не
-   отдаёт. Публичный `:443`/Caddy SNI появится только с веб-дашбордом (Roadmap Phase 5).
-4. Регистрация владельца, контейнера, volume, backup и расписания — в `vps_management`.
+```
+┌─── VPS HostKey (204.168.239.217) — автоматически, cron ──────────────┐
+│                                                                        │
+│  03:30 UTC  reddit-compass rss       → 135 статей (BBC, Guardian...)  │
+│  03:45 UTC  reddit-compass hn        → 197 stories (HN, 7 дней)       │
+│  04:00 UTC  reddit-compass ladder    → 183 статьи (NYT, WaPo, FT...)  │
+│  04:30 UTC  reddit-compass ph        → 30 продуктов (ProductHunt)     │
+│  04:45 UTC  reddit-compass radar     → отчёт с ссылками               │
+│                                                                        │
+│  rc-api     (FastAPI :8900, 24/7)                                      │
+│  rc-caddy   (reverse proxy, loopback)                                  │
+│  ladder     (paywall proxy, Docker network)                            │
+│                                                                        │
+│  Dashboard: https://rc.204.168.239.217.sslip.io/dashboard             │
+│             (admin / rc-compass-2026, Basic Auth, Let's Encrypt)       │
+└────────────────────────────────────────────────────────────────────────┘
 
-## Раскладка
+┌─── Mac (residential IP) — вручную или launchd ─────────────────────────┐
+│                                                                        │
+│  reddit-compass fetch --stealth   → 737 постов Reddit (18 сабреддитов)│
+│  reddit-compass signals           → LLM-анализ (Qwen API)             │
+│  scp data/ → VPS                  → sync на сервер                     │
+│                                                                        │
+│  Причина: Reddit блокирует датацентр-IP (403).                         │
+│  Только residential IP (Mac) работает для Reddit.                      │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+## Контейнеры
+
+| Контейнер | Образ | Роль | Порт |
+|---|---|---|---|
+| `rc-api` | reddit-compass:latest | FastAPI REST API + Dashboard | 8900 (loopback) |
+| `rc-caddy` | caddy:2-alpine | Reverse proxy | 8900→80 (loopback) |
+| `ladder` | ghcr.io/everywall/ladder | Paywall proxy (12 СМИ) | 8080 (Docker net) |
+| `rc-collector` | reddit-compass:latest | Batch (cron, не daemon) | — |
+
+## Раскладка на VPS
 
 ```
 /opt/reddit-compass/
-  docker-compose.yml     # из deploy/hostkey/ (этот стек)
-  .env                   # секреты и переопределения, НЕ в git
-  # образ собирается из исходников reddit-compass (build: ../..) или тянется из registry
+├── docker-compose.yml      # 3 сервиса (api + caddy + collector)
+├── Dockerfile              # Playwright (batch collector)
+├── Dockerfile.api          # Slim (API, без Chromium)
+├── Caddyfile               # Reverse proxy :80 → api:8900
+├── .env                    # Секреты (LADDER_URL, PRODUCTHUNT_API_KEY, RC_API_*)
+├── src/                    # Исходники (sync с Mac)
+├── config/                 # Профили
+└── data/                   # Volume: snapshots/, compass.db
 ```
 
-## Ночной прогон (host-cron)
-
-Расписание на хосте (не внутри контейнера). Пример строки crontab (UTC), ежедневно в 03:17:
+## Host-cron (текущий)
 
 ```cron
-17 3 * * * cd /opt/reddit-compass && /usr/bin/docker compose run --rm reddit-compass nightly >> /var/log/reddit-compass/nightly.log 2>&1
+30 3 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /var/log/reddit-compass/rss.log 2>&1
+45 3 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /var/log/reddit-compass/hn.log 2>&1
+0  4 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /var/log/reddit-compass/ladder.log 2>&1
+30 4 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /var/log/reddit-compass/ph.log 2>&1
+45 4 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass radar >> /var/log/reddit-compass/radar.log 2>&1
 ```
 
-Данные копятся в volume `reddit-compass_data` (`/data` внутри контейнера): `snapshots/<date>/` и
-`harvests/reddit-compass-<date>.md`.
+## HTTPS-доступ (Caddy на хосте)
+
+```
+/etc/caddy/Caddyfile:
+  https://rc.204.168.239.217.sslip.io {
+      basicauth { admin <bcrypt-hash> }
+      reverse_proxy 127.0.0.1:8900
+  }
+```
+
+- DNS: sslip.io (автоматически, без настройки)
+- TLS: Let's Encrypt (авто)
+- Auth: Basic Auth (admin / rc-compass-2026)
+
+## Ladder (paywall proxy)
+
+```bash
+# Запущен как отдельный контейнер, подключён к reddit-compass_net:
+docker run -d --restart always --name ladder -p 127.0.0.1:8080:8080 \
+  --env RULESET=https://raw.githubusercontent.com/everywall/ladder-rules/main/ruleset.yaml \
+  ghcr.io/everywall/ladder:latest
+docker network connect reddit-compass_net ladder
+
+# Из контейнера reddit-compass доступен как http://ladder:8080
+# .env: LADDER_URL=http://ladder:8080
+```
+
+## Жёсткие границы
+
+1. Только `vps-hostkey-hermes`. Hetzner и другие стеки не трогать.
+2. Изолированный стек `/opt/reddit-compass` (своя сеть + volume).
+3. Reddit fetch — **только с Mac** (residential IP). С VPS — 403.
+4. UFW: порт 8900 открыт. Остальное — default deny.
+5. Секреты в `.env` (gitignored). Никогда в git.
 
 ## Проверки
 
 ```bash
-docker compose config                     # валидация стека
-docker compose run --rm reddit-compass all
-docker run --rm -v reddit-compass_data:/d alpine ls -R /d/snapshots | head
+# Health
+curl -u admin:rc-compass-2026 https://rc.204.168.239.217.sslip.io/health
+
+# Dashboard
+open https://rc.204.168.239.217.sslip.io/dashboard
+
+# Логи
+ssh deploy@204.168.239.217 "tail -5 /var/log/reddit-compass/rss.log"
+
+# Данные
+ssh deploy@204.168.239.217 "docker exec rc-api ls /data/snapshots/"
 ```
 
 ## Резервные копии
 
-Бэкапить volume `reddit-compass_data` по общему регламенту `vps_management` (снапшоты JSONL и
-Markdown — единственное состояние сервиса; секретов в данных нет).
+Volume `reddit-compass_data` — по регламенту `vps_management`.
+Секретов в данных нет (только JSONL + SQLite + Markdown).
