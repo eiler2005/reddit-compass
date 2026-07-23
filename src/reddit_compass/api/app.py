@@ -200,13 +200,61 @@ details summary { cursor:pointer; color:var(--accent); }
                     )
                 html += "</table>\n"
 
-            # Ссылка на radar
+            # Ссылки: детальный дашборд + radar
+            html += (
+                f'<p style="margin-top:0.5rem">'
+                f'<a href="/runs/{run["date"]}">📊 Дашборд запуска →</a>'
+            )
             if run["has_radar"]:
-                html += f'<p style="margin-top:0.5rem"><a href="/runs/{run["date"]}/radar">📄 Trend radar →</a></p>\n'
+                html += f' &nbsp; <a href="/runs/{run["date"]}/radar">📄 Trend radar →</a>'
+            html += "</p>\n"
 
             html += "</div></details>\n</div>\n"
 
         html += "</body></html>"
+        return html
+
+    @app.get("/runs/{date}", response_class=HTMLResponse, tags=["system"])
+    def run_detail(date: str) -> str:
+        """Полный дашборд по конкретному запуску (из JSONL-файлов)."""
+        from pathlib import Path as _Path
+
+        from ..manifest import load_manifest
+        from .dashboard import load_posts_from_snapshot, render_dashboard
+
+        data_dir = _Path(os.environ.get("DATA_DIR", "data"))
+        snap_dir = data_dir / "snapshots" / date
+        if not snap_dir.exists():
+            return (
+                f"<html><body><h1>404</h1><p>Snapshot {date} не найден.</p>"
+                f"<a href='/runs'>← Запуски</a></body></html>"
+            )
+
+        posts = load_posts_from_snapshot(snap_dir)
+        manifest = load_manifest(snap_dir)
+        manifest_data = manifest.to_dict() if manifest else None
+
+        # Статистика из файлов
+        sources: dict[str, int] = {}
+        for p in posts:
+            src = p.get("source", "reddit")
+            sources[src] = sources.get(src, 0) + 1
+
+        stats = {
+            "total_posts": len(posts),
+            "total_snapshots": 1,
+            "total_signals": 0,
+            "latest_snapshot": date,
+            "top_subreddits": [],
+        }
+
+        html = render_dashboard(stats, posts, manifest_data)
+        # Добавляем навигацию назад
+        html = html.replace(
+            "<h1>🧭 reddit-compass</h1>",
+            f"<div style='margin-bottom:0.5rem'><a href='/runs' style='color:#4a9eff'>← Запуски</a></div>"
+            f"<h1>🧭 reddit-compass · {date}</h1>",
+        )
         return html
 
     @app.get("/runs/{date}/radar", response_class=HTMLResponse, tags=["system"])

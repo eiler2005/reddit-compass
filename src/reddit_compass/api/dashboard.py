@@ -75,6 +75,7 @@ nav a:hover { background: var(--border); }
   <div class="stat"><div class="num">{reddit_count}</div><div class="label">Reddit</div></div>
   <div class="stat"><div class="num">{hn_count}</div><div class="label">HN</div></div>
   <div class="stat"><div class="num">{rss_count}</div><div class="label">RSS</div></div>
+  <div class="stat"><div class="num">{ladder_count}</div><div class="label">Ladder</div></div>
   <div class="stat"><div class="num">{subreddits_count}</div><div class="label">Subreddits</div></div>
 </div>
 
@@ -87,7 +88,8 @@ nav a:hover { background: var(--border); }
   <a href="#business">🏪 Бизнес</a>
   <a href="#society">🌍 Общество</a>
   <a href="#hn">💬 HN</a>
-  <a href="#rss">📡 СМИ</a>
+  <a href="#rss">📡 СМИ RSS</a>
+  <a href="#ladder">🪜 СМИ Ladder</a>
 </nav>
 """
 
@@ -175,6 +177,36 @@ def _render_manifest(manifest: dict[str, Any] | None) -> str:
     return html
 
 
+def load_posts_from_snapshot(snap_dir: Any) -> list[dict[str, Any]]:
+    """Загружает посты из JSONL-файлов snapshot-директории."""
+    import json as _json
+    from pathlib import Path
+
+    snap = Path(snap_dir)
+    posts: list[dict[str, Any]] = []
+    source_map = {
+        "posts.jsonl": "reddit",
+        "hackernews.jsonl": "hackernews",
+        "rss.jsonl": "rss",
+        "ladder.jsonl": "ladder",
+        "producthunt.jsonl": "producthunt",
+    }
+    for fname, source in source_map.items():
+        fp = snap / fname
+        if not fp.exists():
+            continue
+        for line in fp.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                p = _json.loads(line)
+                p["source"] = source
+                posts.append(p)
+            except _json.JSONDecodeError:
+                continue
+    return posts
+
+
 def render_dashboard(
     stats: dict[str, Any], posts: list[dict[str, Any]], manifest: dict[str, Any] | None = None
 ) -> str:
@@ -183,17 +215,21 @@ def render_dashboard(
     # Разделяем по источникам (определяем по subreddit или source)
     def _get_source(p: dict[str, Any]) -> str:
         sub = p.get("subreddit", "")
-        if sub == "hackernews" or p.get("source") == "hackernews":
+        src = p.get("source", "")
+        if sub == "hackernews" or src == "hackernews":
             return "hackernews"
-        if sub == "producthunt" or p.get("source") == "producthunt":
+        if sub == "producthunt" or src == "producthunt":
             return "producthunt"
-        if p.get("source") == "rss" or p.get("monitoring_type") == "rss":
+        if src == "ladder" or p.get("monitoring_type") == "ladder":
+            return "ladder"
+        if src == "rss" or p.get("monitoring_type") == "rss":
             return "rss"
         return "reddit"
 
     reddit = [p for p in posts if _get_source(p) == "reddit"]
     hn = [p for p in posts if _get_source(p) == "hackernews"]
     rss = [p for p in posts if _get_source(p) == "rss"]
+    ladder = [p for p in posts if _get_source(p) == "ladder"]
 
     # Кластеры Reddit
     ai_subs = {
@@ -257,6 +293,7 @@ def render_dashboard(
     html = html.replace("{reddit_count}", str(len(reddit)))
     html = html.replace("{hn_count}", str(len(hn)))
     html = html.replace("{rss_count}", str(len(rss)))
+    html = html.replace("{ladder_count}", str(len(ladder)))
     html = html.replace("{subreddits_count}", str(n_subs))
 
     # Статус запуска (манифест)
@@ -306,8 +343,14 @@ def render_dashboard(
 
     # RSS
     if rss:
-        html += '<h2 id="rss">📡 СМИ (Guardian, Reuters, TechCrunch, Verge)</h2>\n'
+        html += '<h2 id="rss">📡 СМИ: RSS (BBC, Guardian, Reuters, TechCrunch, Verge, Ars)</h2>\n'
         for p in rss[:15]:
+            html += _post_row(p)
+
+    # Ladder (paywall СМИ)
+    if ladder:
+        html += '<h2 id="ladder">🪜 СМИ: Ladder (NYT, WaPo, FT, Wired, Time, VF, New Yorker)</h2>\n'
+        for p in ladder[:20]:
             html += _post_row(p)
 
     html += _PAGE_BOTTOM
