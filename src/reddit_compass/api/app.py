@@ -97,7 +97,150 @@ def create_app() -> FastAPI:
 
         return render_dashboard(stats, posts, manifest_data)
 
-    # ── OAuth2 token ────────────────────────────────────────────────────────
+    # ── Runs: история запусков ────────────────────────────────────────────────
+
+    @app.get("/runs", response_class=HTMLResponse, tags=["system"])
+    def runs_page(db: sqlite3.Connection = Depends(_get_db)) -> str:
+        from pathlib import Path as _Path
+
+        from ..manifest import load_manifest
+
+        data_dir = _Path(os.environ.get("DATA_DIR", "data"))
+        snapshots_dir = data_dir / "snapshots"
+
+        # Собираем все snapshot-даты
+        runs: list[dict[str, Any]] = []
+        if snapshots_dir.exists():
+            for d in sorted(snapshots_dir.iterdir(), reverse=True):
+                if not d.is_dir():
+                    continue
+                date = d.name
+                manifest = load_manifest(d)
+                # Считаем файлы
+                files = {f.name: 0 for f in d.glob("*.jsonl")}
+                for f in d.glob("*.jsonl"):
+                    files[f.name] = sum(1 for line in f.read_text().splitlines() if line.strip())
+                has_radar = (d / "trend-radar.md").exists()
+
+                runs.append(
+                    {
+                        "date": date,
+                        "manifest": manifest.to_dict() if manifest else None,
+                        "files": files,
+                        "total": sum(files.values()),
+                        "has_radar": has_radar,
+                    }
+                )
+
+        # Рендерим HTML
+        html = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>🧭 Запуски — reddit-compass</title>
+<style>
+:root { --bg:#0f0f1a; --fg:#e0e0e0; --accent:#4a9eff; --muted:#777; --card:#1a1a2e; --border:#2a2a4a; --green:#51cf66; --red:#ff6b6b; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,'Segoe UI',Roboto,monospace; background:var(--bg); color:var(--fg); padding:1.5rem; max-width:1000px; margin:0 auto; line-height:1.5; }
+h1 { color:var(--accent); margin-bottom:1rem; }
+a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+.run { background:var(--card); border:1px solid var(--border); border-radius:8px; margin:1rem 0; padding:1rem; }
+.run-header { display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
+.run-date { font-size:1.1rem; font-weight:bold; }
+.run-status { font-size:0.85rem; }
+.ok { color:var(--green); } .err { color:var(--red); } .warn { color:#ffd43b; }
+.run-details { margin-top:0.8rem; font-size:0.85rem; color:var(--muted); }
+.run-details table { width:100%; border-collapse:collapse; margin-top:0.5rem; }
+.run-details td, .run-details th { padding:0.3rem 0.5rem; border-bottom:1px solid var(--border); text-align:left; }
+.run-details th { color:var(--muted); font-weight:normal; }
+.badge { display:inline-block; background:var(--border); border-radius:4px; padding:0.1rem 0.5rem; margin:0.1rem; font-size:0.75rem; }
+.nav { margin-bottom:1rem; } .nav a { margin-right:1rem; }
+details summary { cursor:pointer; color:var(--accent); }
+</style></head><body>
+<h1>🧭 Запуски</h1>
+<div class="nav"><a href="/dashboard">← Дашборд</a> <a href="/docs">API</a></div>
+"""
+        for run in runs:
+            m = run["manifest"]
+            if m:
+                status = m.get("status", "?")
+                icon = {"done": "✅", "partial": "⚠️", "running": "⏳"}.get(status, "❓")
+                started = m.get("started_at", "")[:16].replace("T", " ")
+                duration = f"{m.get('duration_sec', 0):.0f}с"
+                status_cls = (
+                    "ok" if status == "done" else ("warn" if status == "partial" else "err")
+                )
+            else:
+                icon = "📁"
+                started = run["date"]
+                duration = "—"
+                status_cls = ""
+
+            html += f'<div class="run">\n'
+            html += f'<div class="run-header"><span class="run-date">{icon} {run["date"]}</span>'
+            html += f'<span class="run-status {status_cls}">{started} · {duration} · {run["total"]} items</span></div>\n'
+
+            # Детали (разворачиваемые)
+            html += '<details><summary>Подробнее</summary><div class="run-details">\n'
+
+            # Файлы
+            html += "<table><tr><th>Файл</th><th>Строк</th></tr>\n"
+            for fname, count in sorted(run["files"].items()):
+                html += f"<tr><td>{fname}</td><td>{count}</td></tr>\n"
+            html += "</table>\n"
+
+            # Манифест (источники)
+            if m and m.get("sources"):
+                html += "<table><tr><th>Источник</th><th>Статус</th><th>Собрано</th><th>Время</th></tr>\n"
+                for s in m["sources"]:
+                    sicon = {"ok": "✅", "error": "❌", "empty": "⚠️", "skipped": "⏭"}.get(
+                        s.get("status", ""), "❓"
+                    )
+                    html += (
+                        f"<tr><td>{s.get('name', '')}</td><td>{sicon} {s.get('status', '')}</td>"
+                        f"<td>{s.get('count', 0)}</td><td>{s.get('duration_sec', 0):.0f}с</td></tr>\n"
+                    )
+                html += "</table>\n"
+
+            # Ссылка на radar
+            if run["has_radar"]:
+                html += f'<p style="margin-top:0.5rem"><a href="/runs/{run["date"]}/radar">📄 Trend radar →</a></p>\n'
+
+            html += "</div></details>\n</div>\n"
+
+        html += "</body></html>"
+        return html
+
+    @app.get("/runs/{date}/radar", response_class=HTMLResponse, tags=["system"])
+    def run_radar(date: str) -> str:
+        """Показывает trend-radar.md как HTML (простой рендер)."""
+        from pathlib import Path as _Path
+
+        data_dir = _Path(os.environ.get("DATA_DIR", "data"))
+        radar_path = data_dir / "snapshots" / date / "trend-radar.md"
+        if not radar_path.exists():
+            return f"<html><body><h1>404</h1><p>Radar for {date} not found.</p><a href='/runs'>← Back</a></body></html>"
+
+        content = radar_path.read_text(encoding="utf-8")
+        # Простой рендер: markdown → HTML (минимальный)
+        import re as _re
+
+        # Заменяем markdown-ссылки [text](url) на <a>
+        content = _re.sub(
+            r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" target="_blank">\1</a>', content
+        )
+        # Заголовки
+        content = _re.sub(r"^### (.+)$", r"<h3>\1</h3>", content, flags=_re.MULTILINE)
+        content = _re.sub(r"^## (.+)$", r"<h2>\1</h2>", content, flags=_re.MULTILINE)
+        content = _re.sub(r"^# (.+)$", r"<h1>\1</h1>", content, flags=_re.MULTILINE)
+        # Таблицы → <pre> (простой рендер)
+        content = _re.sub(r"\|(.+)\|", r"<code>|\1|</code>", content)
+        content = content.replace("\n", "<br>\n")
+
+        return (
+            f'<html><head><meta charset="utf-8"><title>Radar {date}</title>'
+            f"<style>body{{font-family:monospace;background:#0f0f1a;color:#e0e0e0;padding:2rem;max-width:1100px;margin:0 auto;line-height:1.6;}}"
+            f"a{{color:#4a9eff;}}h1,h2,h3{{color:#4a9eff;}}code{{display:block;font-size:0.8rem;color:#ccc;}}</style></head>"
+            f'<body><a href="/runs">← Запуски</a> <a href="/dashboard">Дашборд</a><hr>{content}</body></html>'
+        )
 
     @app.post("/oauth/token", response_model=TokenResponse, tags=["auth"])
     def oauth_token(body: TokenRequest) -> TokenResponse:
