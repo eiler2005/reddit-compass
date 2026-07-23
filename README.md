@@ -23,25 +23,33 @@ That's 45 minutes of tab-switching before your first coffee. And you *still* mis
 
 ### Every night, on its own
 
-| Cadence | What happens | Why you care |
+Runs in the Qwen discount window (**17:00–03:00 Moscow = 14:00–00:00 UTC**) so LLM
+analysis uses the cheaper off-peak rate.
+
+| Time (UTC / MSK) | What happens | Why you care |
 |---|---|---|
-| 03:17 nightly | Collects 400+ posts from 18 Reddit subreddits (Playwright, stealth mode) | The "voice of the street" — raw, unfiltered, real |
-| 03:30 nightly | Pulls 50+ stories from Hacker News (Algolia API) | What developers are building and arguing about |
-| 03:45 nightly | Fetches 50+ articles from BBC, Guardian, Reuters, TechCrunch, Verge, Ars (RSS) | The mainstream narrative — what the masses hear tomorrow |
-| 04:00 nightly | Bypasses paywalls on NYT, WaPo, FT, Wired, Medium + 7 more (Ladder proxy) | The *real* analysis behind the paywall |
-| 04:15 nightly | Qwen LLM reads all posts → pain points, business relevance (1–10), themes | Not just data — *intelligence* |
-| 04:30 nightly | Cross-source synthesis: "This theme appeared in Reddit + HN + NYT" | **Strong signal** = topic in 3+ sources |
-| 04:30 nightly | Syncs to VPS → REST API serves it to your tools | Your Practicum, digest, or notebook gets fresh data |
+| 14:00 / 17:00 | 227 articles from BBC, Guardian, Reuters, TechCrunch, Verge, Ars (RSS) | The mainstream narrative — what the masses hear tomorrow |
+| 14:10 / 17:10 | 197 stories from Hacker News (Algolia API, last 7 days) | What developers are building and arguing about |
+| 14:20 / 17:20 | 183 articles from NYT, WaPo, FT, Wired, Medium + 7 more (Ladder paywall proxy) | The *real* analysis behind the paywall |
+| 14:30 / 17:30 | 30 products from ProductHunt (GraphQL) | What's launching right now |
+| 15:00 / 18:00 | Qwen LLM reads all posts → pain points, relevance (1–10), deep themes | Not just data — *intelligence* |
+| 15:30 / 18:30 | Cross-source synthesis + report with links | **Strong signal** = topic in 3+ sources |
+
+> Reddit (737 posts, 18 subreddits) is collected manually from a residential IP
+> (Reddit blocks datacenter IPs) and synced to the VPS.
 
 You wake up to a report that says:
 
 > **Top themes today:**
-> 1. "AI replaced my job, then they rehired humans" — viral on r/AskReddit + HN + NYT
-> 2. "Vibe coding fixes one thing, breaks ten" — r/vibecoding + Ars Technica
-> 3. "One person + AI = $1M company" — Medium + ProductHunt + r/Entrepreneur
+> 1. **AI-агенты выходят из-под контроля: побеги из песочниц и взломы компаний**
+>    Продвинутые модели самостоятельно находят уязвимости и выходят за пределы
+>    изолированных сред. Критично для тома «Общество»...
+> 2. **Физическое сопротивление строительству ИИ-дата-центров**
+>    Активисты мобилизуют общественность против экологического ущерба...
 >
-> **Column ideas:** [3 specific angles with source links]
-> **Pain points:** [12 extracted from today's posts]
+> **Column ideas:** «ИИ-колониализм» и бунт на местах · Конец эпохи AI-washing ·
+> Агент вышел из-под контроля: кто несёт ответственность?
+> **Pain points:** AI safety failures, sandbox escape, AI feature bloat...
 
 ### When you ask it
 
@@ -157,12 +165,19 @@ An optional local proxy for other approved public read-only sources is documente
 only in gitignored operations notes and secret files; never move it into tracked
 configuration or `REDDIT_COMPASS_PROXIES`.
 
-### Nightly automation (macOS)
+### Nightly automation
+
+**VPS** (RSS, HN, Ladder, PH, LLM, radar) — host-cron in the Qwen discount window
+(14:00–15:30 UTC = 17:00–18:30 MSK). See [`deploy/hostkey/README.md`](deploy/hostkey/README.md).
+
+**Reddit** (residential IP) — collected manually from Mac (Reddit blocks datacenter IPs),
+then synced to the VPS:
 
 ```bash
-cp scripts/com.reddit-compass.nightly.plist ~/Library/LaunchAgents/
-launchctl load ~/Library/LaunchAgents/com.reddit-compass.nightly.plist
-# Runs at 03:17 daily: fetch + HN + RSS + LLM + sync to VPS
+uv run reddit-compass fetch --stealth     # collect on Mac (~11 min)
+# sync to VPS (via chat or scp)
+scp data/snapshots/$(date +%F)/posts.jsonl deploy@VPS:/tmp/
+ssh deploy@VPS "docker cp /tmp/posts.jsonl rc-api:/data/snapshots/$(date +%F)/"
 ```
 
 ### VPS deployment
@@ -208,7 +223,7 @@ curl -H "Authorization: Bearer <token>" \
 Not just collection — **intelligence**.
 
 ```bash
-export DASHSCOPE_API_KEY=sk-...  # QwenCloud pay-as-you-go: https://home.qwencloud.com/api-keys
+export QWEN_TOKEN_PLAN_KEY=sk-...  # QwenCloud: https://home.qwencloud.com/api-keys
 uv run reddit-compass signals
 ```
 
@@ -219,7 +234,36 @@ For each post, the LLM extracts:
 - **Book relevance** (1–10) — how relevant for the narrative
 - **Themes** — key topics (1–3 per post)
 
-Then synthesizes: **top 5 themes**, **3 column ideas**, **narrative shifts**.
+Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
+**narrative shifts**, **top-10 by book relevance**, **all pain points**.
+
+### Model pyramid (price / quality)
+
+| Task | Model | Why |
+|---|---|---|
+| **Synthesis** (themes, column ideas, narrative shifts) | `qwen3.8-max-preview` | Complex, few calls, off-peak discount 17:00–03:00 MSK |
+| **Classification** (per-post pain points, relevance) | `qwen3.7-plus` | High volume, balanced price/quality |
+| **Simple tasks** (filtering, summarization) | `qwen3.6-flash` | Cheapest |
+
+---
+
+## Dashboard & Trend Radar
+
+Two views, two purposes:
+
+| View | URL | Purpose |
+|---|---|---|
+| **📊 Dashboard** | `/dashboard`, `/runs/{date}` | Operational: what was collected, sources, posts by cluster, themes→posts |
+| **🤖 Trend Radar** | `/runs/{date}/radar` | Analytical: LLM synthesis — deep themes, column ideas, narrative shifts |
+
+```
+https://rc.204.168.239.217.sslip.io/dashboard    # general dashboard
+https://rc.204.168.239.217.sslip.io/runs         # run history + status
+https://rc.204.168.239.217.sslip.io/runs/2026-07-23        # 📊 run dashboard (posts)
+https://rc.204.168.239.217.sslip.io/runs/2026-07-23/radar  # 🤖 trend radar (analysis)
+```
+
+Auth: Basic Auth (`admin` / `rc-compass-2026`), Let's Encrypt TLS.
 
 ---
 
@@ -259,7 +303,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | Language | Python 3.12, strict mypy |
 | Collection | Playwright, aiohttp, Ladder proxy |
 | Storage | JSONL + SQLite |
-| LLM | Qwen API (qwen-plus + qwen-max) |
+| LLM | Qwen API — pyramid: qwen3.8-max-preview / qwen3.7-plus / qwen3.6-flash |
 | API | FastAPI + uvicorn + JWT |
 | Deploy | Docker + Caddy + host-cron |
 | Quality | ruff, mypy strict, pytest (84%), detect-secrets |
