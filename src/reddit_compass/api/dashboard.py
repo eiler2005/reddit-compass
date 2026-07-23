@@ -334,19 +334,52 @@ def render_dashboard(
     # Статус запуска (манифест)
     html += _render_manifest(manifest)
 
-    # Сводка проверенных источников (какие СМИ + сколько ссылок)
+    # Сводка проверенных источников (все ожидаемые + честный статус)
     source_counts: dict[str, int] = {}
     for p in posts:
         label = _source_label(p)
         source_counts[label] = source_counts.get(label, 0) + 1
-    if source_counts:
-        html += '<h2 id="sources">📚 Проверенные источники</h2>\n'
-        html += '<p class="meta">Сколько материалов собрано из каждого источника:</p>\n'
-        html += "<table>\n<tr><th>Источник</th><th>Материалов</th></tr>\n"
-        for label, count in sorted(source_counts.items(), key=lambda x: -x[1]):
-            html += f"<tr><td>{label}</td><td class='score'>{count}</td></tr>\n"
-        html += f"<tr><td><b>Итого</b></td><td class='score'><b>{len(posts)}</b></td></tr>\n"
-        html += "</table>\n"
+
+    # Reddit считаем отдельно (r/*)
+    reddit_total = sum(c for lbl, c in source_counts.items() if lbl.startswith("r/"))
+    # Полный список ожидаемых СМИ
+    expected_media = [
+        "Hacker News",
+        "ProductHunt",
+        "BBC",
+        "Guardian",
+        "Reuters",
+        "TechCrunch",
+        "The Verge",
+        "Ars Technica",
+        "USA Today",
+        "Fox Business",
+        "Medium",
+        "NYT",
+        "Washington Post",
+        "Financial Times",
+        "Wired",
+        "Time",
+        "Vanity Fair",
+        "New Yorker",
+        "American Banker",
+        "Fox News",
+    ]
+
+    html += '<h2 id="sources">📚 Проверенные источники</h2>\n'
+    html += '<p class="meta">Полный список: что проверено и сколько собрано:</p>\n'
+    html += "<table>\n<tr><th>Источник</th><th>Статус</th><th>Материалов</th></tr>\n"
+    html += (
+        f"<tr><td>Reddit (18 сабреддитов)</td>"
+        f"<td>{'✅' if reddit_total else '❌ не собрано'}</td>"
+        f"<td class='score'>{reddit_total or '—'}</td></tr>\n"
+    )
+    for src in expected_media:
+        count = source_counts.get(src, 0)
+        status = "✅" if count else "❌ не собрано"
+        html += f"<tr><td>{src}</td><td>{status}</td><td class='score'>{count or '—'}</td></tr>\n"
+    html += f"<tr><td><b>Итого</b></td><td></td><td class='score'><b>{len(posts)}</b></td></tr>\n"
+    html += "</table>\n"
 
     # Мега-тренды
     html += '<h2 id="mega">🔥 Мега-тренды (топ через все источники)</h2>\n'
