@@ -6,12 +6,14 @@
 
 ```
 ┌─── VPS HostKey (204.168.239.217) — автоматически, cron ──────────────┐
+│  Скидка Qwen 17:00–03:00 МСК = 14:00–00:00 UTC                        │
 │                                                                        │
-│  03:30 UTC  reddit-compass rss       → 135 статей (BBC, Guardian...)  │
-│  03:45 UTC  reddit-compass hn        → 197 stories (HN, 7 дней)       │
-│  04:00 UTC  reddit-compass ladder    → 183 статьи (NYT, WaPo, FT...)  │
-│  04:30 UTC  reddit-compass ph        → 30 продуктов (ProductHunt)     │
-│  04:45 UTC  reddit-compass radar     → отчёт с ссылками               │
+│  14:00 UTC  reddit-compass rss       → 227 статей (BBC, Guardian...)  │
+│  14:10 UTC  reddit-compass hn        → 197 stories (HN, 7 дней)       │
+│  14:20 UTC  reddit-compass ladder    → 183 статьи (NYT, WaPo, FT...)  │
+│  14:30 UTC  reddit-compass ph        → 30 продуктов (ProductHunt)     │
+│  15:00 UTC  reddit-compass signals   → LLM-анализ (qwen3.8-max)       │
+│  15:30 UTC  reddit-compass radar     → отчёт с ссылками + темами      │
 │                                                                        │
 │  rc-api     (FastAPI :8900, 24/7)                                      │
 │  rc-caddy   (reverse proxy, loopback)                                  │
@@ -55,15 +57,31 @@
 └── data/                   # Volume: snapshots/, compass.db
 ```
 
-## Host-cron (текущий)
+## Host-cron (скидка Qwen 17:00–03:00 МСК = 14:00–00:00 UTC)
+
+LLM-анализ (signals) запускается в окне скидки на qwen3.8-max-preview.
+Весь nightly заканчивается до 03:00 МСК (00:00 UTC).
 
 ```cron
-30 3 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /var/log/reddit-compass/rss.log 2>&1
-45 3 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /var/log/reddit-compass/hn.log 2>&1
-0  4 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /var/log/reddit-compass/ladder.log 2>&1
-30 4 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /var/log/reddit-compass/ph.log 2>&1
-45 4 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass radar >> /var/log/reddit-compass/radar.log 2>&1
+# Сбор данных (без LLM, бесплатно)
+0  14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1
+10 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1
+20 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1
+30 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1
+# LLM-анализ (в окне скидки 17:00-03:00 МСК)
+0  15 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass signals >> /tmp/rc-signals.log 2>&1
+30 15 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass radar >> /tmp/rc-radar.log 2>&1
 ```
+
+> Reddit fetch — вручную с Mac (residential IP), sync через чат. С VPS Reddit блокирует (403).
+
+## Модельная пирамида (цена/качество)
+
+| Задача | Модель | Почему |
+|---|---|---|
+| Синтез (темы, идеи колонок, сдвиги) | `qwen3.8-max-preview` | Сложное, мало вызовов, скидка 17:00–03:00 МСК |
+| Классификация постов (pain points, relevance) | `qwen3.7-plus` | Массово, баланс цена/качество |
+| Простые задачи (фильтрация, саммари) | `qwen3.6-flash` | Самый дешёвый |
 
 ## HTTPS-доступ (Caddy на хосте)
 
