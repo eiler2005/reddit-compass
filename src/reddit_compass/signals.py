@@ -19,13 +19,33 @@ from .models import PostCard
 
 logger = logging.getLogger("reddit_compass")
 
-DASHSCOPE_BASE_URL = os.environ.get(
-    "DASHSCOPE_BASE_URL", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-)
-DEFAULT_MODEL = "qwen-plus"
-SYNTHESIS_MODEL = "qwen-max"
 BATCH_SIZE = 10  # постов на один LLM-запрос
 MAX_CONCURRENT = 3
+
+# Конфигурации провайдеров (ключ → base_url + модели)
+_TOKEN_PLAN_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+_DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+
+
+def _get_api_config() -> tuple[str, str, str, str]:
+    """Возвращает (api_key, base_url, classification_model, synthesis_model).
+
+    Приоритет: QWEN_TOKEN_PLAN_KEY (token-plan) → QWEN_Pay_As_You_Go / DASHSCOPE_API_KEY.
+    """
+    # Token-plan ключ (qwen3.7 модели)
+    token_plan_key = os.environ.get("QWEN_TOKEN_PLAN_KEY", "")
+    if token_plan_key:
+        return token_plan_key, _TOKEN_PLAN_URL, "qwen3.7-plus", "qwen3.7-max"
+    # Pay-as-you-go / стандартный ключ (qwen-plus/max)
+    for var in ("DASHSCOPE_API_KEY", "QWEN_Pay_As_You_Go_PLAN_KEY"):
+        key = os.environ.get(var, "")
+        if key:
+            base_url = os.environ.get("DASHSCOPE_BASE_URL", _DASHSCOPE_INTL_URL)
+            return key, base_url, "qwen-plus", "qwen-max"
+    raise ValueError(
+        "Ключ Qwen не установлен. Задайте QWEN_TOKEN_PLAN_KEY "
+        "или DASHSCOPE_API_KEY. Получить: https://home.qwencloud.com/api-keys"
+    )
 
 
 @dataclass
@@ -65,33 +85,26 @@ class SynthesisResult:
 
 
 def _get_api_key() -> str:
-    # Проверяем несколько имён ключа (QwenCloud / DashScope)
-    for var in ("DASHSCOPE_API_KEY", "QWEN_Pay_As_You_Go_PLAN_KEY", "QWEN_TOKEN_PLAN_KEY"):
-        key = os.environ.get(var, "")
-        if key:
-            return key
-    raise ValueError(
-        "Ключ Qwen не установлен. Задайте DASHSCOPE_API_KEY "
-        "(или QWEN_Pay_As_You_Go_PLAN_KEY). Получить: https://home.qwencloud.com/api-keys"
-    )
+    """Возвращает API-ключ (для обратной совместимости)."""
+    return _get_api_config()[0]
 
 
 async def _call_qwen(
     messages: list[dict[str, str]],
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
     temperature: float = 0.3,
 ) -> str:
     """Вызов Qwen API (OpenAI-compatible, через aiohttp)."""
     import aiohttp
 
-    api_key = _get_api_key()
-    url = f"{DASHSCOPE_BASE_URL}/chat/completions"
+    api_key, base_url, default_model, _ = _get_api_config()
+    url = f"{base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": model,
+        "model": model or default_model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": 2000,
@@ -148,11 +161,14 @@ SYNTHESIS_PROMPT = (
 
 async def analyze_posts(
     cards: list[PostCard],
-    model: str = DEFAULT_MODEL,
+    model: str | None = None,
 ) -> list[SignalCard]:
     """Анализирует посты батчами через Qwen API."""
     if not cards:
         return []
+
+    _, _, classification_model, _ = _get_api_config()
+    model = model or classification_model
 
     signals: list[SignalCard] = []
     batches = [cards[i : i + BATCH_SIZE] for i in range(0, len(cards), BATCH_SIZE)]
@@ -227,9 +243,11 @@ async def synthesize(
     signals: list[SignalCard],
     snapshot_date: str,
     total_posts: int,
-    model: str = SYNTHESIS_MODEL,
+    model: str | None = None,
 ) -> SynthesisResult:
     """Синтез: топ-темы, идеи для колонок, сдвиги нарратива."""
+    _, _, _, synthesis_model = _get_api_config()
+    model = model or synthesis_model
     if not signals:
         return SynthesisResult(model=model)
 
