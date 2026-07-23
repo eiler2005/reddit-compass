@@ -208,7 +208,7 @@ curl -H "Authorization: Bearer <token>" \
 Not just collection — **intelligence**.
 
 ```bash
-export DASHSCOPE_API_KEY=sk-...
+export DASHSCOPE_API_KEY=sk-...  # QwenCloud pay-as-you-go: https://home.qwencloud.com/api-keys
 uv run reddit-compass signals
 ```
 
