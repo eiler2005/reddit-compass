@@ -80,7 +80,7 @@ def create_app() -> FastAPI:
         from .dashboard import render_dashboard
 
         stats = query_stats(db)
-        posts = query_posts(db, limit=15)
+        posts = query_posts(db, limit=1000)
         return render_dashboard(stats, posts)
 
     # ── OAuth2 token ────────────────────────────────────────────────────────
