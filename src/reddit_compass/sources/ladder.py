@@ -144,8 +144,10 @@ def _extract_articles_from_listing(html: str, base_url: str) -> list[dict[str, s
         if href.startswith(("#", "javascript:", "mailto:")):
             continue
 
-        # Полный URL
-        if href.startswith("/"):
+        # Полный URL (Ladder может возвращать /https://... — чистим)
+        if href.startswith("/https://") or href.startswith("/http://"):
+            full_url = href[1:]  # убираем ведущий /
+        elif href.startswith("/"):
             full_url = f"{base_url}{href}"
         elif href.startswith("http"):
             full_url = href
