@@ -56,13 +56,6 @@ LADDER_SOURCES: list[LadderSource] = [
         base_url="https://time.com",
         search_paths=["/section/tech/", "/section/business/"],
     ),
-    LadderSource(
-        name="usatoday",
-        cluster="mainstream",
-        country="US",
-        base_url="https://www.usatoday.com",
-        search_paths=["/tech/", "/money/"],
-    ),
     # Кластер 2: Бизнес/финансы
     LadderSource(
         name="ft",
@@ -77,13 +70,6 @@ LADDER_SOURCES: list[LadderSource] = [
         country="US",
         base_url="https://www.americanbanker.com",
         search_paths=["/news"],
-    ),
-    LadderSource(
-        name="foxbusiness",
-        cluster="business",
-        country="US",
-        base_url="https://www.foxbusiness.com",
-        search_paths=["/technology", "/economy"],
     ),
     # Кластер 3: Tech/культура
     LadderSource(
@@ -106,14 +92,6 @@ LADDER_SOURCES: list[LadderSource] = [
         country="US",
         base_url="https://www.vanityfair.com",
         search_paths=["/tech", "/business"],
-    ),
-    # Кластер 4: Голоса
-    LadderSource(
-        name="medium",
-        cluster="voices",
-        country="Global",
-        base_url="https://medium.com",
-        search_paths=["/tag/artificial-intelligence", "/tag/technology"],
     ),
     # Кластер 5: Массовый пульс
     LadderSource(

@@ -89,6 +89,31 @@ RSS_SOURCES: list[RSSSource] = [
             "https://feeds.arstechnica.com/arstechnica/index",
         ],
     ),
+    # SPA-сайты (Ladder не парсит JS → используем RSS)
+    RSSSource(
+        name="usatoday",
+        cluster="mainstream",
+        country="US",
+        feeds=[
+            "https://www.usatoday.com/tech/rss/",
+        ],
+    ),
+    RSSSource(
+        name="foxbusiness",
+        cluster="business",
+        country="US",
+        feeds=[
+            "https://www.foxbusiness.com/technology/rss",
+        ],
+    ),
+    RSSSource(
+        name="medium",
+        cluster="voices",
+        country="Global",
+        feeds=[
+            "https://medium.com/feed/tag/artificial-intelligence",
+        ],
+    ),
 ]
 
 
