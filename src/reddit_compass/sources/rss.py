@@ -89,13 +89,13 @@ RSS_SOURCES: list[RSSSource] = [
             "https://feeds.arstechnica.com/arstechnica/index",
         ],
     ),
-    # SPA-сайты (Ladder не парсит JS → используем RSS)
+    # SPA-сайты (Ladder не парсит JS → используем Google News RSS)
     RSSSource(
         name="usatoday",
         cluster="mainstream",
         country="US",
         feeds=[
-            "https://www.usatoday.com/tech/rss/",
+            "https://news.google.com/rss/search?q=site:usatoday.com+when:1d&hl=en-US&gl=US&ceid=US:en",
         ],
     ),
     RSSSource(
@@ -103,7 +103,15 @@ RSS_SOURCES: list[RSSSource] = [
         cluster="business",
         country="US",
         feeds=[
-            "https://www.foxbusiness.com/technology/rss",
+            "https://news.google.com/rss/search?q=site:foxbusiness.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+        ],
+    ),
+    RSSSource(
+        name="ft",
+        cluster="business",
+        country="UK",
+        feeds=[
+            "https://news.google.com/rss/search?q=site:ft.com+when:1d&hl=en-US&gl=US&ceid=US:en",
         ],
     ),
     RSSSource(
