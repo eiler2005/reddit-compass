@@ -67,6 +67,11 @@ nav a:hover { background: var(--border); }
 </style>
 </head>
 <body>
+<div class="topnav" style="margin-bottom:1rem;padding-bottom:0.5rem;border-bottom:1px solid #2a2a4a;">
+  <a href="/dashboard" style="color:#4a9eff;margin-right:1.2rem;">🧭 Дашборд</a>
+  <a href="/runs" style="color:#4a9eff;margin-right:1.2rem;">📁 Запуски</a>
+  <a href="/docs" style="color:#4a9eff;">📖 API</a>
+</div>
 <h1>🧭 reddit-compass</h1>
 <p class="meta">Трендовый радар · {latest} · {total_posts} постов из {sources_count} источников</p>
 
