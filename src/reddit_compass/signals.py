@@ -122,7 +122,7 @@ async def _call_qwen(
     async with (
         aiohttp.ClientSession() as session,
         session.post(
-            url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=120)
+            url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=300)
         ) as resp,
     ):
         if resp.status != 200:
@@ -245,6 +245,55 @@ async def analyze_posts(
 
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("LLM batch %d: parse error: %s", batch_idx + 1, exc)
+            continue
+        except TimeoutError:
+            logger.warning("LLM batch %d: timeout, retry через 10с...", batch_idx + 1)
+            await asyncio.sleep(10)
+            try:
+                response = await _call_qwen(messages, model=model)
+                if response:
+                    text = response.strip()
+                    if text.startswith("```"):
+                        text = text.split("\n", 1)[-1].rsplit("```", 1)[0]
+                    parsed = json.loads(text)
+                    if not isinstance(parsed, list):
+                        parsed = [parsed]
+                    for item in parsed:
+                        signals.append(
+                            SignalCard(
+                                post_id=str(item.get("post_id", "")),
+                                title=next(
+                                    (c.title for c in batch if c.post_id == item.get("post_id")),
+                                    "",
+                                ),
+                                subreddit=next(
+                                    (
+                                        c.subreddit
+                                        for c in batch
+                                        if c.post_id == item.get("post_id")
+                                    ),
+                                    "",
+                                ),
+                                score=next(
+                                    (c.score for c in batch if c.post_id == item.get("post_id")), 0
+                                ),
+                                pain_points=item.get("pain_points", []),
+                                buying_intent=bool(item.get("buying_intent", False)),
+                                business_relevance=int(item.get("business_relevance", 0)),
+                                book_relevance=int(item.get("book_relevance", 0)),
+                                themes=item.get("themes", []),
+                                summary=item.get("summary", ""),
+                                model=model,
+                            )
+                        )
+                    logger.info(
+                        "LLM batch %d/%d (retry): %d сигналов",
+                        batch_idx + 1,
+                        len(batches),
+                        len(parsed),
+                    )
+            except Exception:
+                logger.warning("LLM batch %d: retry не удался, пропускаем", batch_idx + 1)
             continue
 
         # Пауза между батчами (rate limit Qwen)
