@@ -19,7 +19,7 @@ from .models import PostCard
 
 logger = logging.getLogger("reddit_compass")
 
-BATCH_SIZE = 10  # постов на один LLM-запрос
+BATCH_SIZE = 20  # постов на один LLM-запрос (flash тянет 20)
 MAX_CONCURRENT = 3
 
 # Конфигурации провайдеров (ключ → base_url + модели)
@@ -28,10 +28,10 @@ _DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
 # Модельная пирамида (цена/качество):
 #   qwen3.8-max-preview — синтез (сложное, мало вызовов, скидка 17:00–03:00 МСК)
-#   qwen3.7-plus        — классификация постов (баланс цена/качество, массово)
-#   qwen3.6-flash       — простые задачи (фильтрация, саммаризация) — самый дешёвый
+#   qwen3.6-flash       — классификация постов (простое извлечение, дёшево)
+#   qwen3.7-plus        — зарезервирована для задач средней сложности
 _MODEL_SYNTHESIS = "qwen3.8-max-preview"  # сложное → дорогая модель
-_MODEL_CLASSIFY = "qwen3.7-plus"  # массовая классификация → баланс
+_MODEL_CLASSIFY = "qwen3.6-flash"  # массовая классификация → самая дешёвая
 _MODEL_CHEAP = "qwen3.6-flash"  # простое → самая дешёвая
 
 
@@ -196,7 +196,7 @@ async def analyze_posts(
                 "title": c.title,
                 "score": c.score,
                 "num_comments": c.num_comments,
-                "selftext": c.selftext[:500],
+                "selftext": c.selftext[:200],
             }
             for c in batch
         ]
