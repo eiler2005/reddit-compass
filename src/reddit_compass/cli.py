@@ -337,6 +337,12 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
 
     print(f"   Источники: {', '.join(loaded_sources)}")
 
+    # Лимит: топ-N по score для быстрого анализа
+    limit = getattr(args, "top", 0)
+    if limit and len(cards) > limit:
+        cards = sorted(cards, key=lambda c: c.score, reverse=True)[:limit]
+        print(f"   Лимит: топ-{limit} по score (из {len(loaded_sources)} источников)")
+
     print(f"🤖 LLM-анализ {len(cards)} постов (Qwen API)...")
     signals = await analyze_posts(cards)
     print(f"   Извлечено {len(signals)} сигналов")
@@ -561,7 +567,15 @@ def build_parser() -> argparse.ArgumentParser:
         "nightly", parents=[common], help="Ночной прогон: all + trends analysis → harvests/"
     )
 
-    sub.add_parser("signals", parents=[common], help="LLM-анализ (Qwen API): pain points, темы")
+    p_signals = sub.add_parser(
+        "signals", parents=[common], help="LLM-анализ (Qwen API): pain points, темы"
+    )
+    p_signals.add_argument(
+        "--top",
+        type=int,
+        default=0,
+        help="Топ-N постов по score (0 = все). Для быстрого анализа: --top 200",
+    )
     sub.add_parser("radar", parents=[common], help="Trend radar: отчёт с ссылками (без LLM)")
     sub.add_parser("hn", parents=[common], help="Hacker News: AI-stories через Algolia API")
     sub.add_parser(
