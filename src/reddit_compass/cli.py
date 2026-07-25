@@ -350,7 +350,11 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
     # Синтез
     synthesis = await synthesize(signals, snapshot_date, len(cards))
     if synthesis.top_themes:
-        print(f"   Топ-темы: {', '.join(synthesis.top_themes[:3])}")
+        theme_names = [
+            t.get("theme", str(t)) if isinstance(t, dict) else str(t)
+            for t in synthesis.top_themes[:3]
+        ]
+        print(f"   Топ-темы: {', '.join(theme_names)}")
 
     # Запись
     signals_path = snap_dir / "signals.jsonl"
