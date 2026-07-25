@@ -403,6 +403,8 @@ def render_trend_radar(
     reddit_posts: list[dict[str, Any]] = []
     hn_posts: list[dict[str, Any]] = []
     rss_posts: list[dict[str, Any]] = []
+    ladder_posts: list[dict[str, Any]] = []
+    ph_posts: list[dict[str, Any]] = []
 
     posts_file = snap_dir / "posts.jsonl"
     if posts_file.exists():
@@ -422,12 +424,25 @@ def render_trend_radar(
             if line.strip():
                 rss_posts.append(_json.loads(line))
 
-    total = len(reddit_posts) + len(hn_posts) + len(rss_posts)
+    ladder_file = snap_dir / "ladder.jsonl"
+    if ladder_file.exists():
+        for line in ladder_file.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                ladder_posts.append(_json.loads(line))
+
+    ph_file = snap_dir / "producthunt.jsonl"
+    if ph_file.exists():
+        for line in ph_file.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                ph_posts.append(_json.loads(line))
+
+    total = len(reddit_posts) + len(hn_posts) + len(rss_posts) + len(ladder_posts) + len(ph_posts)
     n_subs = len({p.get("subreddit", "") for p in reddit_posts})
 
     lines.append(
         f"> **{total} единиц** | Reddit: {len(reddit_posts)} ({n_subs} sub) "
-        f"| HN: {len(hn_posts)} | RSS: {len(rss_posts)}"
+        f"| HN: {len(hn_posts)} | RSS: {len(rss_posts)} "
+        f"| Ladder: {len(ladder_posts)} | PH: {len(ph_posts)}"
     )
     lines.append("")
     lines.append("---")
@@ -455,6 +470,24 @@ def render_trend_radar(
                 "title": p.get("title", ""),
                 "source": "HN",
                 "url": hn_url,
+            }
+        )
+    for p in ladder_posts:
+        all_items.append(
+            {
+                "score": p.get("score", 0),
+                "title": p.get("title", ""),
+                "source": p.get("subreddit", "ladder"),
+                "url": p.get("url", ""),
+            }
+        )
+    for p in ph_posts:
+        all_items.append(
+            {
+                "score": p.get("score", 0),
+                "title": p.get("title", ""),
+                "source": "PH",
+                "url": p.get("url", ""),
             }
         )
 
@@ -637,13 +670,61 @@ def render_trend_radar(
                 lines.append(f"| {i} | {p.get('subreddit', '')} | {title} | [→]({url}) |")
             lines.append("")
 
+    # ── Ladder (paywall СМИ) ────────────────────────────────────────────────
+
+    if ladder_posts:
+        ladder_ai = [
+            p
+            for p in ladder_posts
+            if any(
+                w in p.get("title", "").lower() for w in ["ai", "gpt", "llm", "openai", "anthropic"]
+            )
+        ]
+        ladder_other = [p for p in ladder_posts if p not in ladder_ai]
+
+        if ladder_ai:
+            lines.append("## 🪜 СМИ (paywall): AI и технологии")
+            lines.append("")
+            lines.append("| # | Источник | Title | Ссылка |")
+            lines.append("|---|---|---|---|")
+            for i, p in enumerate(ladder_ai[:top_n], 1):
+                title = p.get("title", "")[:65]
+                url = p.get("url", "")
+                lines.append(f"| {i} | {p.get('subreddit', '')} | {title} | [→]({url}) |")
+            lines.append("")
+
+        if ladder_other:
+            lines.append("## 🪜 СМИ (paywall): общее")
+            lines.append("")
+            lines.append("| # | Источник | Title | Ссылка |")
+            lines.append("|---|---|---|---|")
+            for i, p in enumerate(ladder_other[:top_n], 1):
+                title = p.get("title", "")[:65]
+                url = p.get("url", "")
+                lines.append(f"| {i} | {p.get('subreddit', '')} | {title} | [→]({url}) |")
+            lines.append("")
+
+    # ── ProductHunt ──────────────────────────────────────────────────────────
+
+    if ph_posts:
+        ph_posts.sort(key=lambda p: p.get("score", 0), reverse=True)
+        lines.append("## 🚀 ProductHunt")
+        lines.append("")
+        lines.append("| # | Score | Title | Ссылка |")
+        lines.append("|---|---|---|---|")
+        for i, p in enumerate(ph_posts[:top_n], 1):
+            title = p.get("title", "")[:70]
+            url = p.get("url", "")
+            lines.append(f"| {i} | {p.get('score', 0)} | {title} | [→]({url}) |")
+        lines.append("")
+
     # ── Footer ───────────────────────────────────────────────────────────────
 
     lines.append("---")
     lines.append("")
     lines.append(
         f"*reddit-compass v0.2 | {snapshot_date} | "
-        f"{total} единиц из {n_subs} сабреддитов + HN + RSS*"
+        f"{total} единиц из {n_subs} сабреддитов + HN + RSS + Ladder + PH*"
     )
 
     return "\n".join(lines)

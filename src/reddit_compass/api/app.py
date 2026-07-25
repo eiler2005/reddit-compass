@@ -264,60 +264,20 @@ details summary { cursor:pointer; color:var(--accent); }
 
     @app.get("/runs/{date}/radar", response_class=HTMLResponse, tags=["system"])
     def run_radar(date: str) -> str:
-        """Trend radar: LLM-аналитика (темы, идеи колонок, сдвиги нарратива).
-
-        Показывает signals-report.md (анализ), а не список постов.
-        Если анализа нет — fallback на trend-radar.md (список с ссылками).
-        """
+        """Trend radar: LLM-аналитика + данные по всем источникам."""
         from pathlib import Path as _Path
+
+        from .dashboard import render_radar_page
 
         data_dir = _Path(os.environ.get("DATA_DIR", "data"))
         snap = data_dir / "snapshots" / date
-        # Приоритет: LLM-анализ (signals-report.md), иначе список постов
-        analysis_path = snap / "signals-report.md"
-        radar_path = snap / "trend-radar.md"
-        if analysis_path.exists():
-            content = analysis_path.read_text(encoding="utf-8")
-            title = f"🤖 Trend Radar · Анализ · {date}"
-        elif radar_path.exists():
-            content = radar_path.read_text(encoding="utf-8")
-            title = f"🧭 Trend Radar · {date}"
-        else:
+        if not snap.exists():
             return (
                 f"<html><body><h1>404</h1><p>Radar for {date} not found.</p>"
                 f"<a href='/runs'>← Back</a></body></html>"
             )
 
-        # Рендер markdown → HTML
-        import re as _re
-
-        content = _re.sub(
-            r"\[([^\]]+)\]\(([^)]+)\)", r'<a href="\2" target="_blank">\1</a>', content
-        )
-        # Жирный текст **...**
-        content = _re.sub(r"\*\*([^*]+)\*\*", r"<b>\1</b>", content)
-        # Заголовки
-        content = _re.sub(r"^### (.+)$", r"<h3>\1</h3>", content, flags=_re.MULTILINE)
-        content = _re.sub(r"^## (.+)$", r"<h2>\1</h2>", content, flags=_re.MULTILINE)
-        content = _re.sub(r"^# (.+)$", r"<h1>\1</h1>", content, flags=_re.MULTILINE)
-        # Списки
-        content = _re.sub(r"^- (.+)$", r"&bull; \1<br>", content, flags=_re.MULTILINE)
-        content = _re.sub(r"^\d+\. (.+)$", r"\1<br>", content, flags=_re.MULTILINE)
-        # Таблицы → monospace
-        content = _re.sub(r"\|(.+)\|", r"<code>|\1|</code>", content)
-        content = content.replace("\n", "<br>\n")
-
-        return (
-            f'<html><head><meta charset="utf-8"><title>{title}</title>'
-            f"<style>body{{font-family:-apple-system,'Segoe UI',monospace;background:#0f0f1a;"
-            f"color:#e0e0e0;padding:2rem;max-width:1000px;margin:0 auto;line-height:1.7;}}"
-            f"a{{color:#4a9eff;}}h1,h2,h3{{color:#4a9eff;margin-top:1.5rem;}}"
-            f"code{{display:block;font-size:0.78rem;color:#aaa;}}"
-            f".nav{{margin-bottom:1rem;}}.nav a{{margin-right:1rem;}}</style></head>"
-            f'<body><div class="nav"><a href="/runs">← Запуски</a> '
-            f'<a href="/runs/{date}">Дашборд запуска</a> '
-            f'<a href="/dashboard">Общий дашборд</a></div><hr>{content}</body></html>'
-        )
+        return render_radar_page(snap, date)
 
     @app.post("/oauth/token", response_model=TokenResponse, tags=["auth"])
     def oauth_token(body: TokenRequest) -> TokenResponse:

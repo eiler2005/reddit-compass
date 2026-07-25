@@ -7,6 +7,32 @@
 
 ### Added
 
+- **Trend Radar v2** (`/runs/{date}/radar`): полноценный серверный рендер с LLM-аналитикой —
+  карточки топ-тем с пояснениями, идеи для колонок, сдвиги нарратива, pain points (теги),
+  топ-10 по релевантности для книги, облако тем. Тёмный editorial-стиль, единый с дашбордом.
+- **Сила трендов** (`trend_strength.py`): composite score (кросс-источник × объём × новизна ×
+  динамика) + метка 🆕/🔄. История тем в `data/theme-history.jsonl`. Таблица «📈 Сила трендов»
+  на radar-странице: новые сильные тренды первыми, повторяющиеся — с указанием недель.
+- **Signals без Reddit:** `reddit-compass signals` теперь загружает ВСЕ доступные JSONL
+  (posts, hackernews, rss, ladder, producthunt). Раньше падал без `posts.jsonl`.
+- **Radar: Ladder + ProductHunt:** `render_trend_radar` включает секции paywall-СМИ
+  и ProductHunt в мега-тренды и отдельные блоки.
+
+### Changed
+
+- **`/runs/{date}/radar`**: переключён с regex-рендера markdown на `render_radar_page()`
+  (структурный HTML из signals.jsonl + signals-report.md + JSONL-данных).
+- **`_cmd_signals`** (cli.py): загрузка из 5 JSONL-файлов вместо только `posts.jsonl`.
+
+### Fixed
+
+- Signals на VPS падал с "Snapshot не найден: posts.jsonl" при отсутствии Reddit-данных
+  (RSS/HN/Ladder/PH собираются автоматически, Reddit — вручную с Mac).
+
+## [0.2.0] — 2026-07-23
+
+### Added
+
 - **Мульти-источники (Phase 6):** 5 адаптеров, 1282 единицы за прогон:
   - `sources/rss.py`: BBC, Guardian, Reuters, TechCrunch, Verge, Ars Technica (135 статей)
   - `sources/hackernews.py`: Algolia API, 14 запросов, фильтр 7 дней (197 stories)

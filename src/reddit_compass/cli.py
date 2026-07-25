@@ -309,19 +309,33 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
         return
     snapshot_date = _today()
     snap_dir = _snapshots_dir(args) / snapshot_date
-    posts_file = snap_dir / "posts.jsonl"
-
-    if not posts_file.exists():
-        print(f"❌ Snapshot не найден: {posts_file}. Сначала запустите fetch.")
-        sys.exit(1)
 
     from .signals import analyze_posts, render_signals_report, synthesize, write_signals_jsonl
 
-    # Загружаем посты
+    # Загружаем посты из ВСЕХ доступных JSONL (reddit, hn, rss, ladder, ph)
+    _JSONL_SOURCES = [
+        "posts.jsonl",
+        "hackernews.jsonl",
+        "rss.jsonl",
+        "ladder.jsonl",
+        "producthunt.jsonl",
+    ]
     cards: list[PostCard] = []
-    for line in posts_file.read_text(encoding="utf-8").splitlines():
-        if line.strip():
-            cards.append(PostCard.from_dict(json.loads(line)))
+    loaded_sources: list[str] = []
+    for fname in _JSONL_SOURCES:
+        fp = snap_dir / fname
+        if not fp.exists():
+            continue
+        for line in fp.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                cards.append(PostCard.from_dict(json.loads(line)))
+        loaded_sources.append(fname)
+
+    if not cards:
+        print(f"❌ Нет данных в {snap_dir}. Сначала соберите данные (fetch/hn/rss/ladder/ph).")
+        sys.exit(1)
+
+    print(f"   Источники: {', '.join(loaded_sources)}")
 
     print(f"🤖 LLM-анализ {len(cards)} постов (Qwen API)...")
     signals = await analyze_posts(cards)
@@ -341,6 +355,20 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
     report_path.write_text(report, encoding="utf-8")
     print(f"✅ Signals: {signals_path}")
     print(f"   Report: {report_path}")
+
+    # История тем (для расчёта силы тренда и новизны)
+    from .trend_strength import extract_themes_from_signals, save_theme_history
+
+    data_dir = _snapshots_dir(args).parent
+    signal_dicts = [s.to_dict() for s in signals]
+    theme_snaps = extract_themes_from_signals(signal_dicts)
+    if theme_snaps:
+        # Устанавливаем дату если не была извлечена из сигналов
+        for ts in theme_snaps:
+            if not ts.date:
+                ts.date = snapshot_date
+        save_theme_history(data_dir, theme_snaps)
+        print(f"   Theme history: {len(theme_snaps)} тем")
 
     # Trend radar с ссылками
     from .signals import render_trend_radar

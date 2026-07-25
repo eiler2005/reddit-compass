@@ -59,7 +59,7 @@ reddit-compass hn                  # Hacker News: AI stories
 reddit-compass rss                 # RSS: 6 free sources
 reddit-compass ladder              # Paywall: 12 sources via Ladder
 reddit-compass ph                  # ProductHunt: top products
-reddit-compass signals             # LLM analysis (Qwen API)
+reddit-compass signals             # LLM analysis (Qwen API, all sources)
 reddit-compass serve               # REST API on :8900
 reddit-compass db stats            # SQLite history
 reddit-compass fetch --dry-run     # Preview without network
@@ -220,7 +220,8 @@ curl -H "Authorization: Bearer <token>" \
 
 ## LLM Analysis (Qwen API)
 
-Not just collection — **intelligence**.
+Not just collection — **intelligence**. Analyzes **all available sources**
+(Reddit, HN, RSS, Ladder, ProductHunt) — works even without Reddit data.
 
 ```bash
 export QWEN_TOKEN_PLAN_KEY=sk-...  # QwenCloud: https://home.qwencloud.com/api-keys
@@ -254,7 +255,7 @@ Two views, two purposes:
 | View | URL | Purpose |
 |---|---|---|
 | **📊 Dashboard** | `/dashboard`, `/runs/{date}` | Operational: what was collected, sources, posts by cluster, themes→posts |
-| **🤖 Trend Radar** | `/runs/{date}/radar` | Analytical: LLM synthesis — deep themes, column ideas, narrative shifts |
+| **🤖 Trend Radar** | `/runs/{date}/radar` | Analytical: LLM synthesis — deep themes, column ideas, narrative shifts, pain points, top-10 by book relevance, theme cloud |
 
 ```
 https://rc.204.168.239.217.sslip.io/dashboard    # general dashboard
