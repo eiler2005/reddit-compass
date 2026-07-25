@@ -116,7 +116,7 @@ async def _call_qwen(
         "model": model or default_model,
         "messages": messages,
         "temperature": temperature,
-        "max_tokens": 2000,
+        "max_tokens": 8000,
     }
 
     async with (
