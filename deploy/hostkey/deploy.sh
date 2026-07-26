@@ -52,6 +52,10 @@ scp -r "${PROJECT_ROOT}/config/profiles" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/
 echo "🐳 Запускаю api + caddy..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api caddy"
 
+# 3.5. Рестарт Caddy для обновления Docker DNS (иначе 502 после пересборки api)
+echo "🔄 Рестарт Caddy (Docker DNS refresh)..."
+ssh "${VPS_USER}@${VPS_HOST}" "docker restart rc-caddy"
+
 # 4. Проверяем health
 echo "🏥 Проверяю health..."
 sleep 3
