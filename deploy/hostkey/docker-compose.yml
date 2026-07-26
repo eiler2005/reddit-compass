@@ -47,6 +47,8 @@ services:
       REDDIT_COMPASS_CONFIG: /app/config/profiles/ai-native.json
     restart: always
     stop_grace_period: 10s
+    ports:
+      - "127.0.0.1:8901:8900"
     volumes:
       - rc_data:/data
     networks: [rc_net]
