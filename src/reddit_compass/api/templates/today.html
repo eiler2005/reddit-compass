@@ -56,6 +56,52 @@
     </section>
     {% endif %}
 
+    {% if briefing.stable_themes or briefing.emerging_candidates or briefing.pain_point_cloud %}
+    <section class="section">
+        <h2>Тематический ландшафт</h2>
+        <div class="clouds-grid">
+            {% if briefing.stable_themes %}
+            <div class="cloud-block">
+                <h3>Стабильные темы</h3>
+                <div class="cloud">
+                    {% for node in briefing.stable_themes %}
+                    <a href="{{ node.url }}" class="cloud-node" style="font-size: {{ 0.8 + node.item_count * 0.1 }}rem">
+                        {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if briefing.emerging_candidates %}
+            <div class="cloud-block">
+                <h3>Новые сюжеты</h3>
+                <div class="cloud">
+                    {% for node in briefing.emerging_candidates %}
+                    <span class="cloud-node cloud-candidate">
+                        {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if briefing.pain_point_cloud %}
+            <div class="cloud-block">
+                <h3>Болевые точки</h3>
+                <div class="cloud">
+                    {% for node in briefing.pain_point_cloud %}
+                    <span class="cloud-node cloud-pain">
+                        {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
+                    </span>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </section>
+    {% endif %}
+
     {% if briefing.pain_points %}
     <section class="section">
         <h2>Болевые точки</h2>

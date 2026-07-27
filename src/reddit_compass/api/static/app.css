@@ -125,6 +125,53 @@ h1, h2, h3 {
     font-weight: 500;
 }
 
+.clouds-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.5rem;
+}
+
+.cloud-block h3 {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.cloud-node {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: #f3f4f6;
+    border-radius: var(--radius);
+    text-decoration: none;
+    color: var(--color-text);
+    font-size: 0.85rem;
+}
+
+.cloud-node:hover {
+    background: #e5e7eb;
+}
+
+.cloud-count {
+    color: var(--color-text-secondary);
+    font-size: 0.75rem;
+}
+
+.cloud-candidate {
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+.cloud-pain {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
 .status-badge {
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius);

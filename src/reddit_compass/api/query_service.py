@@ -9,7 +9,7 @@ import sqlite3
 from datetime import datetime
 
 from ..sources.registry import SOURCES
-from .view_models import RunSummary, SourceCoverageRow
+from .view_models import CloudNode, RunSummary, SourceCoverageRow
 
 
 def resolve_latest_run(conn: sqlite3.Connection, profile: str = "ai-native") -> str | None:
@@ -176,3 +176,91 @@ def build_freshness_line(summary: RunSummary) -> str:
     parts.append(f"{summary.unique_item_count} материалов")
 
     return " · ".join(parts)
+
+
+def build_theme_clouds(
+    conn: sqlite3.Connection,
+    run_id: str,
+    theme_catalog: list[dict[str, str]] | None = None,
+) -> tuple[list[CloudNode], list[CloudNode], list[CloudNode]]:
+    """Строит три облака: stable themes, emerging candidates, pain points.
+
+    Returns:
+        Tuple of (stable_themes, emerging_candidates, pain_points).
+    """
+    # Получаем item signals для run
+    signals = conn.execute(
+        "SELECT * FROM item_signals WHERE run_id = ?",
+        (run_id,),
+    ).fetchall()
+
+    if not signals:
+        return [], [], []
+
+    # Stable themes: из theme_catalog (profile taxonomy)
+    stable_themes: list[CloudNode] = []
+    if theme_catalog:
+        theme_ids = {t["id"] for t in theme_catalog}
+        theme_labels = {t["id"]: t.get("label", t["id"]) for t in theme_catalog}
+
+        # Считаем items по theme_ids
+        theme_counts: dict[str, int] = {}
+        for sig in signals:
+            import json
+
+            sig_themes = json.loads(sig["theme_ids"])
+            for theme_id in sig_themes:
+                if theme_id in theme_ids:
+                    theme_counts[theme_id] = theme_counts.get(theme_id, 0) + 1
+
+        for theme_id, count in sorted(theme_counts.items(), key=lambda x: -x[1]):
+            stable_themes.append(
+                CloudNode(
+                    node_id=theme_id,
+                    label_ru=theme_labels.get(theme_id, theme_id),
+                    item_count=count,
+                    url=f"/explore?theme={theme_id}",
+                )
+            )
+
+    # Emerging candidates: из candidate_themes
+    candidate_counts: dict[str, int] = {}
+    for sig in signals:
+        import json
+
+        candidates = json.loads(sig["candidate_themes"])
+        for candidate in candidates:
+            candidate_counts[candidate] = candidate_counts.get(candidate, 0) + 1
+
+    emerging_candidates: list[CloudNode] = []
+    for candidate, count in sorted(candidate_counts.items(), key=lambda x: -x[1])[:20]:
+        if count >= 2:  # Только кандидаты с 2+ упоминаниями
+            emerging_candidates.append(
+                CloudNode(
+                    node_id=f"candidate_{hash(candidate) % 10000}",
+                    label_ru=candidate,
+                    label_original=candidate,
+                    item_count=count,
+                )
+            )
+
+    # Pain points: нормализованные
+    pain_counts: dict[str, int] = {}
+    for sig in signals:
+        import json
+
+        pains = json.loads(sig["pain_points"])
+        for pain in pains:
+            pain_counts[pain] = pain_counts.get(pain, 0) + 1
+
+    pain_points: list[CloudNode] = []
+    for pain, count in sorted(pain_counts.items(), key=lambda x: -x[1])[:15]:
+        pain_points.append(
+            CloudNode(
+                node_id=f"pain_{hash(pain) % 10000}",
+                label_ru=pain,
+                item_count=count,
+            )
+        )
+
+    return stable_themes, emerging_candidates, pain_points

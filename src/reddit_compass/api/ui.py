@@ -74,7 +74,12 @@ async def today_page(
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
-    from .query_service import build_freshness_line, build_run_summary, build_source_coverage
+    from .query_service import (
+        build_freshness_line,
+        build_run_summary,
+        build_source_coverage,
+        build_theme_clouds,
+    )
 
     if date is None:
         row = conn.execute(
@@ -103,6 +108,18 @@ async def today_page(
     run_summary = build_run_summary(conn, date, profile)
     source_coverage = build_source_coverage(conn, f"{date}:{profile}", date)
     freshness_line = build_freshness_line(run_summary) if run_summary else ""
+
+    # Theme clouds
+    from ..config import MonitorConfig
+
+    config = MonitorConfig.from_file()
+    theme_catalog = [{"id": t.id, "label": t.label} for t in config.themes]
+    stable_themes, emerging_candidates, pain_point_cloud = build_theme_clouds(
+        conn, f"{date}:{profile}", theme_catalog
+    )
+    view.stable_themes = stable_themes
+    view.emerging_candidates = emerging_candidates
+    view.pain_point_cloud = pain_point_cloud
 
     prev_row = conn.execute(
         "SELECT snapshot_date FROM runs WHERE snapshot_date < ? "
