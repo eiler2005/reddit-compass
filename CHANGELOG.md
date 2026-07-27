@@ -7,6 +7,30 @@
 
 ### Added
 
+- **Intelligence layer** (`src/reddit_compass/intelligence/`): source-agnostic domain models
+  (ContentItem, Story, Briefing), SQLite v2 migrations, story clustering (rapidfuzz),
+  ranking (goal relevance, cross-source coverage, momentum, novelty, evidence quality),
+  deterministic briefing.
+- **Unified run** (`reddit-compass run`): единая команда для сбора из указанных источников.
+  Флаги: `--sources reddit,hn,rss`, `--profile`, `--analyze`, `--allow-partial`.
+- **Source registry** (`sources/registry.py`): 22 источника с метаданными (provider, cluster,
+  access, required env). NYT API и WSJ: `enabled_by_default=False`.
+- **NYT adapter** (`sources/nytimes.py`): Top Stories API + Article Search API.
+  Требует `NYT_API_KEY`. Без ключа: status `not_configured`.
+- **Web UI** (Jinja2): `/today` (briefing), `/stories/{id}` (detail + timeline),
+  `/explore` (search/filter/pagination), `/runs` (history). Research actions с CSRF.
+  Security headers: CSP, X-Content-Type-Options, Referrer-Policy.
+- **API v2** (`/api/v2/`): briefings, stories, runs, source-health, PATCH research-state.
+  Pydantic schemas. v1 остаётся совместимым.
+- **LLM validation** (`llm_schemas.py`): Pydantic schemas для валидации ответов Qwen.
+  Stratified selection (70% clusters, 20% global, 10% exploration). Retry policy.
+- **Profile schema v2**: goals, themes в `config/profiles/ai-native.json`.
+  Совместимость с v1.
+- **CLI: `db rebuild`**: перестройка SQLite v2 из snapshots. Идемпотентен,
+  research_state переживает rebuild.
+
+### Changed
+
 - **`REDDIT_COMPASS_ENGINE`** (`auto|playwright`): выбор движка Reddit-запросов.
   `playwright` пропускает aiohttp-попытку и сразу стартует Chromium — основной режим
   для ротационных residential proxy, где Reddit отдаёт 403 голому HTTP с pool-IP,

@@ -276,7 +276,7 @@ https://rc.204.168.239.217.sslip.io/runs/2026-07-23        # 📊 run dashboard 
 https://rc.204.168.239.217.sslip.io/runs/2026-07-23/radar  # 🤖 trend radar (analysis)
 ```
 
-Auth: Basic Auth (`admin` / `rc-compass-2026`), Let's Encrypt TLS.
+Auth: Basic Auth (credentials in `.env.secrets`), Let's Encrypt TLS.
 
 ---
 

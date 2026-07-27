@@ -20,7 +20,7 @@
 │  ladder     (paywall proxy, Docker network)                            │
 │                                                                        │
 │  Dashboard: https://rc.204.168.239.217.sslip.io/dashboard             │
-│             (admin / rc-compass-2026, Basic Auth, Let's Encrypt)       │
+│             (Basic Auth, credentials in .env.secrets, Let's Encrypt)   │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌─── Mac (residential IP) — вручную или launchd ─────────────────────────┐
@@ -95,7 +95,7 @@ LLM-анализ (signals) запускается в окне скидки на 
 
 - DNS: sslip.io (автоматически, без настройки)
 - TLS: Let's Encrypt (авто)
-- Auth: Basic Auth (admin / rc-compass-2026)
+- Auth: Basic Auth (credentials in `.env.secrets`)
 
 ## Ladder (paywall proxy)
 
@@ -121,8 +121,8 @@ docker network connect reddit-compass_net ladder
 ## Проверки
 
 ```bash
-# Health
-curl -u admin:rc-compass-2026 https://rc.204.168.239.217.sslip.io/health
+# Health (credentials из .env.secrets)
+curl -u "$RC_BASIC_AUTH" https://rc.204.168.239.217.sslip.io/health
 
 # Dashboard
 open https://rc.204.168.239.217.sslip.io/dashboard
