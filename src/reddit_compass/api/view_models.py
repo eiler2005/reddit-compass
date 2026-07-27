@@ -149,6 +149,8 @@ class RunView:
     status_label: str
     started_at: str
     finished_at: str | None
+    item_count: int = 0
+    story_count: int = 0
     sources: list[dict[str, Any]] = field(default_factory=list)
 
 

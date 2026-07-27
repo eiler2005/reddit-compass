@@ -296,18 +296,36 @@ async def runs_page(
 
     from .view_models import RunView, status_label
 
-    runs = [
-        RunView(
-            run_id=row["run_id"],
-            date=row["snapshot_date"],
-            profile=row["profile"],
-            status=row["status"],
-            status_label=status_label(row["status"]),
-            started_at=row["started_at"],
-            finished_at=row["finished_at"],
+    runs = []
+    for row in rows:
+        run_id = row["run_id"]
+        date = row["snapshot_date"]
+
+        # Item count
+        item_count = conn.execute(
+            "SELECT COUNT(DISTINCT item_id) FROM items WHERE snapshot_date = ?",
+            (date,),
+        ).fetchone()[0]
+
+        # Story count
+        story_count = conn.execute(
+            "SELECT COUNT(*) FROM story_metrics WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()[0]
+
+        runs.append(
+            RunView(
+                run_id=run_id,
+                date=date,
+                profile=row["profile"],
+                status=row["status"],
+                status_label=status_label(row["status"]),
+                started_at=row["started_at"],
+                finished_at=row["finished_at"],
+                item_count=item_count,
+                story_count=story_count,
+            )
         )
-        for row in rows
-    ]
 
     return templates.TemplateResponse(
         request=request,
