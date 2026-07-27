@@ -27,6 +27,9 @@ USER_AGENT = (
 REQUEST_PAUSE = 4.0
 MAX_RETRIES = 2
 RETRY_PAUSE = 10.0
+FLAKE_RETRY_PAUSE = 5.0
+BROWSER_GOTO_ATTEMPTS = 2
+ENGINE_ENV = "REDDIT_COMPASS_ENGINE"
 
 # ── Proxy rotation ─────────────────────────────────────────────────────────
 
@@ -59,6 +62,21 @@ class ProxyRotator:
         proxy = self._proxies[self._index % len(self._proxies)]
         self._index += 1
         return proxy
+
+
+def _engine_mode() -> str:
+    """Выбор движка из REDDIT_COMPASS_ENGINE: auto (aiohttp → Playwright) | playwright.
+
+    playwright полезен за ротационными residential proxy: Reddit отдаёт .json
+    браузерному трафику, но часто блокирует голый HTTP (403) с pool-IP.
+    """
+    raw = os.environ.get(ENGINE_ENV, "").strip().lower()
+    if raw in ("", "auto"):
+        return "auto"
+    if raw == "playwright":
+        return "playwright"
+    logger.warning("Неизвестное значение %s=%r — использую auto", ENGINE_ENV, raw)
+    return "auto"
 
 
 # ── aiohttp engine (primary) ───────────────────────────────────────────────
@@ -222,14 +240,28 @@ class RedditBrowser:
 
         self._browser = await self._pw.chromium.launch(**launch_args)
         self._page = await self._browser.new_page(user_agent=USER_AGENT)
-        try:
-            await self._page.goto(
-                "https://www.reddit.com/", wait_until="domcontentloaded", timeout=60000
-            )
-            await asyncio.sleep(2)
-            logger.info("Reddit browser session открыта (Playwright fallback)")
-        except Exception as exc:
-            logger.warning("Не удалось открыть reddit.com: %s", exc)
+        for attempt in range(BROWSER_GOTO_ATTEMPTS):
+            try:
+                await self._page.goto(
+                    "https://www.reddit.com/", wait_until="domcontentloaded", timeout=60000
+                )
+                await asyncio.sleep(2)
+                logger.info("Reddit browser session открыта (Playwright fallback)")
+                return
+            except Exception as exc:
+                if attempt < BROWSER_GOTO_ATTEMPTS - 1:
+                    # Новая страница — новое соединение, у ротационного proxy другой exit IP
+                    logger.warning(
+                        "Не удалось открыть reddit.com (попытка %d/%d): %s — пробую новую страницу",
+                        attempt + 1,
+                        BROWSER_GOTO_ATTEMPTS,
+                        exc,
+                    )
+                    await self._page.close()
+                    self._page = await self._browser.new_page(user_agent=USER_AGENT)
+                    await asyncio.sleep(FLAKE_RETRY_PAUSE)
+                else:
+                    logger.warning("Не удалось открыть reddit.com: %s", exc)
 
     async def fetch_json(self, url: str) -> Any | None:
         """Загружает JSON через fetch() в контексте браузера."""
@@ -240,9 +272,13 @@ class RedditBrowser:
                 result = await self._page.evaluate(
                     """async (url) => {
                         try {
+                            const ctrl = new AbortController();
+                            const timer = setTimeout(() => ctrl.abort(), 25000);
                             const resp = await fetch(url, {
-                                headers: {'Accept': 'application/json'}
+                                headers: {'Accept': 'application/json'},
+                                signal: ctrl.signal
                             });
+                            clearTimeout(timer);
                             if (resp.status === 429) return {__status: 429};
                             if (!resp.ok) return {__status: resp.status};
                             return await resp.json();
@@ -273,7 +309,19 @@ class RedditBrowser:
                         logger.warning("JSON %s: HTTP %s", url, result["__status"])
                         return None
                     if "__error" in result:
-                        logger.warning("JSON %s: %s", url, result["__error"])
+                        # Сетевой flake (ротация IP у residential proxy, обрыв соединения)
+                        if attempt < MAX_RETRIES:
+                            logger.warning(
+                                "JSON %s: %s, retry %d/%d (пауза %.0fс)",
+                                url,
+                                result["__error"],
+                                attempt + 1,
+                                MAX_RETRIES,
+                                FLAKE_RETRY_PAUSE,
+                            )
+                            await asyncio.sleep(FLAKE_RETRY_PAUSE)
+                            continue
+                        logger.warning("JSON %s: %s, исчерпаны retries", url, result["__error"])
                         return None
                 return result
             except Exception as exc:
@@ -310,6 +358,14 @@ class RedditEngine:
         self._use_browser = False
 
     async def start(self) -> None:
+        if _engine_mode() == "playwright":
+            if _check_playwright():
+                logger.info("REDDIT_COMPASS_ENGINE=playwright — стартую с браузерного движка")
+                await self._start_browser()
+                return
+            logger.warning(
+                "REDDIT_COMPASS_ENGINE=playwright, но Playwright не установлен — режим auto"
+            )
         self._http = RedditHttpClient(self._rotator, stealth=self._stealth)
         await self._http.start()
 
