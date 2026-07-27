@@ -14,6 +14,8 @@ dependencies = [
   "fastapi>=0.115,<1",
   "uvicorn[standard]>=0.34,<1",
   "python-jose[cryptography]>=3.3,<4",
+  "rapidfuzz>=3,<4",
+  "jinja2>=3.1,<4",
 ]
 
 [project.scripts]
