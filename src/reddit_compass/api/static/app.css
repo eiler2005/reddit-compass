@@ -179,6 +179,29 @@ h1, h2, h3 {
 .confidence-medium { color: var(--color-warning); }
 .confidence-low { color: var(--color-text-secondary); }
 
+.clusters {
+    display: flex;
+    gap: 0.25rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+.cluster-badge {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: var(--radius);
+    background: #f3f4f6;
+    color: var(--color-text-secondary);
+}
+
+.cluster-voices { background: #fef3c7; color: #92400e; }
+.cluster-developers { background: #dbeafe; color: #1e40af; }
+.cluster-mainstream { background: #f3e8ff; color: #6b21a8; }
+.cluster-business { background: #dcfce7; color: #166534; }
+.cluster-tech_culture { background: #cffafe; color: #155e75; }
+.cluster-product_pulse { background: #fce7f3; color: #9d174d; }
+.cluster-search_interest { background: #e0e7ff; color: #3730a3; }
+
 .evidence-links {
     display: flex;
     gap: 0.5rem;

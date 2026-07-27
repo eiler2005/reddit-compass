@@ -233,6 +233,7 @@ async def explore_page(
             why_it_matters="",
             source_count=s.get("source_count", 0),
             item_count=s.get("item_count", 0),
+            clusters=[source_cluster] if source_cluster else [],
         )
         for s in stories
     ]
@@ -248,6 +249,7 @@ async def explore_page(
             "total_pages": total_pages,
             "filters": {
                 "q": q,
+                "source_cluster": source_cluster,
                 "theme": theme,
                 "direction": direction,
                 "confidence": confidence,

@@ -10,6 +10,13 @@
     <p class="story-summary">{{ story.summary_ru }}</p>
     {% endif %}
     <p class="story-why">{{ story.why_it_matters }}</p>
+    {% if story.clusters %}
+    <div class="clusters">
+        {% for cluster in story.clusters %}
+        <span class="cluster-badge cluster-{{ cluster }}">{{ cluster }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
     <footer class="story-footer">
         <span class="meta">{{ story.source_count }} ист. · {{ story.item_count }} мат.</span>
         <span class="confidence confidence-{{ story.confidence }}">{{ story.confidence }}</span>

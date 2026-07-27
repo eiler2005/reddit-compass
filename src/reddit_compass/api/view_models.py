@@ -25,6 +25,7 @@ class StoryCardView:
     why_it_matters: str
     source_count: int
     item_count: int
+    clusters: list[str] = field(default_factory=list)
     evidence: list[dict[str, Any]] = field(default_factory=list)
     score_breakdown: dict[str, float] = field(default_factory=dict)
     research_state: ResearchState | None = None
@@ -118,6 +119,7 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
     """Преобразует Briefing в BriefingView."""
 
     def _story_to_card(bs: BriefingStory) -> StoryCardView:
+        clusters: list[str] = list({e.source_cluster for e in bs.evidence})
         return StoryCardView(
             story_id=bs.story.story_id,
             title=bs.story.title,
@@ -129,10 +131,12 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
             why_it_matters=bs.why_it_matters,
             source_count=bs.metric.source_count,
             item_count=bs.metric.item_count,
+            clusters=clusters,
             evidence=[
                 {
                     "item_id": e.item_id,
                     "provider": e.provider,
+                    "source_cluster": e.source_cluster,
                     "url": e.url,
                     "title": e.title,
                     "excerpt": e.excerpt,

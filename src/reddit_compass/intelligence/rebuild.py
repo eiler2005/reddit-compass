@@ -147,7 +147,7 @@ def rebuild_from_snapshots(
         stories, _ = cluster_items(items)
         percentiles = compute_percentiles(items)
 
-        items_by_story: dict[str, list] = {}
+        items_by_story: dict[str, list[ContentItem]] = {}
         for story in stories:
             items_by_story[story.story_id] = [
                 item for item in items if item.item_id in story.item_ids

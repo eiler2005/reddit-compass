@@ -8,6 +8,12 @@
 
     <form method="get" action="/explore" class="filters">
         <input type="text" name="q" value="{{ filters.q or '' }}" placeholder="Поиск...">
+        <select name="source_cluster">
+            <option value="">Все кластеры</option>
+            {% for c in ['voices', 'developers', 'mainstream', 'business', 'tech_culture', 'product_pulse'] %}
+            <option value="{{ c }}" {% if filters.source_cluster == c %}selected{% endif %}>{{ c }}</option>
+            {% endfor %}
+        </select>
         <select name="direction">
             <option value="">Все направления</option>
             {% for d in ['new', 'growing', 'stable', 'fading', 'resurfacing'] %}
@@ -39,11 +45,11 @@
     {% if total_pages > 1 %}
     <nav class="pagination">
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}&q={{ filters.q or '' }}&direction={{ filters.direction or '' }}&confidence={{ filters.confidence or '' }}&sort={{ filters.sort }}" class="btn">← Назад</a>
+        <a href="?page={{ page - 1 }}&q={{ filters.q or '' }}&source_cluster={{ filters.source_cluster or '' }}&direction={{ filters.direction or '' }}&confidence={{ filters.confidence or '' }}&sort={{ filters.sort }}" class="btn">← Назад</a>
         {% endif %}
         <span>Стр. {{ page }} из {{ total_pages }}</span>
         {% if page < total_pages %}
-        <a href="?page={{ page + 1 }}&q={{ filters.q or '' }}&direction={{ filters.direction or '' }}&confidence={{ filters.confidence or '' }}&sort={{ filters.sort }}" class="btn">Вперёд →</a>
+        <a href="?page={{ page + 1 }}&q={{ filters.q or '' }}&source_cluster={{ filters.source_cluster or '' }}&direction={{ filters.direction or '' }}&confidence={{ filters.confidence or '' }}&sort={{ filters.sort }}" class="btn">Вперёд →</a>
         {% endif %}
     </nav>
     {% endif %}
