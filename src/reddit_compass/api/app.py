@@ -103,8 +103,9 @@ def create_app() -> FastAPI:
 
     # ── Dashboard (read-only, без auth) ─────────────────────────────────────
 
-    @app.get("/dashboard", response_class=HTMLResponse, tags=["system"])
-    def dashboard(db: sqlite3.Connection = Depends(_get_db)) -> str:
+    @app.get("/legacy/dashboard", response_class=HTMLResponse, tags=["system"])
+    def legacy_dashboard(db: sqlite3.Connection = Depends(_get_db)) -> str:
+        """Legacy dashboard."""
         from .dashboard import render_dashboard
 
         stats = query_stats(db)
@@ -290,9 +291,9 @@ details summary { cursor:pointer; color:var(--accent); }
         )
         return html
 
-    @app.get("/runs/{date}/radar", response_class=HTMLResponse, tags=["system"])
-    def run_radar(date: str) -> str:
-        """Trend radar: LLM-аналитика + данные по всем источникам."""
+    @app.get("/legacy/runs/{date}/radar", response_class=HTMLResponse, tags=["system"])
+    def legacy_run_radar(date: str) -> str:
+        """Legacy Trend radar: LLM-аналитика + данные по всем источникам."""
         from pathlib import Path as _Path
 
         from .dashboard import render_radar_page
