@@ -4,7 +4,12 @@
         <span class="trend-score">{{ "%.0f"|format(story.trend_score) }}</span>
     </header>
     <h3 class="story-title">
+        {% if story.primary_evidence_url %}
+        <a href="{{ story.primary_evidence_url }}" target="_blank" rel="noopener noreferrer" class="story-title-link" title="Читать источник: {{ story.primary_evidence_provider }}">{{ story.title }}</a>
+        <a href="/stories/{{ story.story_id }}" class="story-detail-link" title="Открыть сюжет">📋</a>
+        {% else %}
         <a href="/stories/{{ story.story_id }}">{{ story.title }}</a>
+        {% endif %}
     </h3>
     {% if story.summary_ru %}
     <p class="story-summary">{{ story.summary_ru }}</p>

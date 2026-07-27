@@ -484,6 +484,9 @@ h3 {
     font-weight: 600;
     margin-bottom: 0.5rem;
     line-height: 1.4;
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
 }
 
 .story-title a {
@@ -494,6 +497,32 @@ h3 {
 
 .story-title a:hover {
     color: var(--accent);
+}
+
+.story-title-link {
+    flex: 1;
+}
+
+.story-title-link::after {
+    content: " ↗";
+    font-size: 0.75rem;
+    opacity: 0;
+    transition: opacity var(--duration) var(--ease-out);
+}
+
+.story-title-link:hover::after {
+    opacity: 1;
+}
+
+.story-detail-link {
+    font-size: 0.85rem;
+    opacity: 0.5;
+    transition: opacity var(--duration) var(--ease-out);
+    flex-shrink: 0;
+}
+
+.story-detail-link:hover {
+    opacity: 1;
 }
 
 .story-summary {

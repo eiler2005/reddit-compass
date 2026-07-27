@@ -86,6 +86,8 @@ class StoryCardView:
     evidence: list[dict[str, Any]] = field(default_factory=list)
     score_breakdown: dict[str, float] = field(default_factory=dict)
     research_state: ResearchState | None = None
+    primary_evidence_url: str = ""
+    primary_evidence_provider: str = ""
 
 
 @dataclass
@@ -183,6 +185,48 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
 
     def _story_to_card(bs: BriefingStory) -> StoryCardView:
         clusters: list[str] = list({e.source_cluster for e in bs.evidence})
+
+        # Ранжирование primary evidence:
+        # 1. content_scope: full > excerpt > abstract > headline
+        # 2. При равном scope — предпочтение mainstream/business
+        scope_weight = {"full": 4, "excerpt": 3, "abstract": 2, "headline": 1}
+        cluster_weight = {
+            "mainstream": 2,
+            "business": 2,
+            "tech_culture": 1,
+            "developers": 1,
+            "voices": 0,
+            "product_pulse": 0,
+            "search_interest": 0,
+        }
+
+        evidence_list = [
+            {
+                "item_id": e.item_id,
+                "provider": e.provider,
+                "source_cluster": e.source_cluster,
+                "url": e.url,
+                "title": e.title,
+                "excerpt": e.excerpt,
+                "content_scope": e.content_scope,
+            }
+            for e in bs.evidence
+        ]
+
+        primary_url = ""
+        primary_provider = ""
+        if evidence_list:
+            ranked = sorted(
+                evidence_list,
+                key=lambda x: (
+                    scope_weight.get(x["content_scope"], 0),
+                    cluster_weight.get(x["source_cluster"], 0),
+                ),
+                reverse=True,
+            )
+            primary_url = ranked[0]["url"]
+            primary_provider = ranked[0]["provider"]
+
         return StoryCardView(
             story_id=bs.story.story_id,
             title=bs.story.title,
@@ -195,19 +239,10 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
             source_count=bs.metric.source_count,
             item_count=bs.metric.item_count,
             clusters=clusters,
-            evidence=[
-                {
-                    "item_id": e.item_id,
-                    "provider": e.provider,
-                    "source_cluster": e.source_cluster,
-                    "url": e.url,
-                    "title": e.title,
-                    "excerpt": e.excerpt,
-                    "content_scope": e.content_scope,
-                }
-                for e in bs.evidence
-            ],
+            evidence=evidence_list,
             score_breakdown=bs.score_breakdown,
+            primary_evidence_url=primary_url,
+            primary_evidence_provider=primary_provider,
         )
 
     return BriefingView(
