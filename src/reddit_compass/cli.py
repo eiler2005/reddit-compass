@@ -504,7 +504,7 @@ async def _cmd_serve(args: argparse.Namespace) -> None:
 
 
 async def _cmd_db(args: argparse.Namespace) -> None:
-    """SQLite: init / stats."""
+    """SQLite: init / stats / rebuild."""
     from .db import get_db, query_stats
 
     db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
@@ -526,6 +526,23 @@ async def _cmd_db(args: argparse.Namespace) -> None:
             print("   Top subreddits:")
             for s in stats["top_subreddits"][:5]:
                 print(f"     r/{s['subreddit']}: {s['cnt']} постов, avg score {s['avg_score']:.0f}")
+    elif action == "rebuild":
+        from .intelligence.migrations import migrate
+        from .intelligence.rebuild import rebuild_from_snapshots
+
+        conn = get_db(db_path)
+        migrate(conn)
+        snapshots_dir = _snapshots_dir(args)
+        target_date = getattr(args, "date", None)
+        profile = getattr(args, "profile", "ai-native")
+
+        print(f"🔄 Rebuild из {snapshots_dir}...")
+        stats = rebuild_from_snapshots(conn, snapshots_dir, profile, target_date)
+        conn.close()
+        print(
+            f"✅ Rebuild: {stats['dates']} дат, {stats['items']} items, "
+            f"{stats['skipped']} пропущено"
+        )
 
 
 # ── CLI parser ─────────────────────────────────────────────────────────────
@@ -591,8 +608,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("ph", parents=[common], help="ProductHunt: топ продуктов (GraphQL API)")
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
 
-    db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats")
-    db_p.add_argument("db_action", choices=["init", "stats"], help="Действие с БД")
+    db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats / rebuild")
+    db_p.add_argument("db_action", choices=["init", "stats", "rebuild"], help="Действие с БД")
+    db_p.add_argument("--date", type=str, default=None, help="Дата для rebuild (YYYY-MM-DD)")
+    db_p.add_argument("--profile", type=str, default="ai-native", help="Профиль для rebuild")
 
     return parser
 
