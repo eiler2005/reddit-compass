@@ -74,6 +74,8 @@ async def today_page(
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
+    from .query_service import build_freshness_line, build_run_summary, build_source_coverage
+
     if date is None:
         row = conn.execute(
             "SELECT snapshot_date FROM runs ORDER BY snapshot_date DESC LIMIT 1"
@@ -97,6 +99,11 @@ async def today_page(
 
     view = briefing_to_view(briefing)
 
+    # Run summary и source coverage
+    run_summary = build_run_summary(conn, date, profile)
+    source_coverage = build_source_coverage(conn, f"{date}:{profile}", date)
+    freshness_line = build_freshness_line(run_summary) if run_summary else ""
+
     prev_row = conn.execute(
         "SELECT snapshot_date FROM runs WHERE snapshot_date < ? "
         "ORDER BY snapshot_date DESC LIMIT 1",
@@ -115,6 +122,9 @@ async def today_page(
         name="today.html",
         context={
             "briefing": view,
+            "run_summary": run_summary,
+            "source_coverage": source_coverage,
+            "freshness_line": freshness_line,
             "csrf_token": _generate_csrf_token(),
         },
     )

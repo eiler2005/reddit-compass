@@ -14,10 +14,12 @@
         {% endif %}
     </div>
 
-    <div class="status-line">
+    <div class="freshness-bar">
         <span class="status-badge status-{{ briefing.status }}">{{ briefing.status_label }}</span>
+        {% if freshness_line %}
+        <span class="freshness-text">{{ freshness_line }}</span>
+        {% endif %}
         <span class="profile">{{ briefing.profile }}</span>
-        <span class="generated">Обновлено: {{ briefing.generated_at }}</span>
     </div>
 
     {% if briefing.top_changes %}
@@ -75,23 +77,27 @@
     </section>
     {% endif %}
 
-    {% if briefing.source_health %}
-    <details class="source-health">
-        <summary>Источники ({{ briefing.source_health|length }})</summary>
+    {% if source_coverage %}
+    <details class="source-coverage">
+        <summary>Охват источников ({{ source_coverage|selectattr("status", "equalto", "ok")|list|length }}/{{ source_coverage|length }})</summary>
         <table class="table">
             <thead>
                 <tr>
                     <th>Источник</th>
+                    <th>Кластер</th>
                     <th>Статус</th>
-                    <th>Кол-во</th>
+                    <th>Материалов</th>
+                    <th>Scope</th>
                 </tr>
             </thead>
             <tbody>
-                {% for source in briefing.source_health %}
+                {% for source in source_coverage %}
                 <tr>
-                    <td>{{ source.source_id }}</td>
+                    <td>{{ source.label }}</td>
+                    <td><span class="cluster-badge cluster-{{ source.source_cluster }}">{{ source.source_cluster }}</span></td>
                     <td><span class="status-badge status-{{ source.status }}">{{ source.status }}</span></td>
-                    <td>{{ source.count }}</td>
+                    <td>{{ source.item_count }}</td>
+                    <td>{{ source.content_scope }}</td>
                 </tr>
                 {% endfor %}
             </tbody>

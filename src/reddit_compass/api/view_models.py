@@ -6,9 +6,66 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from ..intelligence.models import Briefing, BriefingStory, ResearchState, Story
+
+
+@dataclass
+class RunSummary:
+    """Единый источник правды о run."""
+
+    run_id: str
+    date: str
+    profile: str
+    status: Literal["complete", "partial", "running", "failed"]
+    started_at: str | None = None
+    finished_at: str | None = None
+    last_success_at: str | None = None
+    unique_item_count: int = 0
+    analyzed_item_count: int = 0
+    story_count: int = 0
+    expected_provider_count: int = 0
+    successful_provider_count: int = 0
+    fresh_provider_count: int = 0
+    adapter_family_count: int = 0
+
+
+@dataclass
+class SourceCoverageRow:
+    """Строка покрытия источника."""
+
+    source_id: str
+    label: str
+    adapter: str
+    source_cluster: str
+    configured: bool = True
+    expected: bool = True
+    attempted: bool = False
+    status: Literal["ok", "empty", "error", "stale", "skipped", "not_configured"] = "skipped"
+    item_count: int = 0
+    content_scope: Literal["headline", "abstract", "excerpt", "full"] = "headline"
+    last_success_at: str | None = None
+    freshness_hours: float | None = None
+    duration_sec: float | None = None
+    message: str = ""
+
+
+@dataclass
+class CloudNode:
+    """Узел облака тем."""
+
+    node_id: str
+    label_ru: str
+    label_original: str | None = None
+    item_count: int = 0
+    story_count: int = 0
+    provider_count: int = 0
+    source_cluster_count: int = 0
+    direction: str = "stable"
+    delta_1d: int | None = None
+    trend_score: float = 0.0
+    url: str = ""
 
 
 @dataclass

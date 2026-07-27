@@ -93,6 +93,32 @@ h1, h2, h3 {
     flex-wrap: wrap;
 }
 
+.freshness-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+    padding: 0.75rem 1rem;
+    background: var(--color-surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--color-border);
+}
+
+.freshness-text {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+}
+
+.source-coverage {
+    margin-top: 2rem;
+}
+
+.source-coverage summary {
+    cursor: pointer;
+    font-weight: 500;
+}
+
 .status-badge {
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius);
