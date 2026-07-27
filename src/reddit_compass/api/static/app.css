@@ -259,6 +259,54 @@ h1, h2, h3 {
     margin-left: 0.5rem;
 }
 
+.read-list {
+    list-style: none;
+}
+
+.read-list li {
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.read-list a {
+    color: var(--color-text);
+    text-decoration: none;
+    flex: 1;
+}
+
+.read-list a:hover {
+    color: var(--color-primary);
+}
+
+.read-source {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    margin-left: 0.5rem;
+}
+
+.source-status {
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+    margin: 1rem 0;
+}
+
+.radar-cta {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.radar-teaser {
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+}
+
 .status-badge {
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius);

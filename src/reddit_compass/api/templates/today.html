@@ -19,160 +19,67 @@
         {% if freshness_line %}
         <span class="freshness-text">{{ freshness_line }}</span>
         {% endif %}
-        <span class="profile">{{ briefing.profile }}</span>
     </div>
 
+    <!-- Что изменилось сегодня -->
     {% if briefing.top_changes %}
     <section class="section">
-        <h2>Что изменилось</h2>
+        <h2>Что изменилось сегодня</h2>
         <div class="story-grid">
-            {% for story in briefing.top_changes %}
+            {% for story in briefing.top_changes[:5] %}
             {% include "components/story_card.html" %}
             {% endfor %}
         </div>
     </section>
     {% endif %}
 
+    <!-- Что прочитать сейчас -->
     {% if briefing.mega_stories %}
     <section class="section">
-        <h2>Мега-сюжеты</h2>
-        <p class="section-note">Топ сюжетов по всем каналам. Ранжирование: goal relevance × source diversity × momentum × novelty × evidence.</p>
-        <div class="story-grid">
-            {% for story in briefing.mega_stories %}
-            {% include "components/story_card.html" %}
+        <h2>Что прочитать сейчас</h2>
+        <ul class="read-list">
+            {% for story in briefing.mega_stories[:5] %}
+            {% for e in story.evidence[:1] %}
+            <li>
+                <a href="{{ e.url }}" target="_blank" rel="noopener noreferrer">{{ story.title }}</a>
+                <span class="read-source">{{ e.provider }}</span>
+            </li>
             {% endfor %}
-        </div>
+            {% endfor %}
+        </ul>
     </section>
     {% endif %}
 
-    {% if briefing.watchlist %}
+    <!-- В работе -->
+    {% if saved_in_progress %}
     <section class="section">
-        <h2>Наблюдать</h2>
+        <h2>В работе</h2>
         <div class="story-grid compact">
-            {% for story in briefing.watchlist %}
+            {% for story in saved_in_progress %}
             {% include "components/story_card.html" %}
             {% endfor %}
         </div>
     </section>
     {% endif %}
 
-    {% if briefing.stable_themes or briefing.emerging_candidates or briefing.pain_point_cloud %}
-    <section class="section">
-        <h2>Тематический ландшафт</h2>
-        <div class="clouds-grid">
-            {% if briefing.stable_themes %}
-            <div class="cloud-block">
-                <h3>Стабильные темы</h3>
-                <div class="cloud">
-                    {% for node in briefing.stable_themes %}
-                    <a href="{{ node.url }}" class="cloud-node" style="font-size: {{ 0.8 + node.item_count * 0.1 }}rem">
-                        {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
-                    </a>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
+    <!-- Source status -->
+    <p class="source-status">
+        {{ run_summary.successful_provider_count }}/{{ run_summary.expected_provider_count }} источников ·
+        {{ run_summary.unique_item_count }} материалов
+    </p>
 
-            {% if briefing.emerging_candidates %}
-            <div class="cloud-block">
-                <h3>Новые сюжеты</h3>
-                <div class="cloud">
-                    {% for node in briefing.emerging_candidates %}
-                    <span class="cloud-node cloud-candidate">
-                        {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
-                    </span>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-
-            {% if briefing.pain_point_cloud %}
-            <div class="cloud-block">
-                <h3>Болевые точки</h3>
-                <div class="cloud">
-                    {% for node in briefing.pain_point_cloud %}
-                    <span class="cloud-node cloud-pain">
-                        {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
-                    </span>
-                    {% endfor %}
-                </div>
-            </div>
-            {% endif %}
-        </div>
-    </section>
-    {% endif %}
-
-    {% if briefing.pain_points %}
-    <section class="section">
-        <h2>Болевые точки</h2>
-        <ul class="list">
-            {% for point in briefing.pain_points %}
-            <li>{{ point.text }}</li>
-            {% endfor %}
-        </ul>
-    </section>
-    {% endif %}
-
-    {% if briefing.column_ideas %}
-    <section class="section">
-        <h2>Идеи для колонок</h2>
-        <ul class="list">
-            {% for idea in briefing.column_ideas %}
-            <li>{{ idea.text }}</li>
-            {% endfor %}
-        </ul>
-    </section>
-    {% endif %}
-
-    {% if briefing.narrative_shifts %}
-    <section class="section">
-        <h2>Сдвиги нарратива</h2>
-        <ul class="list">
-            {% for shift in briefing.narrative_shifts %}
-            <li>{{ shift.text }}</li>
-            {% endfor %}
-        </ul>
-    </section>
-    {% endif %}
-
-    {% if source_coverage %}
-    <details class="source-coverage">
-        <summary>Охват источников ({{ source_coverage|selectattr("status", "equalto", "ok")|list|length }}/{{ source_coverage|length }})</summary>
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Источник</th>
-                    <th>Кластер</th>
-                    <th>Статус</th>
-                    <th>Материалов</th>
-                    <th>Scope</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for source in source_coverage %}
-                <tr>
-                    <td>{{ source.label }}</td>
-                    <td><span class="cluster-badge cluster-{{ source.source_cluster }}">{{ source.source_cluster }}</span></td>
-                    <td><span class="status-badge status-{{ source.status }}">{{ source.status }}</span></td>
-                    <td>{{ source.item_count }}</td>
-                    <td>{{ source.content_scope }}</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </details>
-    {% endif %}
-
-    <section class="section">
-        <h2>Исходные материалы</h2>
-        <div class="explore-presets">
-            <a href="/explore?source_cluster=voices" class="btn">Reddit voices</a>
-            <a href="/explore?source_cluster=developers" class="btn">Hacker News</a>
-            <a href="/explore?source_cluster=mainstream" class="btn">Mainstream</a>
-            <a href="/explore?source_cluster=business" class="btn">Business media</a>
-            <a href="/explore?source_cluster=tech_culture" class="btn">Tech culture</a>
-            <a href="/explore?source_cluster=product_pulse" class="btn">Product pulse</a>
-        </div>
-    </section>
+    <!-- Кнопка в Radar -->
+    <div class="radar-cta">
+        <a href="/runs/{{ briefing.date }}/radar" class="btn btn-primary">
+            Открыть полный Trend Radar →
+        </a>
+        {% if briefing.mega_stories or briefing.stable_themes %}
+        <span class="radar-teaser">
+            {{ briefing.mega_stories|length }} сюжетов ·
+            {{ briefing.stable_themes|length }} тем ·
+            {{ briefing.pain_point_cloud|length }} pain points
+        </span>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}
