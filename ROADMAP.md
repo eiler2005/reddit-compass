@@ -16,6 +16,23 @@ reddit-compass растёт от автономного коллектора т�
 - Ночной разбор трендов (config-driven, по кластерам профиля).
 - Обвязка: uv, ruff, mypy (strict), pytest, pre-commit, CI; Docker; скелет VPS-деплоя.
 
+## v0.3 — intelligence layer + UI (готово, 2026-07-27)
+
+- **Intelligence layer**: source-agnostic models (ContentItem, Story, Briefing),
+  SQLite v2 (10 таблиц), story clustering (rapidfuzz), ranking (5 компонентов),
+  deterministic briefing, LLM validation (Pydantic schemas).
+- **Unified run**: `reddit-compass run --sources reddit,hn,rss,ladder,ph`.
+- **Source registry**: 22 источника с метаданными. NYT API adapter.
+- **Web UI** (Jinja2): `/today` (компактный бриф), `/runs/{date}/radar` (полный
+  аналитический workspace), `/explore` (поиск/фильтры), `/stories/{id}` (research).
+- **API v2**: briefings, stories, runs, source-health, PATCH research-state.
+- **Дизайн-система**: kinetic motion-first, dark tech aesthetic, обе темы
+  (dark default + light toggle), Space Grotesk / Inter / JetBrains Mono.
+- **Карточки**: прямой переход на primary evidence, читаемые кластеры и источники.
+- **Legacy**: `/legacy/dashboard`, `/legacy/runs/{date}/radar` на переходный релиз.
+- **CLI**: `db rebuild` — перестройка SQLite v2 из snapshots.
+- 268 тестов, coverage 71%, ruff/mypy strict зелёные.
+
 ## Phase 2 — планировщик на VPS (HostKey «Hermes»)
 
 - App-owned compose-стек `/opt/reddit-compass`, изолированный от прочих стеков (своя сеть + volume).

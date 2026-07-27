@@ -121,3 +121,20 @@ class TestBuildThemeClouds:
         assert stable == []
         assert emerging == []
         assert pain == []
+
+
+class TestViewLabels:
+    def test_cluster_label(self):
+        from reddit_compass.api.view_models import cluster_label
+
+        assert cluster_label("voices") == "🗣 Голоса"
+        assert cluster_label("tech_culture") == "🔬 Tech/Культура"
+        assert cluster_label("unknown") == "unknown"
+
+    def test_provider_label(self):
+        from reddit_compass.api.view_models import provider_label
+
+        assert provider_label("techcrunch") == "TechCrunch"
+        assert provider_label("hackernews") == "HN"
+        assert provider_label("bbc") == "BBC"
+        assert provider_label("unknown_source") == "unknown_source"

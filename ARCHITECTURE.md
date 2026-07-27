@@ -128,12 +128,18 @@ reddit-compass — **трендовый радар**: собирает «гол�
   │                    rc-api (FastAPI, :8900)                        │
   │                                                                  │
   │  GET /health              GET /api/v1/posts?date=&subreddit=     │
-  │  GET /dashboard           GET /api/v1/signals?date=              │
-  │  GET /docs (Swagger)      GET /api/v1/stats                      │
-  │  POST /oauth/token        GET /api/v1/snapshots                  │
+  │  GET /today               GET /api/v1/signals?date=              │
+  │  GET /radar               GET /api/v1/stats                      │
+  │  GET /runs/{date}/radar   GET /api/v2/briefings/{date}           │
+  │  GET /explore             GET /api/v2/stories                    │
+  │  GET /stories/{id}        GET /api/v2/runs                       │
+  │  GET /runs                PATCH /api/v2/stories/{id}/research    │
+  │  GET /docs (Swagger)      POST /oauth/token                      │
+  │  GET /legacy/dashboard    GET /api/v1/snapshots                  │
   │                                                                  │
   │  Auth: OAuth2 client credentials → JWT (1h)                      │
   │  CORS: cheap-intelligence.vercel.app (Practicum)                 │
+  │  UI: Jinja2 + dark/light theme + kinetic motion                  │
   └─────────────────────────────────────────────────────────────────┘
            │
            ▼

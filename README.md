@@ -54,13 +54,16 @@ You wake up to a report that says:
 ### When you ask it
 
 ```bash
-reddit-compass fetch --stealth     # Reddit: 18 subreddits, stealth mode
+reddit-compass run --sources reddit,hn,rss,ladder,ph  # Unified run (все источники)
+reddit-compass run --sources reddit,hn --allow-partial  # Частичный run
+reddit-compass fetch --stealth     # Reddit: 40 subreddits, stealth mode
 reddit-compass hn                  # Hacker News: AI stories
 reddit-compass rss                 # RSS: 6 free sources
 reddit-compass ladder              # Paywall: 12 sources via Ladder
 reddit-compass ph                  # ProductHunt: top products
 reddit-compass signals             # LLM analysis (Qwen API, all sources)
-reddit-compass serve               # REST API on :8900
+reddit-compass serve               # REST API + UI on :8900
+reddit-compass db rebuild          # Rebuild SQLite v2 из snapshots
 reddit-compass db stats            # SQLite history
 reddit-compass fetch --dry-run     # Preview without network
 ```
@@ -262,18 +265,36 @@ Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
 
 ## Dashboard & Trend Radar
 
-Two views, two purposes:
+Три режима, три сценария:
 
 | View | URL | Purpose |
 |---|---|---|
-| **📊 Dashboard** | `/dashboard`, `/runs/{date}` | Operational: what was collected, sources, posts by cluster, themes→posts |
-| **🤖 Trend Radar** | `/runs/{date}/radar` | Analytical: LLM synthesis — deep themes, column ideas, narrative shifts, pain points, top-10 by book relevance, theme cloud |
+| **⚡ Today** | `/today` | Утренний бриф: 3–5 изменений, что прочитать, что в работе |
+| **🤖 Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: KPI, мега-сюжеты, облака, сила трендов, relevance Книга/РБК |
+| **🔍 Explore** | `/explore` | Поиск, фильтры, raw materials по кластерам |
+| **📋 Story** | `/stories/{id}` | Исследование сюжета: timeline, evidence, research state |
+| **📁 Runs** | `/runs` | История запусков с реальными counts |
+
+Legacy (один переходный релиз): `/legacy/dashboard`, `/legacy/runs/{date}/radar`
+
+### Дизайн
+
+Kinetic motion-first, dark tech aesthetic (по описанию Awwwards: icreon-digital-velocity).
+Обе темы: dark (default) + light toggle. Типографика: Space Grotesk / Inter / JetBrains Mono.
+Scroll-reveal, hover lift + glow, count-up KPI, ambient background.
+
+### Карточки сюжетов
+
+Title → прямой переход на самый значимый источник (primary evidence).
+Ранжирование: content_scope (full > excerpt > abstract > headline) × cluster weight.
+📋 рядом — полный сюжет с timeline и evidence matrix.
+Кластеры: 🗣 Голоса, 💻 Разработчики, 📰 Мейнстрим, 💰 Бизнес,  Tech/Культура, 🚀 Продукты.
 
 ```
-https://rc.204.168.239.217.sslip.io/dashboard    # general dashboard
-https://rc.204.168.239.217.sslip.io/runs         # run history + status
-https://rc.204.168.239.217.sslip.io/runs/2026-07-23        # 📊 run dashboard (posts)
-https://rc.204.168.239.217.sslip.io/runs/2026-07-23/radar  # 🤖 trend radar (analysis)
+http://127.0.0.1:8900/today              # утренний бриф
+http://127.0.0.1:8900/radar              # полный Radar
+http://127.0.0.1:8900/explore            # поиск + фильтры
+http://127.0.0.1:8900/legacy/dashboard   # legacy
 ```
 
 Auth: Basic Auth (credentials in `.env.secrets`), Let's Encrypt TLS.
