@@ -481,10 +481,41 @@ class StoryClusterer:
             for c in self._clusters.values()
         ]
 
+    def seed_from_stories(self, stories: list[Story]) -> None:
+        """Загружает существующие stories для cross-date matching."""
+        for story in stories:
+            tokens = extract_tokens(normalize_title(story.title))
+            entities = extract_entities(story.title)
+            cluster = StoryCluster(
+                story_id=story.story_id,
+                canonical_key=story.canonical_key,
+                title=story.title,
+                item_ids=list(story.item_ids),
+                canonical_urls=set(),
+                tokens=tokens,
+                entities=entities,
+                first_seen=story.first_seen,
+                last_seen=story.last_seen,
+            )
+            self._clusters[story.story_id] = cluster
+
 
 def cluster_items(items: list[ContentItem]) -> tuple[list[Story], int]:
     """Кластеризует список items. Возвращает (stories, ambiguity_count)."""
     clusterer = StoryClusterer()
+    for item in items:
+        clusterer.add_item(item)
+    return clusterer.get_stories(), clusterer.ambiguity_count
+
+
+def cluster_items_with_history(
+    items: list[ContentItem],
+    existing_stories: list[Story],
+) -> tuple[list[Story], int]:
+    """Кластеризует items с учётом истории stories из предыдущих runs."""
+    clusterer = StoryClusterer()
+    if existing_stories:
+        clusterer.seed_from_stories(existing_stories)
     for item in items:
         clusterer.add_item(item)
     return clusterer.get_stories(), clusterer.ambiguity_count

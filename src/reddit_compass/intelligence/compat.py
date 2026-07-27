@@ -45,6 +45,7 @@ _RSS_LADDER_CLUSTER_MAP: dict[str, SourceCluster] = {
     "reuters": "business",
     "techcrunch": "tech_culture",
     "theverge": "tech_culture",
+    "verge": "tech_culture",
     "arstechnica": "tech_culture",
     "nytimes": "mainstream",
     "washingtonpost": "mainstream",

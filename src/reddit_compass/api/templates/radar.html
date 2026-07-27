@@ -44,6 +44,21 @@
                 <div class="kpi-label">Pain points</div>
             </div>
         </div>
+        {% if radar.run.analyzed_item_count == 0 %}
+        <p class="section-note" style="color: var(--warning); margin-top: 0.75rem;">
+            ⚠️ LLM-анализ не выполнен для этого run. Облака тем и pain points пустые.
+            Запустите <code>reddit-compass run --analyze</code> для полного анализа.
+        </p>
+        {% endif %}
+        {% if radar.run.story_count > 0 and radar.run.unique_item_count > 0 %}
+        {% set ratio = (radar.run.story_count / radar.run.unique_item_count * 100)|round(1) %}
+        {% if ratio > 90 %}
+        <p class="section-note" style="color: var(--warning); margin-top: 0.5rem;">
+            ⚠️ Compression ratio {{ ratio }}% — кластеризация почти не объединяет материалы.
+            Требуется улучшение алгоритма story clustering.
+        </p>
+        {% endif %}
+        {% endif %}
     </section>
 
     <!-- LLM-анализ: топ-темы -->
@@ -153,15 +168,17 @@
     </section>
     {% endif %}
 
-    <!-- Сила трендов -->
+    <!-- Сила трендов — только если есть реальная история (не все new) -->
     {% if radar.trend_strength_rows %}
+    {% set has_history = radar.trend_strength_rows | selectattr("direction", "ne", "new") | list | length > 0 %}
+    {% if has_history %}
     <section class="section">
-        <h2>Сила трендов</h2>
+        <h2>Динамика сюжетов</h2>
         <table class="table">
             <thead>
                 <tr>
                     <th>Сюжет</th>
-                    <th>Score</th>
+                    <th>Priority</th>
                     <th>Novelty</th>
                     <th>Coverage</th>
                     <th>Direction</th>
@@ -169,7 +186,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for row in radar.trend_strength_rows %}
+                {% for row in radar.trend_strength_rows[:10] %}
                 <tr>
                     <td><a href="/stories/{{ row.story_id }}">{{ row.title[:60] }}{% if row.title|length > 60 %}...{% endif %}</a></td>
                     <td>{{ "%.0f"|format(row.trend_score) }}</td>
@@ -182,6 +199,7 @@
             </tbody>
         </table>
     </section>
+    {% endif %}
     {% endif %}
 
     <!-- Мега-сюжеты -->

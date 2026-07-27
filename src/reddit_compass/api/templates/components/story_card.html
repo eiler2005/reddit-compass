@@ -1,7 +1,7 @@
 <article class="story-card">
     <header class="story-header">
         <span class="direction-badge direction-{{ story.direction }}">{{ story.direction_label }}</span>
-        <span class="trend-score">{{ "%.0f"|format(story.trend_score) }}</span>
+        <span class="trend-score" title="Story priority">{{ "%.0f"|format(story.trend_score) }}</span>
     </header>
     <h3 class="story-title">
         {% if story.primary_evidence_url %}

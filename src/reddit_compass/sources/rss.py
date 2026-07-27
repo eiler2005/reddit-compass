@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 import xml.etree.ElementTree as ET
@@ -246,7 +247,7 @@ async def fetch_rss_source(
                         cards.append(
                             PostCard(
                                 subreddit=source.name,
-                                post_id=url.split("/")[-1][:50] or source.name,
+                                post_id=hashlib.sha256(url.encode()).hexdigest()[:24],
                                 title=item["title"],
                                 author=source.name,
                                 created_utc=item["published"],

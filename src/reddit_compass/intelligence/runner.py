@@ -112,14 +112,26 @@ async def run_sources(
     if sources is None:
         sources = ["reddit", "hackernews", "rss", "ladder", "producthunt"]
 
+    # Маппинг source_id → имя файла в snapshot
+    _FILE_MAP = {
+        "reddit": "posts.jsonl",
+        "hackernews": "hackernews.jsonl",
+        "hn": "hackernews.jsonl",
+        "rss": "rss.jsonl",
+        "ladder": "ladder.jsonl",
+        "producthunt": "producthunt.jsonl",
+        "ph": "producthunt.jsonl",
+    }
+
     for source_id in sources:
         result = await _run_single_source(source_id, config, snap_dir, snapshot_date)
         source_results.append(result)
 
         if result.status == "ok":
+            filename = _FILE_MAP.get(source_id, f"{source_id}.jsonl")
             items, _ = load_legacy_jsonl(
-                snap_dir / f"{source_id}.jsonl",
-                f"{source_id}.jsonl",
+                snap_dir / filename,
+                filename,
                 _now_iso(),
             )
             all_items.extend(items)
@@ -159,19 +171,24 @@ async def run_sources(
 
         replace_run_stories(conn, run_id, stories, metrics)
 
-        source_health = [
-            SourceHealth(
-                source_id=r.source_id,
-                provider=r.source_id,
-                cluster="voices",
-                status=r.status,  # type: ignore[arg-type]
-                count=r.count,
-                duration_sec=r.duration_sec,
-                error_code=r.error_code,
-                message=r.message,
+        from ..sources.registry import SOURCES
+
+        source_health = []
+        for r in source_results:
+            source_def = SOURCES.get(r.source_id)
+            cluster = source_def.cluster if source_def else "voices"
+            source_health.append(
+                SourceHealth(
+                    source_id=r.source_id,
+                    provider=r.source_id,
+                    cluster=cluster,
+                    status=r.status,  # type: ignore[arg-type]
+                    count=r.count,
+                    duration_sec=r.duration_sec,
+                    error_code=r.error_code,
+                    message=r.message,
+                )
             )
-            for r in source_results
-        ]
         save_source_health(conn, run_id, source_health)
 
         briefing = build_deterministic_briefing(
@@ -219,6 +236,10 @@ async def _run_single_source(
     snapshot_date: str,
 ) -> SourceResult:
     """Запускает один источник."""
+    # Нормализация aliases
+    _ALIASES = {"hn": "hackernews", "ph": "producthunt"}
+    source_id = _ALIASES.get(source_id, source_id)
+
     t0 = time.time()
 
     try:

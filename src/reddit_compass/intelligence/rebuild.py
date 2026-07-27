@@ -140,11 +140,35 @@ def rebuild_from_snapshots(
 
         # Clustering + ranking + briefing
         from .briefing import build_deterministic_briefing
-        from .clustering import cluster_items
+        from .clustering import cluster_items_with_history
         from .ranking import compute_percentiles, rank_story
         from .repository import replace_run_stories, save_briefing
 
-        stories, _ = cluster_items(items)
+        # Загружаем stories из предыдущих дат для cross-date matching
+        existing_stories = []
+        prev_rows = conn.execute(
+            "SELECT story_id, canonical_key, title, first_seen, last_seen, item_ids "
+            "FROM stories WHERE story_id NOT IN "
+            "(SELECT story_id FROM story_metrics WHERE run_id = ?)",
+            (run_id,),
+        ).fetchall()
+        import json as _json
+
+        for row in prev_rows:
+            from .models import Story
+
+            existing_stories.append(
+                Story(
+                    story_id=row["story_id"],
+                    canonical_key=row["canonical_key"],
+                    title=row["title"],
+                    first_seen=row["first_seen"],
+                    last_seen=row["last_seen"],
+                    item_ids=_json.loads(row["item_ids"]),
+                )
+            )
+
+        stories, _ = cluster_items_with_history(items, existing_stories)
         percentiles = compute_percentiles(items)
 
         items_by_story: dict[str, list[ContentItem]] = {}
@@ -156,12 +180,39 @@ def rebuild_from_snapshots(
         metrics = []
         for story in stories:
             story_items = items_by_story.get(story.story_id, [])
+
+            # Ищем предыдущие метрики для этого story
+            prev_row = conn.execute(
+                "SELECT item_count, source_count FROM story_metrics "
+                "WHERE story_id = ? AND run_id != ? "
+                "ORDER BY run_id DESC LIMIT 1",
+                (story.story_id, run_id),
+            ).fetchone()
+
+            prev_item_count = prev_row["item_count"] if prev_row else None
+            prev_source_count = prev_row["source_count"] if prev_row else None
+
+            # Вычисляем gap_days для resurfacing detection
+            gap_days = None
+            if story.last_seen and story.last_seen != snapshot_date:
+                from datetime import date as _date
+
+                try:
+                    last = _date.fromisoformat(story.last_seen)
+                    curr = _date.fromisoformat(snapshot_date)
+                    gap_days = (curr - last).days
+                except ValueError:
+                    pass
+
             metric = rank_story(
                 story=story,
                 items=story_items,
                 current_date=snapshot_date,
                 percentiles=percentiles,
                 run_id=run_id,
+                prev_item_count=prev_item_count,
+                prev_source_count=prev_source_count,
+                gap_days=gap_days,
             )
             metrics.append(metric)
 
