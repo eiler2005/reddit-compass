@@ -98,6 +98,7 @@ class BriefingView:
     status_label: str
     generated_at: str
     top_changes: list[StoryCardView] = field(default_factory=list)
+    mega_stories: list[StoryCardView] = field(default_factory=list)
     watchlist: list[StoryCardView] = field(default_factory=list)
     pain_points: list[dict[str, Any]] = field(default_factory=list)
     column_ideas: list[dict[str, Any]] = field(default_factory=list)
@@ -211,6 +212,7 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
         status_label=status_label(briefing.status),
         generated_at=briefing.generated_at,
         top_changes=[_story_to_card(bs) for bs in briefing.top_changes],
+        mega_stories=[_story_to_card(bs) for bs in briefing.mega_stories],
         watchlist=[_story_to_card(bs) for bs in briefing.watchlist],
         pain_points=[
             {"text": gp.text, "evidence_ids": gp.evidence_ids} for gp in briefing.pain_points

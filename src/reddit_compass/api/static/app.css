@@ -73,6 +73,12 @@ h1, h2, h3 {
     margin-bottom: 2rem;
 }
 
+.section-note {
+    color: var(--color-text-secondary);
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+}
+
 .date-switcher {
     display: flex;
     align-items: center;

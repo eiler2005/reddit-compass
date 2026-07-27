@@ -417,6 +417,7 @@ def _briefing_to_dict(b: Briefing) -> dict[str, Any]:
         "generated_at": b.generated_at,
         "source_health": [asdict(sh) for sh in b.source_health],
         "top_changes": [_story_dict(bs) for bs in b.top_changes],
+        "mega_stories": [_story_dict(bs) for bs in b.mega_stories],
         "watchlist": [_story_dict(bs) for bs in b.watchlist],
         "pain_points": [asdict(gp) for gp in b.pain_points],
         "column_ideas": [asdict(gp) for gp in b.column_ideas],
@@ -492,6 +493,7 @@ def _dict_to_briefing(d: dict[str, Any]) -> Briefing:
             for sh in d.get("source_health", [])
         ],
         top_changes=[_story_from_dict(sd) for sd in d.get("top_changes", [])],
+        mega_stories=[_story_from_dict(sd) for sd in d.get("mega_stories", [])],
         watchlist=[_story_from_dict(sd) for sd in d.get("watchlist", [])],
         pain_points=[
             GroundedText(text=gp["text"], evidence_ids=gp.get("evidence_ids", []))

@@ -24,6 +24,7 @@ from .models import (
 )
 
 _TOP_CHANGES_LIMIT = 5
+_MEGA_STORIES_LIMIT = 10
 _WATCHLIST_LIMIT = 10
 
 _WHY_IT_MATTERS_TEMPLATE = (
@@ -117,8 +118,19 @@ def build_deterministic_briefing(
     sorted_metrics = sorted(metrics, key=lambda m: m.trend_score, reverse=True)
 
     top_changes: list[BriefingStory] = []
+    mega_stories: list[BriefingStory] = []
     watchlist: list[BriefingStory] = []
 
+    # Mega stories: top 10 по trend_score (все направления)
+    for metric in sorted_metrics[:_MEGA_STORIES_LIMIT]:
+        story = stories_by_id.get(metric.story_id)
+        if not story:
+            continue
+        items = items_by_story.get(metric.story_id, [])
+        mega_stories.append(build_briefing_story(story, metric, items))
+
+    # Top changes: new/growing/resurfacing
+    # Watchlist: остальные
     for metric in sorted_metrics:
         story = stories_by_id.get(metric.story_id)
         if not story:
@@ -153,6 +165,7 @@ def build_deterministic_briefing(
         generated_at=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         source_health=source_health,
         top_changes=top_changes,
+        mega_stories=mega_stories,
         watchlist=watchlist,
         pain_points=[],
         column_ideas=[],

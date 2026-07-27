@@ -33,6 +33,18 @@
     </section>
     {% endif %}
 
+    {% if briefing.mega_stories %}
+    <section class="section">
+        <h2>Мега-сюжеты</h2>
+        <p class="section-note">Топ сюжетов по всем каналам. Ранжирование: goal relevance × source diversity × momentum × novelty × evidence.</p>
+        <div class="story-grid">
+            {% for story in briefing.mega_stories %}
+            {% include "components/story_card.html" %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     {% if briefing.watchlist %}
     <section class="section">
         <h2>Наблюдать</h2>

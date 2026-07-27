@@ -172,6 +172,7 @@ class Briefing:
     generated_at: str
     source_health: list[SourceHealth] = field(default_factory=list)
     top_changes: list[BriefingStory] = field(default_factory=list)
+    mega_stories: list[BriefingStory] = field(default_factory=list)
     watchlist: list[BriefingStory] = field(default_factory=list)
     pain_points: list[GroundedText] = field(default_factory=list)
     column_ideas: list[GroundedText] = field(default_factory=list)
