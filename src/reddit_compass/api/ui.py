@@ -320,6 +320,6 @@ async def update_research_state_endpoint(
 
 
 @router.get("/dashboard", include_in_schema=False)
-async def dashboard_redirect():
+async def dashboard_redirect() -> RedirectResponse:
     """Legacy redirect: /dashboard → /today."""
     return RedirectResponse(url="/today", status_code=302)
