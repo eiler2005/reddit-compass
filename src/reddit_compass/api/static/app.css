@@ -178,6 +178,87 @@ h1, h2, h3 {
     gap: 0.5rem;
 }
 
+.kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+.kpi-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 1rem;
+    text-align: center;
+}
+
+.kpi-num {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--color-primary);
+}
+
+.kpi-label {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.two-column {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 1.5rem;
+}
+
+.tabs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 1.5rem;
+}
+
+.tab-block h3 {
+    font-size: 0.9rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.relevance-list {
+    list-style: none;
+    counter-reset: relevance;
+}
+
+.relevance-list li {
+    counter-increment: relevance;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--color-border);
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+}
+
+.relevance-list li::before {
+    content: counter(relevance) ".";
+    color: var(--color-text-secondary);
+    margin-right: 0.5rem;
+}
+
+.relevance-list a {
+    color: var(--color-text);
+    text-decoration: none;
+    flex: 1;
+}
+
+.relevance-list a:hover {
+    color: var(--color-primary);
+}
+
+.relevance-score {
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-left: 0.5rem;
+}
+
 .status-badge {
     padding: 0.25rem 0.75rem;
     border-radius: var(--radius);

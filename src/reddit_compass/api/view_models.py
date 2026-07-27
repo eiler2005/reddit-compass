@@ -272,3 +272,69 @@ def story_to_detail_view(
         evidence_by_cluster=evidence_by_cluster,
         research_state=research_state,
     )
+
+
+@dataclass
+class TrendStrengthView:
+    """View model для строки силы трендов."""
+
+    story_id: str
+    title: str
+    trend_score: float
+    novelty: float
+    coverage: float
+    direction: str
+    direction_label: str
+    provider_count: int
+    item_count: int
+
+
+@dataclass
+class RawItemView:
+    """View model для raw item (популярное в каналах)."""
+
+    item_id: str
+    title: str
+    provider: str
+    source_cluster: str
+    url: str
+    score: int = 0
+    comments: int = 0
+
+
+@dataclass
+class RadarPageView:
+    """Полный аналитический Radar."""
+
+    date: str
+    profile: str
+    run: RunSummary
+    source_coverage: list[SourceCoverageRow]
+    top_changes: list[StoryCardView] = field(default_factory=list)
+    mega_stories: list[StoryCardView] = field(default_factory=list)
+    watchlist: list[StoryCardView] = field(default_factory=list)
+    stable_themes: list[CloudNode] = field(default_factory=list)
+    emerging_candidates: list[CloudNode] = field(default_factory=list)
+    pain_point_cloud: list[CloudNode] = field(default_factory=list)
+    goal_relevance_rankings: dict[str, list[StoryCardView]] = field(default_factory=dict)
+    trend_strength_rows: list[TrendStrengthView] = field(default_factory=list)
+    column_ideas: list[dict[str, Any]] = field(default_factory=list)
+    narrative_shifts: list[dict[str, Any]] = field(default_factory=list)
+    raw_popular_items: list[RawItemView] = field(default_factory=list)
+    prev_date: str | None = None
+    next_date: str | None = None
+
+
+@dataclass
+class TodayPageView:
+    """Компактный Today briefing."""
+
+    date: str
+    profile: str
+    run: RunSummary
+    top_changes: list[StoryCardView] = field(default_factory=list)
+    urgent_reads: list[dict[str, Any]] = field(default_factory=list)
+    saved_in_progress: list[StoryCardView] = field(default_factory=list)
+    radar_url: str = ""
+    prev_date: str | None = None
+    next_date: str | None = None

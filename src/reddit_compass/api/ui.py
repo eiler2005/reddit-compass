@@ -372,3 +372,119 @@ async def update_research_state_endpoint(
 async def dashboard_redirect() -> RedirectResponse:
     """Legacy redirect: /dashboard → /today."""
     return RedirectResponse(url="/today", status_code=302)
+
+
+@router.get("/radar", response_class=HTMLResponse)
+async def radar_redirect(
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> RedirectResponse:
+    """Redirect на последний доступный Radar."""
+    from .query_service import resolve_latest_run
+
+    date = resolve_latest_run(conn)
+    if date is None:
+        return RedirectResponse(url="/today", status_code=302)
+    return RedirectResponse(url=f"/runs/{date}/radar", status_code=302)
+
+
+@router.get("/runs/{date}/radar", response_class=HTMLResponse)
+async def radar_page(
+    request: Request,
+    date: str,
+    profile: str = "ai-native",
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> HTMLResponse:
+    """Полный аналитический Radar."""
+    from ..config import MonitorConfig
+    from .query_service import (
+        build_goal_relevance_rankings,
+        build_raw_popular_items,
+        build_run_summary,
+        build_source_coverage,
+        build_theme_clouds,
+        build_trend_strength,
+    )
+    from .view_models import RadarPageView
+
+    run_id = f"{date}:{profile}"
+    run_summary = build_run_summary(conn, date, profile)
+
+    if run_summary is None:
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": f"Run не найден для {date}."},
+        )
+
+    # Source coverage
+    source_coverage = build_source_coverage(conn, run_id, date)
+
+    # Briefing для stories
+    briefing = get_briefing(conn, date, profile)
+    top_changes = []
+    mega_stories = []
+    watchlist = []
+    column_ideas = []
+    narrative_shifts = []
+
+    if briefing:
+        view = briefing_to_view(briefing)
+        top_changes = view.top_changes
+        mega_stories = view.mega_stories
+        watchlist = view.watchlist
+        column_ideas = view.column_ideas
+        narrative_shifts = view.narrative_shifts
+
+    # Theme clouds
+    config = MonitorConfig.from_file()
+    theme_catalog = [{"id": t.id, "label": t.label} for t in config.themes]
+    stable_themes, emerging_candidates, pain_point_cloud = build_theme_clouds(
+        conn, run_id, theme_catalog
+    )
+
+    # Trend strength
+    trend_strength_rows = build_trend_strength(conn, run_id)
+
+    # Raw popular items
+    raw_popular_items = build_raw_popular_items(conn, date)
+
+    # Goal relevance rankings
+    goals = [g.id for g in config.goals]
+    goal_relevance_rankings = build_goal_relevance_rankings(conn, run_id, goals)
+
+    # Prev/next dates
+    prev_row = conn.execute(
+        "SELECT snapshot_date FROM runs WHERE snapshot_date < ? "
+        "ORDER BY snapshot_date DESC LIMIT 1",
+        (date,),
+    ).fetchone()
+    next_row = conn.execute(
+        "SELECT snapshot_date FROM runs WHERE snapshot_date > ? ORDER BY snapshot_date ASC LIMIT 1",
+        (date,),
+    ).fetchone()
+
+    radar = RadarPageView(
+        date=date,
+        profile=profile,
+        run=run_summary,
+        source_coverage=source_coverage,
+        top_changes=top_changes,
+        mega_stories=mega_stories,
+        watchlist=watchlist,
+        stable_themes=stable_themes,
+        emerging_candidates=emerging_candidates,
+        pain_point_cloud=pain_point_cloud,
+        goal_relevance_rankings=goal_relevance_rankings,
+        trend_strength_rows=trend_strength_rows,
+        column_ideas=column_ideas,
+        narrative_shifts=narrative_shifts,
+        raw_popular_items=raw_popular_items,
+        prev_date=prev_row[0] if prev_row else None,
+        next_date=next_row[0] if next_row else None,
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="radar.html",
+        context={"radar": radar},
+    )

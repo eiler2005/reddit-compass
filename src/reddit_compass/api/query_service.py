@@ -9,7 +9,15 @@ import sqlite3
 from datetime import datetime
 
 from ..sources.registry import SOURCES
-from .view_models import CloudNode, RunSummary, SourceCoverageRow
+from .view_models import (
+    CloudNode,
+    RawItemView,
+    RunSummary,
+    SourceCoverageRow,
+    StoryCardView,
+    TrendStrengthView,
+    direction_label,
+)
 
 
 def resolve_latest_run(conn: sqlite3.Connection, profile: str = "ai-native") -> str | None:
@@ -264,3 +272,110 @@ def build_theme_clouds(
         )
 
     return stable_themes, emerging_candidates, pain_points
+
+
+def build_trend_strength(
+    conn: sqlite3.Connection,
+    run_id: str,
+    limit: int = 20,
+) -> list[TrendStrengthView]:
+    """Строит список силы трендов."""
+    rows = conn.execute(
+        """SELECT sm.story_id, s.title, sm.trend_score, sm.novelty,
+                  sm.cross_source_coverage, sm.direction, sm.source_count, sm.item_count
+           FROM story_metrics sm
+           JOIN stories s ON sm.story_id = s.story_id
+           WHERE sm.run_id = ?
+           ORDER BY sm.trend_score DESC
+           LIMIT ?""",
+        (run_id, limit),
+    ).fetchall()
+
+    return [
+        TrendStrengthView(
+            story_id=row["story_id"],
+            title=row["title"],
+            trend_score=row["trend_score"],
+            novelty=row["novelty"],
+            coverage=row["cross_source_coverage"],
+            direction=row["direction"],
+            direction_label=direction_label(row["direction"]),
+            provider_count=row["source_count"],
+            item_count=row["item_count"],
+        )
+        for row in rows
+    ]
+
+
+def build_raw_popular_items(
+    conn: sqlite3.Connection,
+    date: str,
+    limit: int = 20,
+) -> list[RawItemView]:
+    """Строит список популярных items (raw engagement)."""
+    rows = conn.execute(
+        """SELECT item_id, title, provider, source_cluster, canonical_url, raw_engagement
+           FROM items
+           WHERE snapshot_date = ?
+           ORDER BY json_extract(raw_engagement, '$.score') DESC
+           LIMIT ?""",
+        (date, limit),
+    ).fetchall()
+
+    import json
+
+    items = []
+    for row in rows:
+        engagement = json.loads(row["raw_engagement"]) if row["raw_engagement"] else {}
+        items.append(
+            RawItemView(
+                item_id=row["item_id"],
+                title=row["title"],
+                provider=row["provider"],
+                source_cluster=row["source_cluster"],
+                url=row["canonical_url"],
+                score=int(engagement.get("score", 0)),
+                comments=int(engagement.get("comments", 0)),
+            )
+        )
+    return items
+
+
+def build_goal_relevance_rankings(
+    conn: sqlite3.Connection,
+    run_id: str,
+    goals: list[str],
+    limit: int = 10,
+) -> dict[str, list[StoryCardView]]:
+    """Строит rankings по goal relevance."""
+    rankings: dict[str, list[StoryCardView]] = {}
+
+    for goal in goals:
+        rows = conn.execute(
+            """SELECT sm.story_id, s.title, s.summary_ru, sm.trend_score,
+                      sm.direction, sm.confidence, sm.source_count, sm.item_count
+               FROM story_metrics sm
+               JOIN stories s ON sm.story_id = s.story_id
+               WHERE sm.run_id = ?
+               ORDER BY sm.goal_relevance DESC
+               LIMIT ?""",
+            (run_id, limit),
+        ).fetchall()
+
+        rankings[goal] = [
+            StoryCardView(
+                story_id=row["story_id"],
+                title=row["title"],
+                summary_ru=row["summary_ru"],
+                direction=row["direction"],
+                direction_label=direction_label(row["direction"]),
+                trend_score=row["trend_score"],
+                confidence=row["confidence"],
+                why_it_matters="",
+                source_count=row["source_count"],
+                item_count=row["item_count"],
+            )
+            for row in rows
+        ]
+
+    return rankings
