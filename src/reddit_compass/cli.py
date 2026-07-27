@@ -486,6 +486,42 @@ async def _cmd_ph(args: argparse.Namespace) -> None:
     print(f"✅ ProductHunt: {len(cards)} продуктов → {snap_dir / 'producthunt.jsonl'}")
 
 
+async def _cmd_run(args: argparse.Namespace) -> None:
+    """Unified run: сбор из указанных источников."""
+    from .intelligence.runner import run_sources
+
+    config = _load_config(args)
+    snapshots_dir = _snapshots_dir(args)
+    db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+
+    sources = None
+    if args.sources:
+        sources = [s.strip() for s in args.sources.split(",")]
+
+    profile = getattr(args, "profile", "ai-native")
+    analyze = getattr(args, "analyze", False)
+    allow_partial = getattr(args, "allow_partial", False)
+
+    print(f"🔄 Run: sources={sources or 'all'}, profile={profile}")
+    result = await run_sources(
+        config=config,
+        snapshots_dir=snapshots_dir,
+        db_path=db_path,
+        sources=sources,
+        profile=profile,
+        analyze=analyze,
+        allow_partial=allow_partial,
+    )
+
+    print(f"\n{'=' * 60}")
+    print(f"✅ Run {result.run_id}: {result.status}")
+    print(f"{'=' * 60}")
+    for sr in result.source_results:
+        print(f"  {sr.source_id}: {sr.status} ({sr.count} items, {sr.duration_sec}s)")
+    print(f"  Total items: {len(result.items)}")
+    print(f"{'=' * 60}")
+
+
 def _cmd_serve_sync(args: argparse.Namespace) -> None:
     """Запуск REST API (FastAPI/uvicorn). Синхронный — uvicorn сам управляет event loop."""
     import uvicorn
@@ -606,6 +642,20 @@ def build_parser() -> argparse.ArgumentParser:
         "ladder", parents=[common], help="Ladder: NYT, WaPo, FT, Wired, Medium (paywall)"
     )
     sub.add_parser("ph", parents=[common], help="ProductHunt: топ продуктов (GraphQL API)")
+
+    run_p = sub.add_parser(
+        "run", parents=[common], help="Unified run: сбор из указанных источников"
+    )
+    run_p.add_argument(
+        "--sources",
+        type=str,
+        default=None,
+        help="Источники через запятую: reddit,hn,rss,ladder,ph",
+    )
+    run_p.add_argument("--profile", type=str, default="ai-native", help="Профиль")
+    run_p.add_argument("--analyze", action="store_true", help="Запустить LLM-анализ")
+    run_p.add_argument("--allow-partial", action="store_true", help="Разрешить partial run")
+
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
 
     db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats / rebuild")
@@ -635,6 +685,7 @@ def main() -> None:
         "rss": _cmd_rss,
         "ladder": _cmd_ladder,
         "ph": _cmd_ph,
+        "run": _cmd_run,
         "serve": _cmd_serve,
         "db": _cmd_db,
     }
