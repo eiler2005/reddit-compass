@@ -138,7 +138,53 @@ def rebuild_from_snapshots(
         observations = _compute_observations(run_id, items, observed_at)
         upsert_observations(conn, observations)
 
+        # Clustering + ranking + briefing
+        from .briefing import build_deterministic_briefing
+        from .clustering import cluster_items
+        from .ranking import compute_percentiles, rank_story
+        from .repository import replace_run_stories, save_briefing
+
+        stories, _ = cluster_items(items)
+        percentiles = compute_percentiles(items)
+
+        items_by_story: dict[str, list] = {}
+        for story in stories:
+            items_by_story[story.story_id] = [
+                item for item in items if item.item_id in story.item_ids
+            ]
+
+        metrics = []
+        for story in stories:
+            story_items = items_by_story.get(story.story_id, [])
+            metric = rank_story(
+                story=story,
+                items=story_items,
+                current_date=snapshot_date,
+                percentiles=percentiles,
+                run_id=run_id,
+            )
+            metrics.append(metric)
+
+        replace_run_stories(conn, run_id, stories, metrics)
+
+        briefing = build_deterministic_briefing(
+            run_id=run_id,
+            date=snapshot_date,
+            profile=profile,
+            stories=stories,
+            metrics=metrics,
+            items_by_story=items_by_story,
+            source_health=[],
+        )
+        save_briefing(conn, briefing)
+
         conn.commit()
-        logger.info("  %s: %d items, %d skipped", snapshot_date, len(items), skipped)
+        logger.info(
+            "  %s: %d items, %d stories, %d skipped",
+            snapshot_date,
+            len(items),
+            len(stories),
+            skipped,
+        )
 
     return {"dates": len(dates), "items": total_items, "skipped": total_skipped}
