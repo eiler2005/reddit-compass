@@ -31,6 +31,24 @@ DEFAULT_CONFIG_PATH = _dir(
 
 
 @dataclass
+class Goal:
+    """Цель из профиля (schema v2)."""
+
+    id: str
+    label: str
+    weight: float = 1.0
+
+
+@dataclass
+class Theme:
+    """Тема из профиля (schema v2)."""
+
+    id: str
+    label: str
+    keywords: list[str] = field(default_factory=list)
+
+
+@dataclass
 class MonitorSettings:
     posts_per_subreddit: int = 25
     top_comments_per_post: int = 5
@@ -49,6 +67,9 @@ class MonitorConfig:
     keywords: list[str] = field(default_factory=list)
     tracked_threads: list[str] = field(default_factory=list)
     settings: MonitorSettings = field(default_factory=MonitorSettings)
+    schema_version: int = 1
+    goals: list[Goal] = field(default_factory=list)
+    themes: list[Theme] = field(default_factory=list)
 
     @property
     def all_subreddits(self) -> list[str]:
@@ -83,9 +104,38 @@ class MonitorConfig:
             virality_score_threshold=int(settings_raw.get("virality_score_threshold", 1000)),
             virality_crosspost_min=int(settings_raw.get("virality_crosspost_min", 2)),
         )
+
+        schema_version = int(raw.get("schema_version", 1))
+        goals: list[Goal] = []
+        themes: list[Theme] = []
+
+        if schema_version >= 2:
+            goals_raw = raw.get("goals", {})
+            for goal_id, goal_data in goals_raw.items():
+                goals.append(
+                    Goal(
+                        id=goal_id,
+                        label=goal_data.get("label", goal_id),
+                        weight=float(goal_data.get("weight", 1.0)),
+                    )
+                )
+
+            themes_raw = raw.get("themes", [])
+            for theme_data in themes_raw:
+                themes.append(
+                    Theme(
+                        id=theme_data.get("id", ""),
+                        label=theme_data.get("label", ""),
+                        keywords=theme_data.get("keywords", []),
+                    )
+                )
+
         return cls(
             subreddits=raw.get("subreddits", {}),
             keywords=raw.get("keywords", []),
             tracked_threads=raw.get("tracked_threads", []),
             settings=settings,
+            schema_version=schema_version,
+            goals=goals,
+            themes=themes,
         )

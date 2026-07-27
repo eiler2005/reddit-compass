@@ -1,4 +1,18 @@
 {
+  "schema_version": 2,
+  "goals": {
+    "book": {"label": "Книга", "weight": 1.0},
+    "rbc": {"label": "Колонки РБК", "weight": 1.0},
+    "business": {"label": "Бизнес-сигнал", "weight": 0.7}
+  },
+  "themes": [
+    {"id": "ai_agents", "label": "AI-агенты", "keywords": ["agent", "агент", "autonomous"]},
+    {"id": "labor", "label": "Рынок труда", "keywords": ["layoff", "jobs", "увольнен", "hiring"]},
+    {"id": "regulation", "label": "Регулирование", "keywords": ["regulation", "law", "закон", "policy"]},
+    {"id": "surveillance", "label": "Слежка и приватность", "keywords": ["privacy", "camera", "surveillance", "tracking"]},
+    {"id": "startups", "label": "Стартапы и инвестиции", "keywords": ["startup", "funding", "venture", "investment"]},
+    {"id": "open_source", "label": "Open source AI", "keywords": ["open source", "open-source", "llama", "mistral"]}
+  ],
   "subreddits": {
     "ai_core": [
       "artificial",
