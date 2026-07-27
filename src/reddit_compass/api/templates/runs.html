@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block title %}Запуски — reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Запуски</h1>
+
+    {% if runs %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Профиль</th>
+                <th>Статус</th>
+                <th>Начало</th>
+                <th>Конец</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in runs %}
+            <tr>
+                <td><a href="/today?date={{ run.date }}">{{ run.date }}</a></td>
+                <td>{{ run.profile }}</td>
+                <td><span class="status-badge status-{{ run.status }}">{{ run.status_label }}</span></td>
+                <td>{{ run.started_at }}</td>
+                <td>{{ run.finished_at or '—' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p>Нет запусков. Выполните <code>reddit-compass run</code>.</p>
+    {% endif %}
+</div>
+{% endblock %}

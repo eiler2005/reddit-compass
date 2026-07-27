@@ -1,0 +1,35 @@
+<article class="story-card">
+    <header class="story-header">
+        <span class="direction-badge direction-{{ story.direction }}">{{ story.direction_label }}</span>
+        <span class="trend-score">{{ "%.0f"|format(story.trend_score) }}</span>
+    </header>
+    <h3 class="story-title">
+        <a href="/stories/{{ story.story_id }}">{{ story.title }}</a>
+    </h3>
+    {% if story.summary_ru %}
+    <p class="story-summary">{{ story.summary_ru }}</p>
+    {% endif %}
+    <p class="story-why">{{ story.why_it_matters }}</p>
+    <footer class="story-footer">
+        <span class="meta">{{ story.source_count }} ист. · {{ story.item_count }} мат.</span>
+        <span class="confidence confidence-{{ story.confidence }}">{{ story.confidence }}</span>
+    </footer>
+    {% if story.evidence %}
+    <div class="evidence-links">
+        {% for e in story.evidence[:3] %}
+        <a href="{{ e.url }}" target="_blank" rel="noopener noreferrer" class="evidence-link">
+            {{ e.provider }}
+        </a>
+        {% endfor %}
+    </div>
+    {% endif %}
+    <details class="score-breakdown">
+        <summary>Детали</summary>
+        <dl>
+            {% for key, value in story.score_breakdown.items() %}
+            <dt>{{ key }}</dt>
+            <dd>{{ "%.1f"|format(value) }}</dd>
+            {% endfor %}
+        </dl>
+    </details>
+</article>

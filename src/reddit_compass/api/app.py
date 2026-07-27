@@ -8,10 +8,11 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.staticfiles import StaticFiles
 
 from ..db import get_db, query_posts, query_signals, query_snapshots, query_stats
 from .auth import authenticate_client, create_access_token, verify_token
@@ -24,8 +25,11 @@ from .schemas import (
     TokenRequest,
     TokenResponse,
 )
+from .ui import router as ui_router
 
 security = HTTPBearer(auto_error=False)
+
+STATIC_DIR = Path(__file__).parent / "static"
 
 
 def _get_db() -> Generator[sqlite3.Connection, None, None]:
@@ -55,6 +59,26 @@ def create_app() -> FastAPI:
         description="Compass for Reddit trends — API для потребителей данных",
         version="0.2.0",
     )
+
+    # Security headers middleware
+    @app.middleware("http")
+    async def add_security_headers(request: Request, call_next):
+        response: Response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
+        if request.url.path.startswith(("/today", "/stories", "/explore", "/runs")):
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; img-src 'self' data:; "
+                "style-src 'self'; script-src 'self'; frame-ancestors 'none'"
+            )
+        return response
+
+    # Static files
+    if STATIC_DIR.exists():
+        app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    # UI routes
+    app.include_router(ui_router)
 
     # CORS
     origins_raw = os.environ.get("RC_API_CORS_ORIGINS", "")

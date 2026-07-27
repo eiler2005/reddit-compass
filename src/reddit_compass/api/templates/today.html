@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}{{ briefing.date }} — reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="date-switcher">
+        {% if briefing.prev_date %}
+        <a href="/today?date={{ briefing.prev_date }}" class="btn">← {{ briefing.prev_date }}</a>
+        {% endif %}
+        <h1 class="date-title">{{ briefing.date }}</h1>
+        {% if briefing.next_date %}
+        <a href="/today?date={{ briefing.next_date }}" class="btn">{{ briefing.next_date }} →</a>
+        {% endif %}
+    </div>
+
+    <div class="status-line">
+        <span class="status-badge status-{{ briefing.status }}">{{ briefing.status_label }}</span>
+        <span class="profile">{{ briefing.profile }}</span>
+        <span class="generated">Обновлено: {{ briefing.generated_at }}</span>
+    </div>
+
+    {% if briefing.top_changes %}
+    <section class="section">
+        <h2>Что изменилось</h2>
+        <div class="story-grid">
+            {% for story in briefing.top_changes %}
+            {% include "components/story_card.html" %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if briefing.watchlist %}
+    <section class="section">
+        <h2>Наблюдать</h2>
+        <div class="story-grid compact">
+            {% for story in briefing.watchlist %}
+            {% include "components/story_card.html" %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {% if briefing.pain_points %}
+    <section class="section">
+        <h2>Болевые точки</h2>
+        <ul class="list">
+            {% for point in briefing.pain_points %}
+            <li>{{ point.text }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    {% if briefing.column_ideas %}
+    <section class="section">
+        <h2>Идеи для колонок</h2>
+        <ul class="list">
+            {% for idea in briefing.column_ideas %}
+            <li>{{ idea.text }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    {% if briefing.narrative_shifts %}
+    <section class="section">
+        <h2>Сдвиги нарратива</h2>
+        <ul class="list">
+            {% for shift in briefing.narrative_shifts %}
+            <li>{{ shift.text }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    {% if briefing.source_health %}
+    <details class="source-health">
+        <summary>Источники ({{ briefing.source_health|length }})</summary>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Источник</th>
+                    <th>Статус</th>
+                    <th>Кол-во</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for source in briefing.source_health %}
+                <tr>
+                    <td>{{ source.source_id }}</td>
+                    <td><span class="status-badge status-{{ source.status }}">{{ source.status }}</span></td>
+                    <td>{{ source.count }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </details>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block title %}Нет данных — reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container empty-state">
+    <h1>Нет данных</h1>
+    <p>{{ message }}</p>
+    <p>Запустите сбор данных:</p>
+    <pre><code>reddit-compass run --sources reddit,hn,rss</code></pre>
+</div>
+{% endblock %}

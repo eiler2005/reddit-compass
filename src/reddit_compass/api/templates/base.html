@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}reddit-compass{% endblock %}</title>
+    <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+    <header class="header">
+        <nav class="nav">
+            <a href="/today" class="nav-link">Сегодня</a>
+            <a href="/explore" class="nav-link">Обзор</a>
+            <a href="/runs" class="nav-link">Запуски</a>
+        </nav>
+    </header>
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">
+        <p>reddit-compass — трендовый радар</p>
+    </footer>
+    <script src="/static/app.js"></script>
+</body>
+</html>
