@@ -7,6 +7,16 @@
 
 ### Added
 
+- **Дизайн-система** (kinetic motion-first, dark tech aesthetic по описанию Awwwards
+  icreon-digital-velocity): обе темы (dark default + light toggle с persistence),
+  типографика Space Grotesk / Inter / JetBrains Mono, CSS design tokens, scroll-reveal,
+  hover lift + glow, count-up KPI, ambient background с radial gradients.
+- **Разделение Radar и Today**: `/today` — компактный briefing (3-5 изменений, что
+  прочитать, кнопка в Radar); `/runs/{date}/radar` — полный аналитический workspace
+  (KPI, LLM-анализ, relevance Книга/РБК, облака, сила трендов, мега-сюжеты, raw
+  popularity, охват источников); `/radar` — redirect на последний Radar.
+- **Legacy routes**: `/legacy/dashboard`, `/legacy/runs/{date}/radar` — старые
+  renderers на один переходный релиз.
 - **Intelligence layer** (`src/reddit_compass/intelligence/`): source-agnostic domain models
   (ContentItem, Story, Briefing), SQLite v2 migrations, story clustering (rapidfuzz),
   ranking (goal relevance, cross-source coverage, momentum, novelty, evidence quality),
