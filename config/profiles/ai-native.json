@@ -1,30 +1,62 @@
 {
   "subreddits": {
-    "ai_work_business": [
+    "ai_core": [
       "artificial",
       "singularity",
       "ChatGPT",
       "AI_Agents",
       "LocalLLaMA",
-      "smallbusiness",
-      "Entrepreneur"
+      "MachineLearning",
+      "OpenAI"
     ],
-    "trust_authenticity": [
-      "changemyview",
-      "MachineLearning"
-    ],
-    "vibe_coding_agents": [
+    "vibe_coding": [
       "vibecoding",
       "cursor",
       "LangChain",
       "AutoGPT",
-      "crewAI"
+      "crewAI",
+      "programming"
     ],
-    "layoffs_labor": [
-      "AskReddit",
-      "technology",
+    "labor_jobs": [
       "jobs",
-      "cscareerquestions"
+      "cscareerquestions",
+      "careers",
+      "recruitinghell"
+    ],
+    "business_startups": [
+      "Entrepreneur",
+      "smallbusiness",
+      "startups",
+      "SaaS",
+      "venturebros"
+    ],
+    "finance_economics": [
+      "finance",
+      "Economics",
+      "investing",
+      "wallstreetbets"
+    ],
+    "society_policy": [
+      "AskReddit",
+      "changemyview",
+      "worldnews",
+      "geopolitics",
+      "news"
+    ],
+    "privacy_surveillance": [
+      "privacy",
+      "netsec",
+      "technology"
+    ],
+    "science_future": [
+      "science",
+      "Futurology",
+      "dataisbeautiful"
+    ],
+    "education_culture": [
+      "Professors",
+      "education",
+      "AskAcademia"
     ]
   },
   "keywords": [
@@ -37,7 +69,15 @@
     "AI trust verification",
     "cognitive debt AI",
     "AI outcome pricing",
-    "digital employee audit"
+    "digital employee audit",
+    "AI regulation",
+    "open source AI ban",
+    "AI surveillance",
+    "data center land seizure",
+    "AI copyright lawsuit",
+    "dead internet theory",
+    "AI startup funding",
+    "autonomous AI agent"
   ],
   "tracked_threads": [
     "https://www.reddit.com/r/AskReddit/comments/1qeb533/people_who_got_laid_off_because_of_ai_what_was_your_job/",
