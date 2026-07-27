@@ -128,7 +128,7 @@ class RetryPolicy:
     def get_delay(self, attempt: int) -> float:
         """Вычисляет задержку для retry."""
         delay = self.backoff_base * (2**attempt)
-        return min(delay, self.backoff_max)
+        return float(min(delay, self.backoff_max))
 
     def should_retry(self, attempt: int, error: Exception | None = None) -> bool:
         """Определяет, нужно ли повторить попытку."""

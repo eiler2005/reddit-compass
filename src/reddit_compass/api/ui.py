@@ -5,14 +5,16 @@ Jinja2 templates с autoescape. Security headers.
 
 from __future__ import annotations
 
+import os
 import secrets
+import sqlite3
+from collections.abc import Generator
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..config import DEFAULT_SNAPSHOTS_DIR
 from ..db import get_db
 from ..intelligence.migrations import migrate
 from ..intelligence.repository import (
@@ -35,8 +37,8 @@ templates.env.autoescape = True
 _CSRF_SECRET = secrets.token_hex(32)
 
 
-def _get_db():
-    db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+def _get_db() -> Generator[sqlite3.Connection, None, None]:
+    db_path = Path(os.environ.get("RC_DB_PATH", "data/compass.db"))
     conn = get_db(db_path)
     migrate(conn)
     try:
@@ -67,8 +69,8 @@ async def today_page(
     request: Request,
     date: str | None = None,
     profile: str = "ai-native",
-    conn=Depends(_get_db),
-):
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
     if date is None:
         row = conn.execute(
@@ -78,15 +80,17 @@ async def today_page(
 
     if date is None:
         return templates.TemplateResponse(
-            "empty.html",
-            {"request": request, "message": "Нет данных. Запустите `reddit-compass run`."},
+            request=request,
+            name="empty.html",
+            context={"message": "Нет данных. Запустите `reddit-compass run`."},
         )
 
     briefing = get_briefing(conn, date, profile)
     if briefing is None:
         return templates.TemplateResponse(
-            "empty.html",
-            {"request": request, "message": f"Briefing не найден для {date}."},
+            request=request,
+            name="empty.html",
+            context={"message": f"Briefing не найден для {date}."},
         )
 
     view = briefing_to_view(briefing)
@@ -105,9 +109,9 @@ async def today_page(
     view.next_date = next_row[0] if next_row else None
 
     return templates.TemplateResponse(
-        "today.html",
-        {
-            "request": request,
+        request=request,
+        name="today.html",
+        context={
             "briefing": view,
             "csrf_token": _generate_csrf_token(),
         },
@@ -118,14 +122,15 @@ async def today_page(
 async def story_page(
     request: Request,
     story_id: str,
-    conn=Depends(_get_db),
-):
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> HTMLResponse:
     """Страница story: timeline, evidence, research state."""
     story_data = get_story(conn, story_id)
     if story_data is None:
         return templates.TemplateResponse(
-            "empty.html",
-            {"request": request, "message": f"Story {story_id} не найден."},
+            request=request,
+            name="empty.html",
+            context={"message": f"Story {story_id} не найден."},
             status_code=404,
         )
 
@@ -168,9 +173,9 @@ async def story_page(
     )
 
     return templates.TemplateResponse(
-        "story.html",
-        {
-            "request": request,
+        request=request,
+        name="story.html",
+        context={
             "story": view,
             "csrf_token": _generate_csrf_token(),
         },
@@ -193,8 +198,8 @@ async def explore_page(
     sort: str = "trend_score",
     page: int = 1,
     page_size: int = 50,
-    conn=Depends(_get_db),
-):
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> HTMLResponse:
     """Explore: поиск и фильтрация stories."""
     page_size = min(max(page_size, 10), 100)
     page = max(page, 1)
@@ -231,9 +236,9 @@ async def explore_page(
     ]
 
     return templates.TemplateResponse(
-        "explore.html",
-        {
-            "request": request,
+        request=request,
+        name="explore.html",
+        context={
             "stories": story_views,
             "total": total,
             "page": page,
@@ -253,8 +258,8 @@ async def explore_page(
 @router.get("/runs", response_class=HTMLResponse)
 async def runs_page(
     request: Request,
-    conn=Depends(_get_db),
-):
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> HTMLResponse:
     """Список runs."""
     rows = conn.execute("SELECT * FROM runs ORDER BY snapshot_date DESC LIMIT 30").fetchall()
 
@@ -274,8 +279,9 @@ async def runs_page(
     ]
 
     return templates.TemplateResponse(
-        "runs.html",
-        {"request": request, "runs": runs},
+        request=request,
+        name="runs.html",
+        context={"runs": runs},
     )
 
 
@@ -287,8 +293,8 @@ async def update_research_state_endpoint(
     note: str = Form(""),
     return_to: str = Form("/today"),
     csrf_token: str = Form(""),
-    conn=Depends(_get_db),
-):
+    conn: sqlite3.Connection = Depends(_get_db),
+) -> Response:
     """Обновление research state для story."""
     if not _validate_csrf_token(csrf_token):
         return Response(status_code=403)

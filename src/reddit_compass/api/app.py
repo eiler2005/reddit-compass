@@ -26,6 +26,7 @@ from .schemas import (
     TokenResponse,
 )
 from .ui import router as ui_router
+from .v2 import router as v2_router
 
 security = HTTPBearer(auto_error=False)
 
@@ -62,7 +63,7 @@ def create_app() -> FastAPI:
 
     # Security headers middleware
     @app.middleware("http")
-    async def add_security_headers(request: Request, call_next):
+    async def add_security_headers(request: Request, call_next: Any) -> Response:
         response: Response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
@@ -79,6 +80,9 @@ def create_app() -> FastAPI:
 
     # UI routes
     app.include_router(ui_router)
+
+    # API v2 routes
+    app.include_router(v2_router)
 
     # CORS
     origins_raw = os.environ.get("RC_API_CORS_ORIGINS", "")
