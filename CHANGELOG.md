@@ -7,6 +7,15 @@
 
 ### Added
 
+- **`REDDIT_COMPASS_ENGINE`** (`auto|playwright`): выбор движка Reddit-запросов.
+  `playwright` пропускает aiohttp-попытку и сразу стартует Chromium — основной режим
+  для ротационных residential proxy, где Reddit отдаёт 403 голому HTTP с pool-IP,
+  но обслуживает браузерный трафик (проверено на IPRoyal 2026-07-27).
+- **`fetch-and-sync.sh`**: страховка домашнего IP — чередование маршрута Reddit:
+  чётные дни = домашний IP, нечётные = IPRoyal proxy (движок playwright); скрипт
+  сам source'ит `deploy/hostkey/.env.secrets`. Override — `RC_PROXY_MODE=on|off`.
+- **ROADMAP Phase 7**: план переноса Reddit-fetch на VPS (whitelist/sticky IPRoyal,
+  разнесение тегов образов api/collector, сборка collector в deploy.sh).
 - **Trend Radar v2** (`/runs/{date}/radar`): полноценный серверный рендер с LLM-аналитикой —
   карточки топ-тем с пояснениями, идеи для колонок, сдвиги нарратива, pain points (теги),
   топ-10 по релевантности для книги, облако тем. Тёмный editorial-стиль, единый с дашбордом.
@@ -20,6 +29,9 @@
 
 ### Changed
 
+- **RedditBrowser** (client.py): retry на транзитивные сетевые ошибки (`Failed to fetch` —
+  ротация exit IP у residential proxy) и retry `goto` на новой странице (новое соединение —
+  другой exit IP у ротационного proxy).
 - **`/runs/{date}/radar`**: переключён с regex-рендера markdown на `render_radar_page()`
   (структурный HTML из signals.jsonl + signals-report.md + JSONL-данных).
 - **`_cmd_signals`** (cli.py): загрузка из 5 JSONL-файлов вместо только `posts.jsonl`.

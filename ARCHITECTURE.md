@@ -72,6 +72,8 @@ reddit-compass — **трендовый радар**: собирает «гол�
 │   └──────────────┘             └──────────────┘                    │
 │                                                                    │
 │   ProxyRotator: REDDIT_COMPASS_PROXIES (round-robin, для 429)      │
+│   REDDIT_COMPASS_ENGINE: auto|playwright (playwright — ротационный │
+│   residential proxy, где голый HTTP получает 403 с pool-IP)        │
 │   Stealth: jitter 3–6с + exponential backoff (nightly)             │
 └────────────────────────────────────────────────────────────────────┘
 
@@ -158,7 +160,7 @@ reddit-compass — **трендовый радар**: собирает «гол�
 │  ├── data/snapshots/              ← локальные данные                │
 │  └── .env                         ← DASHSCOPE_API_KEY               │
 │                                                                     │
-│  Роль: Reddit fetch (residential IP) + LLM + sync на VPS           │
+│  Роль: Reddit fetch (домашний IP / IPRoyal по дням) + sync на VPS  │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               │ scp (после каждого прогона)
@@ -249,6 +251,19 @@ class SignalCard:
 
 При одобрении заявки — переход на `asyncpraw` (100 req/min, 100% ToS-чистота).
 До тех пор: Playwright + residential IP + stealth + proxy (для 429).
+Создание script app на `reddit.com/prefs/apps` заблокировано для молодого
+аккаунта (повторить, когда аккаунт наберёт возраст/карму).
+
+**Статус на 2026-07-27 (проверено live):** Reddit выборочно блокирует
+анонимные `.json` — 403 зависит от репутации IP. С чистого residential IP
+голый aiohttp работает; с pool-IP ротационных proxy (IPRoyal) — почти всегда
+403, тогда как браузерный трафик (Playwright) обслуживается стабильно
+(goto 3/3, `.json` 200; редкие `Failed to fetch` — ротация exit IP
+по соединениям, лечится sticky-сессией провайдера + retry в движке).
+Анонимные OAuth grant мертвы (401 без client_id); `token_v2` из браузерной
+сессии работает как Bearer на `oauth.reddit.com`, но добывается только
+браузером — выигрыша над чистым Playwright нет. Для прогонов через
+ротационный proxy: `REDDIT_COMPASS_ENGINE=playwright`.
 
 ---
 

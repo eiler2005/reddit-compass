@@ -91,6 +91,40 @@ reddit-compass растёт от автономного коллектора т�
   или подписка.
 - Twitter/X — API платный ($100/мес). Отложить до обоснования ROI.
 
+## Phase 7 — Reddit-fetch на VPS (план; активация после ответа IPRoyal)
+
+Цель: ночной сбор Reddit переезжает с Mac на VPS — расписание не зависит от того,
+включён ли ноутбук. Mac остаётся резервным маршрутом.
+
+**Проверено 2026-07-27 (live):**
+
+- Datacenter IP VPS: `.json` = 403 даже в headless-браузере (Reddit режет DC-IP).
+- VPS + IPRoyal: TCP-таймаут — residential endpoint пускает только whitelisted
+  source IP (сейчас — домашний IP Mac).
+- Browser-путь через IPRoyal с Mac: работает (200); голый HTTP с pool-IP — 403,
+  поэтому за ротационным proxy нужен `REDDIT_COMPASS_ENGINE=playwright` (реализовано).
+
+**Шаги (по порядку):**
+
+1. **IPRoyal (тикет открыт):** whitelist IP VPS `204.168.239.217` (или переход
+   на username/password-аутентификацию) + sticky-эндпоинт (один exit IP на ~20 мин —
+   убирает транзитивные `Failed to fetch` от ротации IP по соединениям).
+2. **Деплой-фиксы (обязательное условие):**
+   - разнести теги образов: `reddit-compass-api:latest` / `reddit-compass-collector:latest`
+     (сейчас оба сервиса делят `reddit-compass:latest`, и `up -d api` перезаписывает
+     тег slim-образом без Chromium — проверено: collector на VPS не собирался никогда);
+   - добавить сборку collector-образа в `deploy/hostkey/deploy.sh`;
+   - `REDDIT_COMPASS_PROXIES` уже в `.env.secrets` → после деплоя попадает в `.env` VPS.
+3. **VPS cron:** `docker compose run --rm reddit-compass fetch --stealth`
+   с `REDDIT_COMPASS_ENGINE=playwright` в окружении сервиса; проверка стабильности
+   (недели прогона, полнота snapshot).
+4. **Переключение:** после серии стабильных прогонов — снизить роль Mac launchd
+   до резервной (ручной запуск при сбоях VPS/proxy).
+
+**Фон (без сроков):** OAuth/`asyncpraw` — после созревания аккаунта (prefs/apps
+заблокирован для молодых аккаунтов) или одобрения официальной заявки Data API;
+Arctic Shift — как дополнительный исторический источник.
+
 ## Технический долг
 
 - Поднять порог покрытия тестами (сейчас гейт 60%, реально ~75%; сеть/браузер/оркестрация вне гейта).

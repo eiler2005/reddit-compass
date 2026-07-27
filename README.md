@@ -160,6 +160,13 @@ same configured proxy. Request pacing remains 4 seconds, with at most two 429
 retries separated by 10 seconds. Proxies are only for rate-limit mitigation —
 never for account bans, logins, posting, voting, or commenting.
 
+For rotating residential pools (e.g. IPRoyal) set `REDDIT_COMPASS_ENGINE=playwright`:
+Reddit serves `.json` to full browser traffic but frequently rejects bare HTTP
+from pool IPs with 403 (verified 2026-07-27). If the provider offers a
+sticky-session endpoint (same exit IP for ~20 minutes), prefer it — per-connection
+IP rotation causes transient `Failed to fetch` errors (the browser engine retries
+them automatically).
+
 Keep credentials only in `.env.secrets` (gitignored); do not commit or log them.
 An optional local proxy for other approved public read-only sources is documented
 only in gitignored operations notes and secret files; never move it into tracked
@@ -170,12 +177,17 @@ configuration or `REDDIT_COMPASS_PROXIES`.
 **VPS** (RSS, HN, Ladder, PH, LLM, radar) — host-cron in the Qwen discount window
 (14:00–15:30 UTC = 17:00–18:30 MSK). See [`deploy/hostkey/README.md`](deploy/hostkey/README.md).
 
-**Reddit** (residential IP) — collected manually from Mac (Reddit blocks datacenter IPs),
-then synced to the VPS:
+**Reddit** (residential IP) — collected from Mac (Reddit blocks datacenter IPs),
+then synced to the VPS. Nightly `scripts/fetch-and-sync.sh` (launchd, 03:17) alternates
+the route to avoid burning the home IP: even days — direct home IP, odd days — IPRoyal
+residential proxy with `REDDIT_COMPASS_ENGINE=playwright` (proxy from the gitignored
+`deploy/hostkey/.env.secrets`). Force a route with `RC_PROXY_MODE=on|off`:
 
 ```bash
+./scripts/fetch-and-sync.sh               # fetch + sync (route chosen automatically)
+RC_PROXY_MODE=on ./scripts/fetch-and-sync.sh --fetch   # force proxy route
+# manual alternative:
 uv run reddit-compass fetch --stealth     # collect on Mac (~11 min)
-# sync to VPS (via chat or scp)
 scp data/snapshots/$(date +%F)/posts.jsonl deploy@VPS:/tmp/
 ssh deploy@VPS "docker cp /tmp/posts.jsonl rc-api:/data/snapshots/$(date +%F)/"
 ```

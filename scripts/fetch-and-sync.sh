@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
-# fetch-and-sync.sh — Reddit fetch локально (Mac, residential IP) + sync на VPS.
+# fetch-and-sync.sh — Reddit fetch локально (Mac) + sync на VPS.
+#
+# Маршрут Reddit-запросов (страховка домашнего IP):
+#   auto (по умолчанию) — чередование по чётности дня: чётные дни = домашний IP,
+#                         нечётные = IPRoyal proxy (браузерный движок playwright);
+#   RC_PROXY_MODE=on|off — принудительный выбор маршрута.
+# Proxy берётся из REDDIT_COMPASS_PROXIES (deploy/hostkey/.env.secrets).
 #
 # Запуск:
 #   ./scripts/fetch-and-sync.sh          # полный цикл
@@ -14,14 +20,54 @@ PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 VPS_HOST="204.168.239.217"
 VPS_USER="deploy"
 REMOTE_DIR="/opt/reddit-compass"
-DATA_DIR="${PROJECT_DIR}/data"
+# DATA_DIR из окружения позволяет прогнать скрипт в изолированный каталог (тесты)
+DATA_DIR="${DATA_DIR:-${PROJECT_DIR}/data}"
 TODAY=$(date +%Y-%m-%d)
 
 cd "${PROJECT_DIR}"
 
-# ── Fetch (локально, Playwright, residential IP) ───────────────────────────
+# ── Секреты и выбор маршрута Reddit ────────────────────────────────────────
+
+SECRETS_FILE="${PROJECT_DIR}/deploy/hostkey/.env.secrets"
+if [[ -f "${SECRETS_FILE}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    . "${SECRETS_FILE}"
+    set +a
+fi
+
+# RC_PROXY_MODE: auto (чередование по дню) | on | off. Без proxy в секретах — off.
+resolve_proxy_mode() {
+    case "${RC_PROXY_MODE:-auto}" in
+        on|off)
+            echo "${RC_PROXY_MODE}"
+            ;;
+        *)
+            if [[ -z "${REDDIT_COMPASS_PROXIES:-}" ]]; then
+                echo "off"
+            elif (( 10#$(date +%d) % 2 == 1 )); then
+                echo "on"
+            else
+                echo "off"
+            fi
+            ;;
+    esac
+}
+
+# ── Fetch (локально, домашний IP или IPRoyal proxy) ────────────────────────
 
 do_fetch() {
+    local proxy_mode
+    proxy_mode="$(resolve_proxy_mode)"
+    if [[ "${proxy_mode}" == "on" ]]; then
+        # Reddit отдаёт .json браузерному трафику, но режет голый HTTP с pool-IP
+        export REDDIT_COMPASS_ENGINE=playwright
+        echo "🌐 [$(date +%H:%M:%S)] Маршрут Reddit: IPRoyal proxy (движок playwright)"
+    else
+        unset REDDIT_COMPASS_ENGINE
+        echo "🏠 [$(date +%H:%M:%S)] Маршрут Reddit: домашний IP (прямой доступ)"
+    fi
+
     echo "🔍 [$(date +%H:%M:%S)] Reddit fetch: ${TODAY}"
     echo "============================================================"
     uv run reddit-compass fetch --stealth
