@@ -38,10 +38,10 @@
 
 | Контейнер | Образ | Роль | Порт |
 |---|---|---|---|
-| `rc-api` | reddit-compass:latest | FastAPI REST API + Dashboard | 8900 (loopback) |
+| `rc-api` | reddit-compass-api:latest | FastAPI REST API + Dashboard | 8900 (loopback) |
 | `rc-caddy` | caddy:2-alpine | Reverse proxy | 8900→80 (loopback) |
 | `ladder` | ghcr.io/everywall/ladder | Paywall proxy (12 СМИ) | 8080 (Docker net) |
-| `rc-collector` | reddit-compass:latest | Batch (cron, не daemon) | — |
+| `rc-collector` | reddit-compass-collector:latest | Batch (cron, не daemon) | — |
 
 ## Раскладка на VPS
 

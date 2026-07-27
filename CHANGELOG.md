@@ -29,6 +29,10 @@
 
 ### Changed
 
+- **Деплой:** теги образов разнесены — `reddit-compass-api:latest` (slim) и
+  `reddit-compass-collector:latest` (Playwright/Chromium); `deploy.sh` собирает оба образа.
+  Раньше сервисы делили `reddit-compass:latest`, и `up -d api` перезаписывал тег
+  slim-образом — collector с Chromium на VPS не собирался никогда.
 - **RedditBrowser** (client.py): retry на транзитивные сетевые ошибки (`Failed to fetch` —
   ротация exit IP у residential proxy) и retry `goto` на новой странице (новое соединение —
   другой exit IP у ротационного proxy).

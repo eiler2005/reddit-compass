@@ -48,7 +48,13 @@ scp "${PROJECT_ROOT}/README.md" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp -r "${PROJECT_ROOT}/src/reddit_compass" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/src/"
 scp -r "${PROJECT_ROOT}/config/profiles" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/config/"
 
-# 3. Запускаем сервисы
+# 3. Собираем образы (api slim + collector с Chromium) и запускаем сервисы.
+# Теги разнесены (reddit-compass-api / reddit-compass-collector): раньше оба
+# сервиса делили reddit-compass:latest, и up -d api перезаписывал collector-тег
+# slim-образом без Chromium.
+echo "🐳 Собираю образы api + collector (первый раз — долго: базовый Playwright)..."
+ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose build api reddit-compass"
+
 echo "🐳 Запускаю api + caddy..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api caddy"
 

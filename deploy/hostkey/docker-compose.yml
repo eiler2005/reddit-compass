@@ -14,7 +14,7 @@
 services:
   reddit-compass:
     build: .
-    image: reddit-compass:latest
+    image: reddit-compass-collector:latest
     container_name: rc-collector
     env_file: [.env]
     environment:
@@ -37,7 +37,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.api
-    image: reddit-compass:latest
+    image: reddit-compass-api:latest
     container_name: rc-api
     command: ["serve"]
     env_file: [.env]
