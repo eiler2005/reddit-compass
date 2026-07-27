@@ -83,11 +83,13 @@ class StoryCardView:
     source_count: int
     item_count: int
     clusters: list[str] = field(default_factory=list)
+    clusters_display: list[str] = field(default_factory=list)
     evidence: list[dict[str, Any]] = field(default_factory=list)
     score_breakdown: dict[str, float] = field(default_factory=dict)
     research_state: ResearchState | None = None
     primary_evidence_url: str = ""
     primary_evidence_provider: str = ""
+    primary_evidence_provider_label: str = ""
 
 
 @dataclass
@@ -164,6 +166,49 @@ _DIRECTION_LABELS = {
     "resurfacing": "🔄 Возвращается",
 }
 
+_CLUSTER_LABELS = {
+    "voices": "🗣 Голоса",
+    "developers": "💻 Разработчики",
+    "mainstream": "📰 Мейнстрим",
+    "business": "💰 Бизнес",
+    "tech_culture": "🔬 Tech/Культура",
+    "product_pulse": "🚀 Продукты",
+    "search_interest": "📊 Поиск",
+}
+
+_PROVIDER_LABELS = {
+    "reddit": "Reddit",
+    "hackernews": "HN",
+    "producthunt": "PH",
+    "nytimes": "NYT",
+    "washingtonpost": "WaPo",
+    "wired": "Wired",
+    "time": "Time",
+    "vanityfair": "Vanity Fair",
+    "newyorker": "New Yorker",
+    "americanbanker": "Am. Banker",
+    "foxnews": "Fox News",
+    "ft": "FT",
+    "bbc": "BBC",
+    "guardian": "Guardian",
+    "reuters": "Reuters",
+    "techcrunch": "TechCrunch",
+    "theverge": "Verge",
+    "arstechnica": "Ars",
+    "usatoday": "USA Today",
+    "foxbusiness": "Fox Biz",
+    "medium": "Medium",
+}
+
+
+def cluster_label(cluster: str) -> str:
+    return _CLUSTER_LABELS.get(cluster, cluster)
+
+
+def provider_label(provider: str) -> str:
+    return _PROVIDER_LABELS.get(provider, provider)
+
+
 _STATUS_LABELS = {
     "complete": "✅ Полный",
     "partial": "⚠️ Частичный",
@@ -185,6 +230,7 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
 
     def _story_to_card(bs: BriefingStory) -> StoryCardView:
         clusters: list[str] = list({e.source_cluster for e in bs.evidence})
+        clusters_display = [cluster_label(c) for c in clusters]
 
         # Ранжирование primary evidence:
         # 1. content_scope: full > excerpt > abstract > headline
@@ -204,7 +250,9 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
             {
                 "item_id": e.item_id,
                 "provider": e.provider,
+                "provider_label": provider_label(e.provider),
                 "source_cluster": e.source_cluster,
+                "cluster_label": cluster_label(e.source_cluster),
                 "url": e.url,
                 "title": e.title,
                 "excerpt": e.excerpt,
@@ -215,6 +263,7 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
 
         primary_url = ""
         primary_provider = ""
+        primary_provider_label = ""
         if evidence_list:
             ranked = sorted(
                 evidence_list,
@@ -226,6 +275,7 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
             )
             primary_url = ranked[0]["url"]
             primary_provider = ranked[0]["provider"]
+            primary_provider_label = ranked[0]["provider_label"]
 
         return StoryCardView(
             story_id=bs.story.story_id,
@@ -239,10 +289,12 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
             source_count=bs.metric.source_count,
             item_count=bs.metric.item_count,
             clusters=clusters,
+            clusters_display=clusters_display,
             evidence=evidence_list,
             score_breakdown=bs.score_breakdown,
             primary_evidence_url=primary_url,
             primary_evidence_provider=primary_provider,
+            primary_evidence_provider_label=primary_provider_label,
         )
 
     return BriefingView(

@@ -5,8 +5,8 @@
     </header>
     <h3 class="story-title">
         {% if story.primary_evidence_url %}
-        <a href="{{ story.primary_evidence_url }}" target="_blank" rel="noopener noreferrer" class="story-title-link" title="Читать источник: {{ story.primary_evidence_provider }}">{{ story.title }}</a>
-        <a href="/stories/{{ story.story_id }}" class="story-detail-link" title="Открыть сюжет">📋</a>
+        <a href="{{ story.primary_evidence_url }}" target="_blank" rel="noopener noreferrer" class="story-title-link" title="Читать: {{ story.primary_evidence_provider_label }}">{{ story.title }}</a>
+        <a href="/stories/{{ story.story_id }}" class="story-detail-link" title="Полный сюжет">📋</a>
         {% else %}
         <a href="/stories/{{ story.story_id }}">{{ story.title }}</a>
         {% endif %}
@@ -15,10 +15,10 @@
     <p class="story-summary">{{ story.summary_ru }}</p>
     {% endif %}
     <p class="story-why">{{ story.why_it_matters }}</p>
-    {% if story.clusters %}
+    {% if story.clusters_display %}
     <div class="clusters">
-        {% for cluster in story.clusters %}
-        <span class="cluster-badge cluster-{{ cluster }}">{{ cluster }}</span>
+        {% for label in story.clusters_display %}
+        <span class="cluster-badge">{{ label }}</span>
         {% endfor %}
     </div>
     {% endif %}
@@ -28,9 +28,9 @@
     </footer>
     {% if story.evidence %}
     <div class="evidence-links">
-        {% for e in story.evidence[:3] %}
-        <a href="{{ e.url }}" target="_blank" rel="noopener noreferrer" class="evidence-link">
-            {{ e.provider }}
+        {% for e in story.evidence[:4] %}
+        <a href="{{ e.url }}" target="_blank" rel="noopener noreferrer" class="evidence-link" title="{{ e.title }}">
+            {{ e.provider_label }}
         </a>
         {% endfor %}
     </div>

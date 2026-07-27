@@ -546,21 +546,15 @@ h3 {
 }
 
 .cluster-badge {
-    font-size: 0.7rem;
-    padding: 0.2rem 0.5rem;
-    border-radius: var(--radius-sm);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: 999px;
+    font-weight: 500;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    white-space: nowrap;
 }
-
-.cluster-voices { background: var(--accent-2-dim); color: var(--accent-2); }
-.cluster-developers { background: var(--accent-3-dim); color: var(--accent-3); }
-.cluster-mainstream { background: rgba(168, 85, 247, 0.12); color: #a855f7; }
-.cluster-business { background: var(--accent-dim); color: var(--accent); }
-.cluster-tech_culture { background: rgba(34, 211, 238, 0.12); color: #22d3ee; }
-.cluster-product_pulse { background: rgba(236, 72, 153, 0.12); color: #ec4899; }
-.cluster-search_interest { background: rgba(99, 102, 241, 0.12); color: #6366f1; }
 
 .story-footer {
     display: flex;
