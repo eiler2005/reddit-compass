@@ -31,7 +31,116 @@ _TRACKING_PARAMS = {
     "ref",
     "ref_src",
     "ref_url",
+    "oc",
+    "cmpid",
+    "smid",
+    "partner",
+    "campaign_id",
+    "source",
+    "output",
 }
+
+# Publisher host normalization: mobile/AMP/alt → canonical
+_HOST_ALIASES: dict[str, str] = {
+    "m.nytimes.com": "www.nytimes.com",
+    "mobile.nytimes.com": "www.nytimes.com",
+    "nytimes.com": "www.nytimes.com",
+    "amp.theguardian.com": "www.theguardian.com",
+    "theguardian.com": "www.theguardian.com",
+    "m.theguardian.com": "www.theguardian.com",
+    "reuters.com": "www.reuters.com",
+    "m.reuters.com": "www.reuters.com",
+    "washingtonpost.com": "www.washingtonpost.com",
+    "m.washingtonpost.com": "www.washingtonpost.com",
+    "wapo.st": "www.washingtonpost.com",
+    "bbc.com": "www.bbc.com",
+    "m.bbc.com": "www.bbc.com",
+    "bbc.co.uk": "www.bbc.co.uk",
+    "m.bbc.co.uk": "www.bbc.co.uk",
+    "ft.com": "www.ft.com",
+    "m.ft.com": "www.ft.com",
+    "techcrunch.com": "techcrunch.com",
+    "m.techcrunch.com": "techcrunch.com",
+    "theverge.com": "www.theverge.com",
+    "m.theverge.com": "www.theverge.com",
+    "arstechnica.com": "arstechnica.com",
+    "m.arstechnica.com": "arstechnica.com",
+    "wired.com": "www.wired.com",
+    "m.wired.com": "www.wired.com",
+    "www.wired.com": "www.wired.com",
+    "usatoday.com": "www.usatoday.com",
+    "m.usatoday.com": "www.usatoday.com",
+    "foxbusiness.com": "www.foxbusiness.com",
+    "m.foxbusiness.com": "www.foxbusiness.com",
+    "americanbanker.com": "www.americanbanker.com",
+    "medium.com": "medium.com",
+    "m.medium.com": "medium.com",
+    "time.com": "time.com",
+    "m.time.com": "time.com",
+    "vanityfair.com": "www.vanityfair.com",
+    "m.vanityfair.com": "www.vanityfair.com",
+    "newyorker.com": "www.newyorker.com",
+    "m.newyorker.com": "www.newyorker.com",
+    "foxnews.com": "www.foxnews.com",
+    "m.foxnews.com": "www.foxnews.com",
+}
+
+
+def _normalize_host(host: str) -> str:
+    """Нормализует host: lowercase + mobile/AMP → canonical."""
+    host = host.lower().strip()
+    return _HOST_ALIASES.get(host, host)
+
+
+def _unwrap_google_news_url(url: str) -> str:
+    """Пытается раскрыть Google News RSS URL в publisher URL.
+
+    Google News URLs вида:
+    https://news.google.com/rss/articles/CBMi...?oc=5
+
+    Без сети нельзя надёжно раскрыть base64-encoded publisher URL.
+    Возвращаем пустую строку если не можем раскрыть — caller использует title matching.
+    """
+    parsed = urlparse(url)
+    if "news.google.com" not in parsed.netloc:
+        return ""
+    # Google News URLs не раскрываются без сети — возвращаем пустую строку
+    # Clustering будет использовать title/entity matching вместо URL
+    return ""
+
+
+def canonicalize_url(url: str) -> str:
+    """Очищает URL: tracking params, fragments, host normalization, scheme."""
+    if not url:
+        return ""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return ""
+
+    # Normalize scheme to https
+    scheme = "https"
+
+    # Normalize host
+    host = _normalize_host(parsed.netloc)
+
+    # Try to unwrap Google News URLs
+    if "news.google.com" in host:
+        unwrapped = _unwrap_google_news_url(url)
+        if unwrapped:
+            return canonicalize_url(unwrapped)  # recursive normalize
+        # Can't unwrap — return cleaned Google URL as-is
+        return urlunparse((scheme, host, parsed.path, "", "", ""))
+
+    # Filter tracking params
+    query_params = parse_qs(parsed.query, keep_blank_values=False)
+    filtered = {k: v for k, v in query_params.items() if k.lower() not in _TRACKING_PARAMS}
+    clean_query = urlencode(filtered, doseq=True) if filtered else ""
+
+    # Normalize path: strip trailing slash (except root)
+    path = parsed.path.rstrip("/") if parsed.path != "/" else parsed.path
+
+    return urlunparse((scheme, host, path, "", clean_query, ""))
+
 
 _LEGACY_FILE_MAP: dict[str, tuple[str, SourceCluster]] = {
     "posts.jsonl": ("reddit", "voices"),
@@ -61,28 +170,6 @@ _RSS_LADDER_CLUSTER_MAP: dict[str, SourceCluster] = {
     "medium": "voices",
     "foxnews": "mainstream",
 }
-
-
-def canonicalize_url(url: str) -> str:
-    """Очищает URL от tracking parameters и fragments."""
-    if not url:
-        return ""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        return ""
-    query_params = parse_qs(parsed.query, keep_blank_values=False)
-    filtered = {k: v for k, v in query_params.items() if k.lower() not in _TRACKING_PARAMS}
-    clean_query = urlencode(filtered, doseq=True) if filtered else ""
-    return urlunparse(
-        (
-            parsed.scheme,
-            parsed.netloc,
-            parsed.path.rstrip("/") if parsed.path != "/" else parsed.path,
-            parsed.params,
-            clean_query,
-            "",
-        )
-    )
 
 
 def _external_id_from_url(url: str) -> str:

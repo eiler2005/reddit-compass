@@ -74,6 +74,41 @@ class TestCanonicalizeUrl:
         url = "https://example.com/a?utm_source=x&utm_medium=y&utm_campaign=z"
         assert canonicalize_url(url) == "https://example.com/a"
 
+    def test_strips_oc_param(self):
+        url = "https://example.com/article?oc=5&id=1"
+        assert canonicalize_url(url) == "https://example.com/article?id=1"
+
+    def test_mobile_nyt_host(self):
+        url = "https://m.nytimes.com/2026/07/27/tech/ai.html"
+        assert canonicalize_url(url) == "https://www.nytimes.com/2026/07/27/tech/ai.html"
+
+    def test_amp_guardian_host(self):
+        url = "https://amp.theguardian.com/tech/2026/jul/27/ai"
+        assert canonicalize_url(url) == "https://www.theguardian.com/tech/2026/jul/27/ai"
+
+    def test_bare_nyt_host(self):
+        url = "https://nytimes.com/2026/07/27/tech/ai.html"
+        assert canonicalize_url(url) == "https://www.nytimes.com/2026/07/27/tech/ai.html"
+
+    def test_google_news_url_cleaned(self):
+        url = "https://news.google.com/rss/articles/CBMi...?oc=5"
+        result = canonicalize_url(url)
+        assert "oc=5" not in result
+        assert "news.google.com" in result
+
+    def test_http_upgraded_to_https(self):
+        url = "http://example.com/article"
+        assert canonicalize_url(url) == "https://example.com/article"
+
+    def test_reuters_tracking_equals_clean(self):
+        url1 = "https://www.reuters.com/tech/ai-2026-07-27/?utm_source=twitter"
+        url2 = "https://reuters.com/tech/ai-2026-07-27/"
+        assert canonicalize_url(url1) == canonicalize_url(url2)
+
+    def test_wapo_st_normalized(self):
+        url = "https://wapo.st/3abc123"
+        assert canonicalize_url(url) == "https://www.washingtonpost.com/3abc123"
+
 
 class TestPostcardToContentItem:
     def test_reddit_posts_jsonl(self):
