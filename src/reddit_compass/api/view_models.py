@@ -30,6 +30,14 @@ class RunSummary:
     successful_provider_count: int = 0
     fresh_provider_count: int = 0
     adapter_family_count: int = 0
+    # Derived honesty metrics
+    candidate_story_count: int = 0
+    single_item_story_count: int = 0
+    multi_item_story_count: int = 0
+    cross_source_story_count: int = 0
+    radar_ready_story_count: int = 0
+    analyzed_coverage_ratio: float = 0.0
+    compression_ratio: float = 0.0
 
 
 @dataclass
@@ -173,6 +181,8 @@ class RunView:
     finished_at: str | None
     item_count: int = 0
     story_count: int = 0
+    multi_item_count: int = 0
+    cross_source_count: int = 0
     sources: list[dict[str, Any]] = field(default_factory=list)
 
 

@@ -86,6 +86,31 @@ def build_run_summary(
     # Adapter families
     adapters = {c.adapter for c in coverage if c.attempted}
 
+    # Derived honesty metrics
+    single_item = conn.execute(
+        "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND item_count = 1",
+        (run_id,),
+    ).fetchone()[0]
+    multi_item = conn.execute(
+        "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND item_count >= 2",
+        (run_id,),
+    ).fetchone()[0]
+    cross_source = conn.execute(
+        "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND source_count >= 2",
+        (run_id,),
+    ).fetchone()[0]
+    radar_ready = conn.execute(
+        """SELECT COUNT(*) FROM story_metrics sm
+           JOIN stories s ON sm.story_id = s.story_id
+           WHERE sm.run_id = ?
+             AND (sm.source_count >= 2 OR sm.item_count >= 2
+                  OR (sm.trend_score >= 60 AND sm.confidence != 'low'))""",
+        (run_id,),
+    ).fetchone()[0]
+
+    analyzed_ratio = analyzed_count / item_count if item_count > 0 else 0.0
+    compression = story_count / item_count if item_count > 0 else 0.0
+
     return RunSummary(
         run_id=run_id,
         date=date,
@@ -99,6 +124,13 @@ def build_run_summary(
         expected_provider_count=expected,
         successful_provider_count=successful,
         adapter_family_count=len(adapters),
+        candidate_story_count=story_count,
+        single_item_story_count=single_item,
+        multi_item_story_count=multi_item,
+        cross_source_story_count=cross_source,
+        radar_ready_story_count=radar_ready,
+        analyzed_coverage_ratio=round(analyzed_ratio, 3),
+        compression_ratio=round(compression, 3),
     )
 
 

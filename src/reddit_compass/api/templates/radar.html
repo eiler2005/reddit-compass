@@ -24,10 +24,26 @@
         <span class="freshness-text">
             {{ radar.run.successful_provider_count }}/{{ radar.run.expected_provider_count }} источников ·
             {{ radar.run.unique_item_count }} материалов ·
-            {{ radar.run.story_count }} сюжетов
+            {{ radar.run.radar_ready_story_count }} radar-ready ·
+            {{ radar.run.cross_source_story_count }} cross-source
         </span>
         <span class="profile">{{ radar.profile }}</span>
     </div>
+
+    <!-- Honesty warnings -->
+    {% if radar.run.compression_ratio > 0.65 %}
+    <div class="section-note" style="color: var(--warning); margin-bottom: 1rem;">
+        ⚠️ Compression ratio {{ "%.0f"|format(radar.run.compression_ratio * 100) }}% —
+        clustering пока почти не сжимает корпус ({{ radar.run.single_item_story_count }} из
+        {{ radar.run.candidate_story_count }} кандидатов — одиночные материалы).
+    </div>
+    {% endif %}
+    {% if radar.run.analyzed_coverage_ratio < 0.95 and radar.run.analyzed_item_count > 0 %}
+    <div class="section-note" style="color: var(--warning); margin-bottom: 1rem;">
+        ⚠️ Разметка покрывает {{ "%.0f"|format(radar.run.analyzed_coverage_ratio * 100) }}% run:
+        {{ radar.run.analyzed_item_count }}/{{ radar.run.unique_item_count }} материалов.
+    </div>
+    {% endif %}
 
     <!-- KPI -->
     <section class="section">
@@ -37,16 +53,24 @@
                 <div class="kpi-label">Материалов</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-num">{{ radar.run.analyzed_item_count }}</div>
-                <div class="kpi-label">Разметок</div>
+                <div class="kpi-num">{{ radar.run.candidate_story_count }}</div>
+                <div class="kpi-label">Кандидатов</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-num">{{ radar.run.story_count }}</div>
-                <div class="kpi-label">Сюжетов</div>
+                <div class="kpi-num">{{ radar.run.multi_item_story_count }}</div>
+                <div class="kpi-label">Склеено</div>
             </div>
             <div class="kpi-card">
-                <div class="kpi-num">{{ radar.pain_point_cloud|length }}</div>
-                <div class="kpi-label">Pain points</div>
+                <div class="kpi-num">{{ radar.run.cross_source_story_count }}</div>
+                <div class="kpi-label">Cross-source</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-num">{{ radar.run.radar_ready_story_count }}</div>
+                <div class="kpi-label">Radar-ready</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-num">{{ "%.0f"|format(radar.run.analyzed_coverage_ratio * 100) }}%</div>
+                <div class="kpi-label">Разметка</div>
             </div>
         </div>
         {% if radar.run.analyzed_item_count == 0 %}

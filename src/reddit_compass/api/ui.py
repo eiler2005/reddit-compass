@@ -390,6 +390,16 @@ async def runs_page(
             (run_id,),
         ).fetchone()[0]
 
+        # Multi-item and cross-source counts
+        multi_item = conn.execute(
+            "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND item_count >= 2",
+            (run_id,),
+        ).fetchone()[0]
+        cross_source = conn.execute(
+            "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND source_count >= 2",
+            (run_id,),
+        ).fetchone()[0]
+
         runs.append(
             RunView(
                 run_id=run_id,
@@ -401,6 +411,8 @@ async def runs_page(
                 finished_at=row["finished_at"],
                 item_count=item_count,
                 story_count=story_count,
+                multi_item_count=multi_item,
+                cross_source_count=cross_source,
             )
         )
 
