@@ -56,9 +56,6 @@ services:
     memswap_limit: 512m
     cpus: 0.5
     pids_limit: 128
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=32m
     security_opt: ["no-new-privileges:true"]
     cap_drop: [ALL]
     logging:
