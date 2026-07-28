@@ -20,6 +20,7 @@ services:
     environment:
       DATA_DIR: /data
       REDDIT_COMPASS_CONFIG: /app/config/profiles/broad.json
+      REDDIT_COMPASS_ENGINE: playwright
     restart: "no"
     volumes:
       - rc_data:/data
