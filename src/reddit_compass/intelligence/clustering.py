@@ -514,18 +514,31 @@ class StoryClusterer:
         if is_generic_title(normalized) or is_low_signal_title(item.title):
             return None
 
-        candidates: list[tuple[str, float]] = []
+        # Minimum meaningful tokens guard
+        token_count = len(normalized.split())
         item_entities = extract_entities(item.title)
 
+        candidates: list[tuple[str, float]] = []
+
         for story_id, cluster in self._clusters.items():
+            # URL matching always allowed
             if cluster.canonical_urls & self._match_urls(item):
                 return story_id
 
+            # Same provider + same section + generic series → no title merge
+            if item.provider == cluster.title.split()[0] if cluster.title else False:
+                pass  # handled by similarity check below
+
             similarity = title_similarity(item.title, cluster.title, item.provider)
+            has_entity_overlap = bool(item_entities & cluster.entities)
+
+            # Short titles without entity overlap: require higher threshold
+            if token_count < 4 and not has_entity_overlap and similarity < 0.85:
+                continue
+
             matches_threshold = similarity >= self.SIMILARITY_THRESHOLD
             matches_with_entity = (
-                similarity >= self.SIMILARITY_THRESHOLD_WITH_ENTITY
-                and item_entities & cluster.entities
+                similarity >= self.SIMILARITY_THRESHOLD_WITH_ENTITY and has_entity_overlap
             )
             if matches_threshold or matches_with_entity:
                 candidates.append((story_id, similarity))
