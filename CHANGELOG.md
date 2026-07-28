@@ -19,7 +19,7 @@
   Broad/AI-native mode switcher, source-section coverage и domain labels.
 - **Radar drill-down**: pain points, stable themes и emerging theme chips открывают
   `/explore` с сохранёнными `date/profile`; `/api/v2/stories` и `/api/v2/trends`
-  поддерживают фильтр `pain`.
+  поддерживают фильтры `pain` и `candidate_theme`.
 - **API v2 additions**: `/api/v2/domains`, `/api/v2/radar/{date}`,
   `/api/v2/trends`, `/api/v2/trends/{trend_id}`,
   `/api/v2/projects/{project_id}/radar`.

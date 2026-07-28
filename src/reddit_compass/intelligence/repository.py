@@ -272,6 +272,7 @@ def query_stories(
     date: str | None = None,
     profile: str | None = None,
     theme: str | None = None,
+    candidate_theme: str | None = None,
     domain: str | None = None,
     provider: str | None = None,
     source_cluster: str | None = None,
@@ -299,9 +300,19 @@ def query_stories(
         where.append("sm.run_id IN (SELECT run_id FROM runs WHERE snapshot_date = ?)")
         params.append(date)
 
+    def item_signal_exists(column: str) -> str:
+        return (
+            "EXISTS (SELECT 1 FROM story_items si "
+            "JOIN item_signals isig ON isig.run_id = si.run_id AND isig.item_id = si.item_id "
+            f"WHERE si.run_id = sm.run_id AND si.story_id = sm.story_id AND isig.{column} LIKE ?)"
+        )
+
     if theme:
-        where.append("s.theme_ids LIKE ?")
-        params.append(f'%"{theme}"%')
+        where.append(f"(s.theme_ids LIKE ? OR {item_signal_exists('theme_ids')})")
+        params.extend([f'%"{theme}"%', f'%"{theme}"%'])
+    if candidate_theme:
+        where.append(item_signal_exists("candidate_themes"))
+        params.append(f'%"{candidate_theme}"%')
     if domain:
         where.append("s.domain_ids LIKE ?")
         params.append(f'%"{domain}"%')
@@ -324,11 +335,7 @@ def query_stories(
         where.append("sm.confidence = ?")
         params.append(confidence)
     if pain:
-        where.append(
-            "EXISTS (SELECT 1 FROM story_items si "
-            "JOIN item_signals isig ON isig.run_id = si.run_id AND isig.item_id = si.item_id "
-            "WHERE si.run_id = sm.run_id AND si.story_id = sm.story_id AND isig.pain_points LIKE ?)"
-        )
+        where.append(item_signal_exists("pain_points"))
         params.append(f'%"{pain}"%')
     if q:
         where.append("(s.title LIKE ? OR s.summary_ru LIKE ?)")

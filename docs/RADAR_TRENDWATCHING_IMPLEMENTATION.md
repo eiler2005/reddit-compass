@@ -13,8 +13,9 @@
 - Radar получил category navigation, source-cluster matrix, trend shelves и Broad/AI-native switcher.
 - Pain points, stable themes и emerging theme chips стали drill-down навигацией в `/explore`
   с сохранением `date/profile`.
-- `/explore` фильтрует stories по `theme`, `domain`, `source_cluster`, `direction`, `confidence`
-  и `pain`; `pain` резолвится через item-level `item_signals`.
+- `/explore` фильтрует stories по `theme`, `candidate_theme`, `domain`, `source_cluster`,
+  `direction`, `confidence` и `pain`; theme/pain фильтры резолвятся через item-level
+  `item_signals`.
 - `run --analyze` создаёт `item_signals`; при `0` разметок UI не рендерит фальшивый LLM-анализ.
 - Source coverage считается на уровне `provider × section/feed`.
 - Item count считается через `observations`, а не `items.snapshot_date`.

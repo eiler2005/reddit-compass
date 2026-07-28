@@ -209,7 +209,10 @@ class TestBuildThemeClouds:
         )
 
         assert stable[0].url == "/explore?date=2026-07-27&profile=ai-native&theme=ai_agents"
-        assert emerging[0].url == "/explore?date=2026-07-27&profile=ai-native&q=agent+security"
+        assert (
+            emerging[0].url
+            == "/explore?date=2026-07-27&profile=ai-native&candidate_theme=agent+security"
+        )
         assert pain[0].url == "/explore?date=2026-07-27&profile=ai-native&pain=security+breach"
 
     def test_query_stories_filters_by_item_signal_pain(self, db_with_data):
@@ -253,8 +256,18 @@ class TestBuildThemeClouds:
             db_with_data,
             "2026-07-27:ai-native",
             [
-                ItemSignal(item_id="reddit:1", pain_points=["security breach"]),
-                ItemSignal(item_id="reddit:2", pain_points=["pricing friction"]),
+                ItemSignal(
+                    item_id="reddit:1",
+                    theme_ids=["ai_agents"],
+                    candidate_themes=["agent security"],
+                    pain_points=["security breach"],
+                ),
+                ItemSignal(
+                    item_id="reddit:2",
+                    theme_ids=["pricing_models"],
+                    candidate_themes=["pricing pressure"],
+                    pain_points=["pricing friction"],
+                ),
             ],
         )
         db_with_data.commit()
@@ -268,6 +281,24 @@ class TestBuildThemeClouds:
 
         assert total == 1
         assert stories[0]["story_id"] == "story_test"
+
+        theme_stories, theme_total = query_stories(
+            db_with_data,
+            date="2026-07-27",
+            profile="ai-native",
+            theme="ai_agents",
+        )
+        assert theme_total == 1
+        assert theme_stories[0]["story_id"] == "story_test"
+
+        candidate_stories, candidate_total = query_stories(
+            db_with_data,
+            date="2026-07-27",
+            profile="ai-native",
+            candidate_theme="agent security",
+        )
+        assert candidate_total == 1
+        assert candidate_stories[0]["story_id"] == "story_test"
 
 
 class TestViewLabels:

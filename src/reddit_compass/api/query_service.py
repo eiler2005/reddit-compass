@@ -312,7 +312,7 @@ def build_theme_clouds(
                     label_ru=candidate,
                     label_original=candidate,
                     item_count=count,
-                    url=explore_url(q=candidate),
+                    url=explore_url(candidate_theme=candidate),
                 )
             )
 

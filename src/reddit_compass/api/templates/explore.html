@@ -10,6 +10,7 @@
         {% if filters.date %}<input type="hidden" name="date" value="{{ filters.date }}">{% endif %}
         {% if filters.profile %}<input type="hidden" name="profile" value="{{ filters.profile }}">{% endif %}
         {% if filters.theme %}<input type="hidden" name="theme" value="{{ filters.theme }}">{% endif %}
+        {% if filters.candidate_theme %}<input type="hidden" name="candidate_theme" value="{{ filters.candidate_theme }}">{% endif %}
         {% if filters.domain %}<input type="hidden" name="domain" value="{{ filters.domain }}">{% endif %}
         {% if filters.pain %}<input type="hidden" name="pain" value="{{ filters.pain }}">{% endif %}
         <input type="text" name="q" value="{{ filters.q or '' }}" placeholder="Поиск...">
@@ -39,11 +40,12 @@
         <button type="submit" class="btn">Фильтр</button>
     </form>
 
-    {% if filters.date or filters.profile or filters.theme or filters.domain or filters.pain %}
+    {% if filters.date or filters.profile or filters.theme or filters.candidate_theme or filters.domain or filters.pain %}
     <div class="active-filters" aria-label="Активные фильтры">
         {% if filters.date %}<span class="filter-pill">Дата: {{ filters.date }}</span>{% endif %}
         {% if filters.profile %}<span class="filter-pill">Профиль: {{ filters.profile }}</span>{% endif %}
         {% if filters.theme %}<span class="filter-pill">Тема: {{ filters.theme }}</span>{% endif %}
+        {% if filters.candidate_theme %}<span class="filter-pill">Новая тема: {{ filters.candidate_theme }}</span>{% endif %}
         {% if filters.domain %}<span class="filter-pill">Рубрика: {{ filters.domain }}</span>{% endif %}
         {% if filters.pain %}<span class="filter-pill filter-pill-pain">Pain: {{ filters.pain }}</span>{% endif %}
         <a href="/explore" class="filter-clear">Сбросить</a>

@@ -279,7 +279,7 @@ Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
 |---|---|---|
 | **⚡ Today** | `/today` | Утренний бриф: 3–5 изменений, что прочитать, что в работе |
 | **🤖 Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: KPI, мега-сюжеты, кликабельные pain/theme clouds, сила трендов, relevance Книга/РБК |
-| **🔍 Explore** | `/explore` | Поиск, фильтры и drill-down списки сюжетов по date/profile/theme/domain/pain/source |
+| **🔍 Explore** | `/explore` | Поиск, фильтры и drill-down списки сюжетов по date/profile/theme/candidate_theme/domain/pain/source |
 | **📋 Story** | `/stories/{id}` | Исследование сюжета: timeline, evidence, research state |
 | **📁 Runs** | `/runs` | История запусков с реальными counts |
 
