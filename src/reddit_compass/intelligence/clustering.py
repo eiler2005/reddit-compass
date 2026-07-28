@@ -502,6 +502,7 @@ class StoryClusterer:
     def __init__(self) -> None:
         self._clusters: dict[str, StoryCluster] = {}
         self._url_to_story: dict[str, str] = {}
+        self._token_to_clusters: dict[str, set[str]] = {}
         self._ambiguity_count = 0
 
     @property
@@ -532,10 +533,19 @@ class StoryClusterer:
         # Minimum meaningful tokens guard
         token_count = len(normalized.split())
         item_entities = extract_entities(item.title)
+        item_tokens = extract_tokens(normalized)
+
+        # Inverted index: only check clusters sharing at least one token
+        candidate_cluster_ids: set[str] = set()
+        for token in item_tokens:
+            candidate_cluster_ids.update(self._token_to_clusters.get(token, set()))
 
         candidates: list[tuple[str, float]] = []
 
-        for story_id, cluster in self._clusters.items():
+        for story_id in candidate_cluster_ids:
+            cluster = self._clusters.get(story_id)
+            if cluster is None:
+                continue
             # URL matching always allowed
             if cluster.canonical_urls & self._match_urls(item):
                 return story_id
@@ -578,7 +588,10 @@ class StoryClusterer:
             cluster.item_ids.append(item.item_id)
         cluster.canonical_urls.update(self._match_urls(item))
         cluster.domain_ids.update(normalize_domain_ids(item.domain_ids))
-        cluster.tokens.update(extract_tokens(normalize_title(item.title, item.provider)))
+        new_tokens = extract_tokens(normalize_title(item.title, item.provider))
+        cluster.tokens.update(new_tokens)
+        for token in new_tokens:
+            self._token_to_clusters.setdefault(token, set()).add(story_id)
         cluster.entities.update(extract_entities(item.title))
         if item.snapshot_date:
             if not cluster.first_seen or item.snapshot_date < cluster.first_seen:
@@ -616,6 +629,10 @@ class StoryClusterer:
             last_seen=item.snapshot_date,
         )
         self._clusters[story_id] = cluster
+
+        # Update inverted index
+        for token in cluster.tokens:
+            self._token_to_clusters.setdefault(token, set()).add(story_id)
 
         for url in self._match_urls(item):
             self._url_to_story[url] = story_id
@@ -668,6 +685,9 @@ class StoryClusterer:
                 last_seen=story.last_seen,
             )
             self._clusters[story.story_id] = cluster
+            # Update inverted index
+            for token in tokens:
+                self._token_to_clusters.setdefault(token, set()).add(story.story_id)
 
 
 def cluster_items(items: list[ContentItem]) -> tuple[list[Story], int]:
