@@ -121,6 +121,23 @@ class TestGenericAndLowSignal:
         s2 = clusterer.add_item(item2)
         assert s1 != s2  # Different URLs, generic title → no merge
 
+    def test_deterministic_story_ids(self):
+        """cluster_items два раза на одном входе даёт те же story_ids."""
+        items = [
+            _make_item(
+                "d1", "AI agents escape sandbox and hack company", "reddit", "https://r.com/1"
+            ),
+            _make_item("d2", "OpenAI releases GPT-5 model", "reddit", "https://r.com/2"),
+            _make_item(
+                "d3", "AI agents escape sandbox and hack company", "hackernews", "https://r.com/1"
+            ),
+        ]
+        stories1, _ = cluster_items(items)
+        stories2, _ = cluster_items(items)
+        ids1 = sorted(s.story_id for s in stories1)
+        ids2 = sorted(s.story_id for s in stories2)
+        assert ids1 == ids2
+
 
 class TestTokenJaccard:
     def test_identical(self):

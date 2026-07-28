@@ -402,6 +402,11 @@ def extract_tokens(normalized: str) -> set[str]:
     return set(normalized.split())
 
 
+def extract_ordered_tokens(normalized: str) -> list[str]:
+    """Извлекает токены в порядке следования (детерминированно)."""
+    return normalized.split()
+
+
 def extract_entities(title: str) -> set[str]:
     """Извлекает entity-like токены (имена, числа, валюты, акронимы)."""
     return {m.group().lower() for m in _ENTITY_PATTERN.finditer(title)}
@@ -436,12 +441,12 @@ def title_similarity(
 
 
 def _canonical_key_from_tokens(tokens: list[str]) -> str:
-    """Строит canonical key из 5 наиболее информативных токенов."""
+    """Строит canonical key из первых 5 информативных токенов (ordered)."""
     informative = [
         t for t in tokens if len(t) >= 3 and t not in _STOPWORDS_EN and t not in _STOPWORDS_RU
     ]
     key_tokens = informative[:5] if len(informative) >= 5 else tokens[:5]
-    return " ".join(sorted(key_tokens))
+    return " ".join(key_tokens)
 
 
 def generate_story_id(canonical_key: str) -> str:
@@ -562,7 +567,7 @@ class StoryClusterer:
             canonical_key = f"url:{url}"
             story_id = generate_story_id(canonical_key)
         else:
-            tokens = list(extract_tokens(normalized))
+            tokens = extract_ordered_tokens(normalized)
             canonical_key = _canonical_key_from_tokens(tokens)
             story_id = generate_story_id(canonical_key)
 
