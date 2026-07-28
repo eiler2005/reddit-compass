@@ -319,12 +319,28 @@
     {% if radar.mega_stories %}
     <section class="section">
         <h2>Мега-сюжеты через все источники</h2>
-        <p class="section-note">Ранжирование: goal relevance × source diversity × momentum × novelty × evidence.</p>
+        <p class="section-note">
+            Ранжирование: goal relevance × source diversity × momentum × novelty × evidence.
+            Показаны radar-ready сюжеты (2+ источников, 2+ материалов, или high score).
+        </p>
         <div class="story-grid">
             {% for story in radar.mega_stories %}
             {% include "components/story_card.html" %}
             {% endfor %}
         </div>
+    </section>
+    {% endif %}
+
+    <!-- Single-source signals -->
+    {% if radar.run.single_item_story_count > 0 %}
+    <section class="section">
+        <details>
+            <summary>Single-source сигналы ({{ radar.run.single_item_story_count }})</summary>
+            <p class="section-note">
+                Одиночные материалы из одного источника. Не являются трендами,
+                но доступны в <a href="/explore?date={{ radar.date }}&profile={{ radar.profile }}">Explore</a>.
+            </p>
+        </details>
     </section>
     {% endif %}
 

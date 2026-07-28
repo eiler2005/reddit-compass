@@ -397,6 +397,21 @@ def is_low_signal_title(title: str) -> bool:
     return bool(_LOW_SIGNAL_RE.search(title.strip()))
 
 
+def is_radar_ready(
+    source_count: int,
+    item_count: int,
+    trend_score: float,
+    confidence: str,
+    title: str,
+) -> bool:
+    """True если story достаточно значим для Radar top секций."""
+    return (
+        source_count >= 2
+        or item_count >= 2
+        or (trend_score >= 60 and confidence != "low" and not is_low_signal_title(title))
+    )
+
+
 def extract_tokens(normalized: str) -> set[str]:
     """Извлекает токены из нормализованного заголовка."""
     return set(normalized.split())
