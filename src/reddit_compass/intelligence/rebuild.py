@@ -136,6 +136,8 @@ def rebuild_from_snapshots(
         upsert_items(conn, items)
         total_items += len(items)
 
+        # Очищаем старые observations для этого run (idempotent rebuild)
+        conn.execute("DELETE FROM observations WHERE run_id = ?", (run_id,))
         observations = _compute_observations(run_id, items, observed_at)
         upsert_observations(conn, observations)
 
