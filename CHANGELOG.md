@@ -7,6 +7,11 @@
 
 ### Added
 
+- **Дизайн-система v2** (icreon.com palette через VPS + Wayback Machine):
+  deep blue → purple → magenta gradient, Outfit (geometric sans-serif),
+  ambient radial gradients, kinetic motion (reveal-up stagger, pulse-glow,
+  spring easing), gradient text clip на KPI/scores, backdrop-filter nav.
+  Обе темы: dark (deep navy #06080f) + light (#f6f8fa).
 - **Broad Radar / trendwatching core**: стабильная taxonomy из 12 `domain_id`
   (`ai_technology`, `labor_career`, `business_markets`, `society_politics`,
   `world_geopolitics`, `culture_media`, `sports`, `science_health_education`,
