@@ -28,10 +28,9 @@ router = APIRouter(prefix="/api/v2", tags=["v2"])
 
 def _get_db() -> Generator[sqlite3.Connection, None, None]:
     db_path = Path(os.environ.get("RC_DB_PATH", "data/compass.db"))
-    try:
+    if os.access(db_path, os.W_OK):
         conn = sqlite3.connect(db_path, check_same_thread=False)
-        conn.execute("SELECT 1")
-    except sqlite3.OperationalError:
+    else:
         uri = f"file:{db_path}?mode=ro"
         conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.row_factory = sqlite3.Row
