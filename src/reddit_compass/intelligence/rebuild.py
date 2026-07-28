@@ -144,37 +144,57 @@ def rebuild_from_snapshots(
         from .ranking import compute_percentiles, rank_story
         from .repository import replace_run_stories, save_briefing
 
-        # Загружаем stories из предыдущих дат для cross-date matching
+        # Загружаем stories ТОЛЬКО из предыдущей даты (не все!)
+        # Это даёт cross-date continuity без O(n*m) взрыва
         existing_stories = []
-        prev_rows = conn.execute(
-            "SELECT story_id, canonical_key, title, first_seen, last_seen, item_ids "
-            "FROM stories WHERE story_id NOT IN "
-            "(SELECT story_id FROM story_metrics WHERE run_id = ?)",
-            (run_id,),
-        ).fetchall()
-        import json as _json
+        prev_date_row = conn.execute(
+            "SELECT snapshot_date FROM runs "
+            "WHERE snapshot_date < ? AND profile = ? "
+            "ORDER BY snapshot_date DESC LIMIT 1",
+            (snapshot_date, profile),
+        ).fetchone()
 
-        for row in prev_rows:
-            from .models import Story
+        if prev_date_row:
+            prev_run_id = f"{prev_date_row[0]}:{profile}"
+            prev_rows = conn.execute(
+                "SELECT s.story_id, s.canonical_key, s.title, "
+                "s.first_seen, s.last_seen, s.item_ids "
+                "FROM stories s "
+                "JOIN story_metrics sm ON s.story_id = sm.story_id "
+                "WHERE sm.run_id = ? "
+                "ORDER BY sm.trend_score DESC LIMIT 200",
+                (prev_run_id,),
+            ).fetchall()
+            import json as _json
 
-            existing_stories.append(
-                Story(
-                    story_id=row["story_id"],
-                    canonical_key=row["canonical_key"],
-                    title=row["title"],
-                    first_seen=row["first_seen"],
-                    last_seen=row["last_seen"],
-                    item_ids=_json.loads(row["item_ids"]),
+            for row in prev_rows:
+                from .models import Story
+
+                existing_stories.append(
+                    Story(
+                        story_id=row["story_id"],
+                        canonical_key=row["canonical_key"],
+                        title=row["title"],
+                        first_seen=row["first_seen"],
+                        last_seen=row["last_seen"],
+                        item_ids=_json.loads(row["item_ids"]),
+                    )
                 )
-            )
 
         stories, _ = cluster_items_with_history(items, existing_stories)
+
+        # Фильтруем: оставляем только stories с items из текущего run
+        current_item_ids = {item.item_id for item in items}
+        stories = [s for s in stories if any(iid in current_item_ids for iid in s.item_ids)]
+
         percentiles = compute_percentiles(items)
 
+        # Быстрый lookup: item_id → ContentItem
+        items_by_id = {item.item_id: item for item in items}
         items_by_story: dict[str, list[ContentItem]] = {}
         for story in stories:
             items_by_story[story.story_id] = [
-                item for item in items if item.item_id in story.item_ids
+                items_by_id[iid] for iid in story.item_ids if iid in items_by_id
             ]
 
         metrics = []
