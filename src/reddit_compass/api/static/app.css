@@ -126,6 +126,17 @@ body {
                 color var(--duration) var(--ease-smooth);
 }
 
+/* Override default link colors — no harsh browser blue */
+a {
+    color: var(--accent-bright);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease-out);
+}
+
+a:hover {
+    color: var(--accent-2-bright);
+}
+
 ::selection {
     background: var(--accent-dim);
     color: var(--accent-bright);
@@ -670,6 +681,43 @@ h3 {
 .score-breakdown dt { color: var(--text-muted); }
 .score-breakdown dd { color: var(--text-secondary); text-align: right; }
 
+/* Card actions row */
+.card-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 0.75rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+}
+
+.card-action-link {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 0.3rem 0.6rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    transition: all var(--duration) var(--ease-out);
+    letter-spacing: 0.02em;
+}
+
+.card-action-link:hover {
+    color: var(--accent-2-bright);
+    border-color: var(--accent-2);
+    background: var(--accent-2-dim);
+}
+
+/* Make entire card clickable to primary evidence */
+.story-card[data-href] {
+    cursor: pointer;
+}
+
+.story-card[data-href]:hover {
+    border-color: var(--border-accent);
+}
+
 /* ─── Clouds ────────────────────────────────────────────────────────────── */
 
 .clouds-grid {
@@ -940,6 +988,98 @@ h3 {
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
+}
+
+/* ─── Domain tabs (Radar) ───────────────────────────────────────────────── */
+
+.domain-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.domain-tab {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.6rem 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: all var(--duration) var(--ease-out);
+}
+
+.domain-tab small {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+.domain-tab:hover {
+    border-color: var(--accent);
+    color: var(--text);
+    background: var(--surface-2);
+}
+
+.domain-tab.active {
+    border-color: var(--accent-2);
+    color: var(--accent-2-bright);
+    background: var(--accent-2-dim);
+}
+
+.domain-tab.active small {
+    color: var(--accent-2-bright);
+    opacity: 0.7;
+}
+
+/* ─── Active filters (Explore) ──────────────────────────────────────────── */
+
+.active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+    align-items: center;
+}
+
+.filter-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.3rem 0.7rem;
+    background: var(--accent-dim);
+    border: 1px solid var(--border-accent);
+    border-radius: 999px;
+    font-size: 0.75rem;
+    color: var(--accent-bright);
+    font-weight: 500;
+}
+
+.filter-pill-pain {
+    background: var(--error-dim);
+    border-color: color-mix(in srgb, var(--error) 25%, transparent);
+    color: var(--error);
+}
+
+.filter-clear {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.filter-clear:hover {
+    color: var(--text);
+}
+
+.results-count {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 1.25rem;
 }
 
 /* ─── Filters ───────────────────────────────────────────────────────────── */

@@ -284,24 +284,55 @@ async def explore_page(
     def page_url(page_number: int) -> str:
         return f"/explore?{urlencode({**pagination_params, 'page': str(page_number)})}"
 
-    from .view_models import StoryCardView, direction_label
+    from .view_models import StoryCardView, direction_label, provider_label
 
-    story_views = [
-        StoryCardView(
-            story_id=s["story_id"],
-            title=s["title"],
-            summary_ru=s.get("summary_ru", ""),
-            direction=s.get("direction", "new"),
-            direction_label=direction_label(s.get("direction", "new")),
-            trend_score=s.get("trend_score", 0),
-            confidence=s.get("confidence", "low"),
-            why_it_matters="",
-            source_count=s.get("source_count", 0),
-            item_count=s.get("item_count", 0),
-            clusters=[source_cluster] if source_cluster else [],
+    # Batch-load primary evidence for each story
+    story_ids = [s["story_id"] for s in stories]
+    evidence_map: dict[str, dict[str, str]] = {}
+    if story_ids:
+        placeholders = ",".join("?" * len(story_ids))
+        rows = conn.execute(
+            f"""SELECT si.story_id, i.canonical_url, i.provider, i.title
+                FROM story_items si
+                JOIN items i ON si.item_id = i.item_id
+                WHERE si.story_id IN ({placeholders})
+                ORDER BY si.story_id,
+                    CASE i.content_scope
+                        WHEN 'full' THEN 0 WHEN 'excerpt' THEN 1
+                        WHEN 'abstract' THEN 2 ELSE 3 END
+                LIMIT 500""",
+            story_ids,
+        ).fetchall()
+        for row in rows:
+            sid = row["story_id"]
+            if sid not in evidence_map:
+                evidence_map[sid] = {
+                    "url": row["canonical_url"],
+                    "provider": row["provider"],
+                    "provider_label": provider_label(row["provider"]),
+                }
+
+    story_views = []
+    for s in stories:
+        ev = evidence_map.get(s["story_id"], {})
+        story_views.append(
+            StoryCardView(
+                story_id=s["story_id"],
+                title=s["title"],
+                summary_ru=s.get("summary_ru", ""),
+                direction=s.get("direction", "new"),
+                direction_label=direction_label(s.get("direction", "new")),
+                trend_score=s.get("trend_score", 0),
+                confidence=s.get("confidence", "low"),
+                why_it_matters="",
+                source_count=s.get("source_count", 0),
+                item_count=s.get("item_count", 0),
+                clusters=[source_cluster] if source_cluster else [],
+                primary_evidence_url=ev.get("url", ""),
+                primary_evidence_provider=ev.get("provider", ""),
+                primary_evidence_provider_label=ev.get("provider_label", ""),
+            )
         )
-        for s in stories
-    ]
 
     return templates.TemplateResponse(
         request=request,

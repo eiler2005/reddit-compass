@@ -1,12 +1,11 @@
-<article class="story-card">
+<article class="story-card" {% if story.primary_evidence_url %}data-href="{{ story.primary_evidence_url }}"{% endif %}>
     <header class="story-header">
         <span class="direction-badge direction-{{ story.direction }}">{{ story.direction_label }}</span>
         <span class="trend-score" title="Story priority">{{ "%.0f"|format(story.trend_score) }}</span>
     </header>
     <h3 class="story-title">
         {% if story.primary_evidence_url %}
-        <a href="{{ story.primary_evidence_url }}" target="_blank" rel="noopener noreferrer" class="story-title-link" title="Читать: {{ story.primary_evidence_provider_label }}">{{ story.title }}</a>
-        <a href="/stories/{{ story.story_id }}" class="story-detail-link" title="Полный сюжет">📋</a>
+        <a href="{{ story.primary_evidence_url }}" target="_blank" rel="noopener noreferrer" class="story-title-link" title="Читать источник: {{ story.primary_evidence_provider_label }}">{{ story.title }}</a>
         {% else %}
         <a href="/stories/{{ story.story_id }}">{{ story.title }}</a>
         {% endif %}
@@ -35,13 +34,18 @@
         {% endfor %}
     </div>
     {% endif %}
-    <details class="score-breakdown">
-        <summary>Детали</summary>
-        <dl>
-            {% for key, value in story.score_breakdown.items() %}
-            <dt>{{ key }}</dt>
-            <dd>{{ "%.1f"|format(value) }}</dd>
-            {% endfor %}
-        </dl>
-    </details>
+    <div class="card-actions">
+        <a href="/stories/{{ story.story_id }}" class="card-action-link" title="Открыть сюжет с timeline и evidence">
+            Сюжет →
+        </a>
+        <details class="score-breakdown">
+            <summary>Метрики</summary>
+            <dl>
+                {% for key, value in story.score_breakdown.items() %}
+                <dt>{{ key }}</dt>
+                <dd>{{ "%.1f"|format(value) }}</dd>
+                {% endfor %}
+            </dl>
+        </details>
+    </div>
 </article>

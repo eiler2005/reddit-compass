@@ -125,12 +125,26 @@
         });
     }
 
-    // ─── Init ────────────────────────────────────────────────────────────
+    // ─── Clickable cards → primary evidence ──────────────────────────────
+    function initCardClick() {
+        document.addEventListener("click", function (e) {
+            const card = e.target.closest(".story-card[data-href]");
+            if (!card) return;
+            if (e.target.closest("a, button, details, summary, input, select")) return;
+            const href = card.getAttribute("data-href");
+            if (href) {
+                window.open(href, "_blank", "noopener,noreferrer");
+            }
+        });
+    }
+
+    // ─── Init ───────────────────────────────────────────────────────────
     document.addEventListener("DOMContentLoaded", function () {
         initTheme();
         initCounters();
         initScrollReveal();
         initActiveNav();
         initCardKeyboard();
+        initCardClick();
     });
 })();
