@@ -197,6 +197,14 @@ def rebuild_from_snapshots(
 
         percentiles = compute_percentiles(items)
 
+        # Deterministic item signals (100% coverage, no network)
+        from .llm_pipeline import build_deterministic_item_signals
+        from .repository import replace_run_signals
+
+        signals = build_deterministic_item_signals(items, analyzed_at=observed_at)
+        replace_run_signals(conn, run_id, signals)
+        item_signal_scores = {sig.item_id: sig.goal_relevance for sig in signals}
+
         # Быстрый lookup: item_id → ContentItem
         items_by_id = {item.item_id: item for item in items}
         items_by_story: dict[str, list[ContentItem]] = {}
@@ -241,6 +249,7 @@ def rebuild_from_snapshots(
                 prev_item_count=prev_item_count,
                 prev_source_count=prev_source_count,
                 gap_days=gap_days,
+                item_signals=item_signal_scores,
             )
             metrics.append(metric)
 

@@ -215,11 +215,16 @@ def replace_run_stories(
 
 def replace_run_signals(conn: sqlite3.Connection, run_id: str, signals: list[ItemSignal]) -> None:
     conn.execute("DELETE FROM item_signals WHERE run_id = ?", (run_id,))
+    seen: set[str] = set()
     for sig in signals:
+        if sig.item_id in seen:
+            continue
+        seen.add(sig.item_id)
         conn.execute(
-            """INSERT INTO item_signals (run_id, item_id, domain_ids, theme_ids, candidate_themes,
-                                         pain_points, buying_intent, goal_relevance,
-                                         summary_ru, evidence_scope, model, analyzed_at)
+            """INSERT OR REPLACE INTO item_signals
+               (run_id, item_id, domain_ids, theme_ids, candidate_themes,
+                pain_points, buying_intent, goal_relevance,
+                summary_ru, evidence_scope, model, analyzed_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id,
