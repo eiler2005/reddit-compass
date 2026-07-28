@@ -550,9 +550,10 @@ class StoryClusterer:
             if cluster.canonical_urls & self._match_urls(item):
                 return story_id
 
-            # Same provider + same section + generic series → no title merge
-            if item.provider == cluster.title.split()[0] if cluster.title else False:
-                pass  # handled by similarity check below
+            # Cluster-side generic guard: don't merge by title into generic clusters
+            cluster_normalized = normalize_title(cluster.title)
+            if is_generic_title(cluster_normalized) or is_low_signal_title(cluster.title):
+                continue
 
             similarity = title_similarity(item.title, cluster.title, item.provider)
             has_entity_overlap = bool(item_entities & cluster.entities)

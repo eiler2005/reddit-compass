@@ -138,6 +138,18 @@ class TestGenericAndLowSignal:
         ids2 = sorted(s.story_id for s in stories2)
         assert ids1 == ids2
 
+    def test_generic_cluster_cannot_absorb_normal_item(self):
+        """Normal item не должен приклеиться к generic cluster по title."""
+        clusterer = StoryClusterer()
+        generic_item = _make_item("g1", "Tech Life", "bbc", "https://bbc.com/techlife/1")
+        clusterer.add_item(generic_item)
+        normal_item = _make_item(
+            "n1", "Tech Life improves with AI tools", "bbc", "https://bbc.com/ai/1"
+        )
+        clusterer.add_item(normal_item)
+        stories = clusterer.get_stories()
+        assert len(stories) == 2
+
 
 class TestTokenJaccard:
     def test_identical(self):
