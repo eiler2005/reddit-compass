@@ -19,7 +19,7 @@ services:
     env_file: [.env]
     environment:
       DATA_DIR: /data
-      REDDIT_COMPASS_CONFIG: /app/config/profiles/ai-native.json
+      REDDIT_COMPASS_CONFIG: /app/config/profiles/broad.json
     restart: "no"
     volumes:
       - rc_data:/data
@@ -44,7 +44,7 @@ services:
     environment:
       DATA_DIR: /data
       RC_DB_PATH: /data/compass.db
-      REDDIT_COMPASS_CONFIG: /app/config/profiles/ai-native.json
+      REDDIT_COMPASS_CONFIG: /app/config/profiles/broad.json
     restart: always
     stop_grace_period: 10s
     ports:
