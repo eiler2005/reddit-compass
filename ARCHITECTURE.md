@@ -333,3 +333,15 @@ reddit-compass serve                           REST API (FastAPI :8900)
 | VPS-стек | `deploy/hostkey/` | App-owned `/opt/reddit-compass` |
 | Секреты | `.env`, `.env.secrets` | Вручную, НЕ в git |
 | Скрипты | `scripts/` | Mac-specific (launchd) |
+
+---
+
+## 10. Документация
+
+| Документ | Тема |
+|---|---|
+| [`docs/DATABASE_SCHEMA.md`](docs/DATABASE_SCHEMA.md) | Полная схема SQLite: таблицы, колонки, индексы, примеры запросов |
+| [`docs/PRODUCT_IMPLEMENTATION_PLAN.md`](docs/PRODUCT_IMPLEMENTATION_PLAN.md) | Продуктовый план: модели, ranking, UI, API |
+| [`docs/TRENDWATCHING_DEEP_REVIEW_AND_V2_PLAN.md`](docs/TRENDWATCHING_DEEP_REVIEW_AND_V2_PLAN.md) | Глубокое ревью trendwatching + план V2 |
+| [`docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md) | Реализация broad Radar |
+| [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog |
