@@ -31,9 +31,12 @@ def _get_db() -> Generator[sqlite3.Connection, None, None]:
     db_path = Path(os.environ.get("RC_DB_PATH", "data/compass.db"))
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    migrate(conn)
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        migrate(conn)
+    except sqlite3.OperationalError:
+        pass  # read-only DB (API container)
     try:
         yield conn
     finally:
