@@ -254,27 +254,105 @@ _ENTITY_PATTERN = re.compile(
 )
 
 
+_GENERIC_PREFIXES = {
+    "opinion",
+    "analysis",
+    "live",
+    "live updates",
+    "latest news",
+    "top stories",
+    "morning briefing",
+    "newsletter",
+    "sign up",
+    "methodology",
+    "tech life",
+    "tech now",
+    "podcast",
+    "breaking",
+    "breaking news",
+    "updated",
+    "update",
+    "exclusive",
+}
+
+_PUBLISHER_SUFFIXES = {
+    "nytimes": ["the new york times", "new york times", "nyt"],
+    "washingtonpost": ["the washington post", "washington post", "wapo"],
+    "theverge": ["the verge", "verge"],
+    "bbc": ["bbc"],
+    "guardian": ["the guardian", "guardian"],
+    "reuters": ["reuters"],
+    "ft": ["financial times", "ft"],
+    "techcrunch": ["techcrunch", "tech crunch"],
+    "arstechnica": ["ars technica"],
+    "wired": ["wired"],
+    "usatoday": ["usa today"],
+    "foxbusiness": ["fox business"],
+    "americanbanker": ["american banker"],
+    "medium": ["medium"],
+    "time": ["time"],
+    "vanityfair": ["vanity fair"],
+    "newyorker": ["the new yorker", "new yorker"],
+    "foxnews": ["fox news"],
+}
+
+
+def _strip_publisher_suffix(text: str, provider: str) -> str:
+    """Удаляет trailing publisher suffix вида '- The New York Times'."""
+    suffixes = _PUBLISHER_SUFFIXES.get(provider, [])
+    # Also try generic suffixes from all providers
+    all_suffixes = set()
+    for s_list in _PUBLISHER_SUFFIXES.values():
+        all_suffixes.update(s_list)
+    all_suffixes.update(suffixes)
+
+    for suffix in sorted(all_suffixes, key=len, reverse=True):
+        # Match "- suffix" or "| suffix" at end
+        pattern = rf"[\s\-–—|]\s*{re.escape(suffix)}\s*$"
+        text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
 def normalize_title(title: str, provider: str = "") -> str:
     """Нормализует заголовок для сравнения.
 
     1. Unicode NFKC.
     2. Lowercase.
-    3. Удалить punctuation и повторные spaces.
-    4. Удалить URL и publisher suffix после |.
-    5. Токены короче 3 символов исключить, кроме ai.
-    6. Удалить stopword set.
-    7. Числа, суммы и имена компаний сохранить.
+    3. Удалить trailing publisher suffix.
+    4. Обработать | separator: generic prefix → use right; publisher suffix → use left.
+    5. Удалить URL и punctuation.
+    6. Токены короче 3 символов исключить, кроме ai.
+    7. Удалить stopword set.
     """
     text = unicodedata.normalize("NFKC", title)
     text = text.lower()
 
+    # Strip trailing publisher suffix first
+    if provider:
+        text = _strip_publisher_suffix(text, provider)
+
+    # Handle | separator
     if "|" in text:
-        parts = text.split("|")
-        suffix = parts[-1].strip()
-        if provider and provider.lower() in suffix:
-            text = "|".join(parts[:-1])
-        elif len(parts) > 1:
-            text = parts[0]
+        parts = [p.strip() for p in text.split("|")]
+        left = parts[0] if parts else ""
+        right = parts[1] if len(parts) > 1 else ""
+
+        left_is_generic = left in _GENERIC_PREFIXES
+        right_is_publisher = any(
+            right == s or right.endswith(s)
+            for s_list in _PUBLISHER_SUFFIXES.values()
+            for s in s_list
+        )
+
+        if left_is_generic and right:
+            text = right
+        elif (right_is_publisher or (provider and provider.lower() in right)) and left:
+            text = left
+        elif left and right:
+            # Both meaningful — keep both but prefer left
+            text = left
+        elif left:
+            text = left
 
     text = re.sub(r"https?://\S+", "", text)
     text = re.sub(r"[^\w\s]", " ", text)

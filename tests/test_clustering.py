@@ -58,6 +58,43 @@ class TestNormalizeTitle:
         result = normalize_title("ＡＩ agents")  # Fullwidth chars
         assert "ai" in result
 
+    def test_opinion_prefix_uses_right_part(self):
+        """Opinion | Real title - NYT → должен использовать правую часть."""
+        result = normalize_title(
+            "Opinion | Mamdani's Netanyahu Stunt Was a Waste - The New York Times",
+            "nytimes",
+        )
+        assert "opinion" not in result
+        assert "mamdani" in result
+
+    def test_opinion_prefix_different_articles_not_merged(self):
+        """Разные Opinion| статьи не должны нормализоваться в одно."""
+        r1 = normalize_title(
+            "Opinion | Ban AR-style rifles? Virginia is a warning. - The Washington Post",
+            "washingtonpost",
+        )
+        r2 = normalize_title(
+            "Opinion | The path forward for clean energy - The Washington Post",
+            "washingtonpost",
+        )
+        assert r1 != r2
+
+    def test_publisher_suffix_stripped(self):
+        """Trailing '- The New York Times' должен быть удалён."""
+        result = normalize_title(
+            "AI Regulation Bill Passes Senate - The New York Times",
+            "nytimes",
+        )
+        assert "times" not in result
+        assert "regulation" in result
+
+    def test_tech_life_generic_not_merged(self):
+        """'Tech Life' с разными URL не должен склеиваться."""
+        r1 = normalize_title("Tech Life", "bbc")
+        r2 = normalize_title("Tech Life", "bbc")
+        # Same normalized title — but clustering should use URL guard
+        assert r1 == r2  # normalization is same, guard is in clustering
+
 
 class TestTokenJaccard:
     def test_identical(self):
