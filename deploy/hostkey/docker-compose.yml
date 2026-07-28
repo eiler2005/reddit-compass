@@ -41,6 +41,7 @@ services:
     image: reddit-compass-api:latest
     container_name: rc-api
     command: ["serve"]
+    user: "1002:1002"
     env_file: [.env]
     environment:
       DATA_DIR: /data
