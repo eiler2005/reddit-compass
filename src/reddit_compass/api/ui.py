@@ -15,7 +15,6 @@ from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from ..intelligence.migrations import migrate
 from ..intelligence.repository import (
     get_briefing,
     get_research_state,
@@ -38,14 +37,13 @@ _CSRF_SECRET = secrets.token_hex(32)
 
 def _get_db() -> Generator[sqlite3.Connection, None, None]:
     db_path = Path(os.environ.get("RC_DB_PATH", "data/compass.db"))
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
     try:
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA foreign_keys=ON")
-        migrate(conn)
+        conn = sqlite3.connect(db_path, check_same_thread=False)
+        conn.execute("SELECT 1")  # test write access
     except sqlite3.OperationalError:
-        pass  # read-only DB (API container)
+        uri = f"file:{db_path}?mode=ro"
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
     try:
         yield conn
     finally:
