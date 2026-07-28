@@ -174,6 +174,15 @@ Default collection profile: `config/profiles/broad.json`.
 
 ---
 
+### UI drill-down contract
+
+- Radar chips are navigational, not decorative: stable themes, emerging themes and pain points link to `/explore`.
+- Drill-down links preserve run context: `date` + `profile`.
+- Theme filters use `theme=<theme_id>`; candidate theme filters use `q=<candidate label>`; pain filters use `pain=<normalized pain label>`.
+- `/explore` and `/api/v2/stories` resolve `pain` through `story_items → item_signals`, so the UI returns deduplicated stories, not raw item duplicates.
+
+---
+
 ## 5. Деплой
 
 ```

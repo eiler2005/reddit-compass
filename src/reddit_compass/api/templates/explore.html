@@ -7,6 +7,11 @@
     <h1>Обзор сюжетов</h1>
 
     <form method="get" action="/explore" class="filters">
+        {% if filters.date %}<input type="hidden" name="date" value="{{ filters.date }}">{% endif %}
+        {% if filters.profile %}<input type="hidden" name="profile" value="{{ filters.profile }}">{% endif %}
+        {% if filters.theme %}<input type="hidden" name="theme" value="{{ filters.theme }}">{% endif %}
+        {% if filters.domain %}<input type="hidden" name="domain" value="{{ filters.domain }}">{% endif %}
+        {% if filters.pain %}<input type="hidden" name="pain" value="{{ filters.pain }}">{% endif %}
         <input type="text" name="q" value="{{ filters.q or '' }}" placeholder="Поиск...">
         <select name="source_cluster">
             <option value="">Все кластеры</option>
@@ -34,7 +39,22 @@
         <button type="submit" class="btn">Фильтр</button>
     </form>
 
+    {% if filters.date or filters.profile or filters.theme or filters.domain or filters.pain %}
+    <div class="active-filters" aria-label="Активные фильтры">
+        {% if filters.date %}<span class="filter-pill">Дата: {{ filters.date }}</span>{% endif %}
+        {% if filters.profile %}<span class="filter-pill">Профиль: {{ filters.profile }}</span>{% endif %}
+        {% if filters.theme %}<span class="filter-pill">Тема: {{ filters.theme }}</span>{% endif %}
+        {% if filters.domain %}<span class="filter-pill">Рубрика: {{ filters.domain }}</span>{% endif %}
+        {% if filters.pain %}<span class="filter-pill filter-pill-pain">Pain: {{ filters.pain }}</span>{% endif %}
+        <a href="/explore" class="filter-clear">Сбросить</a>
+    </div>
+    {% endif %}
+
     <p class="results-count">Найдено: {{ total }}</p>
+
+    {% if not stories %}
+    <p class="empty-state">По этому фильтру сюжетов не найдено.</p>
+    {% endif %}
 
     <div class="story-grid">
         {% for story in stories %}
@@ -45,11 +65,11 @@
     {% if total_pages > 1 %}
     <nav class="pagination">
         {% if page > 1 %}
-        <a href="?page={{ page - 1 }}&q={{ filters.q or '' }}&source_cluster={{ filters.source_cluster or '' }}&direction={{ filters.direction or '' }}&confidence={{ filters.confidence or '' }}&sort={{ filters.sort }}" class="btn">← Назад</a>
+        <a href="{{ prev_url }}" class="btn">← Назад</a>
         {% endif %}
         <span>Стр. {{ page }} из {{ total_pages }}</span>
         {% if page < total_pages %}
-        <a href="?page={{ page + 1 }}&q={{ filters.q or '' }}&source_cluster={{ filters.source_cluster or '' }}&direction={{ filters.direction or '' }}&confidence={{ filters.confidence or '' }}&sort={{ filters.sort }}" class="btn">Вперёд →</a>
+        <a href="{{ next_url }}" class="btn">Вперёд →</a>
         {% endif %}
     </nav>
     {% endif %}

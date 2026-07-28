@@ -278,8 +278,8 @@ Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
 | View | URL | Purpose |
 |---|---|---|
 | **⚡ Today** | `/today` | Утренний бриф: 3–5 изменений, что прочитать, что в работе |
-| **🤖 Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: KPI, мега-сюжеты, облака, сила трендов, relevance Книга/РБК |
-| **🔍 Explore** | `/explore` | Поиск, фильтры, raw materials по кластерам |
+| **🤖 Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: KPI, мега-сюжеты, кликабельные pain/theme clouds, сила трендов, relevance Книга/РБК |
+| **🔍 Explore** | `/explore` | Поиск, фильтры и drill-down списки сюжетов по date/profile/theme/domain/pain/source |
 | **📋 Story** | `/stories/{id}` | Исследование сюжета: timeline, evidence, research state |
 | **📁 Runs** | `/runs` | История запусков с реальными counts |
 
@@ -302,6 +302,7 @@ Title → прямой переход на самый значимый исто�
 http://127.0.0.1:8900/today              # утренний бриф
 http://127.0.0.1:8900/radar              # полный Radar
 http://127.0.0.1:8900/explore            # поиск + фильтры
+http://127.0.0.1:8900/explore?date=2026-07-28&profile=broad&pain=security+breach
 http://127.0.0.1:8900/legacy/dashboard   # legacy
 ```
 

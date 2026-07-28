@@ -277,6 +277,7 @@ def query_stories(
     source_cluster: str | None = None,
     direction: str | None = None,
     confidence: str | None = None,
+    pain: str | None = None,
     q: str | None = None,
     sort: str = "trend_score",
     page: int = 1,
@@ -322,6 +323,13 @@ def query_stories(
     if confidence:
         where.append("sm.confidence = ?")
         params.append(confidence)
+    if pain:
+        where.append(
+            "EXISTS (SELECT 1 FROM story_items si "
+            "JOIN item_signals isig ON isig.run_id = si.run_id AND isig.item_id = si.item_id "
+            "WHERE si.run_id = sm.run_id AND si.story_id = sm.story_id AND isig.pain_points LIKE ?)"
+        )
+        params.append(f'%"{pain}"%')
     if q:
         where.append("(s.title LIKE ? OR s.summary_ru LIKE ?)")
         params.extend([f"%{q}%", f"%{q}%"])

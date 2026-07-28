@@ -9,6 +9,7 @@ import json
 import os
 import sqlite3
 from datetime import datetime
+from urllib.parse import urlencode
 
 from ..config import DEFAULT_PROFILE
 from ..intelligence.taxonomy import BROAD_DOMAINS, DOMAIN_ORDER, stable_hash_id
@@ -258,6 +259,15 @@ def build_theme_clouds(
     if not signals:
         return [], [], []
 
+    def explore_url(**filters: str) -> str:
+        params: dict[str, str] = {}
+        if ":" in run_id:
+            date, profile = run_id.split(":", 1)
+            params["date"] = date
+            params["profile"] = profile
+        params.update({key: value for key, value in filters.items() if value})
+        return f"/explore?{urlencode(params)}"
+
     # Stable themes: из theme_catalog (profile taxonomy)
     stable_themes: list[CloudNode] = []
     if theme_catalog:
@@ -280,7 +290,7 @@ def build_theme_clouds(
                     node_id=theme_id,
                     label_ru=theme_labels.get(theme_id, theme_id),
                     item_count=count,
-                    url=f"/explore?theme={theme_id}",
+                    url=explore_url(theme=theme_id),
                 )
             )
 
@@ -302,6 +312,7 @@ def build_theme_clouds(
                     label_ru=candidate,
                     label_original=candidate,
                     item_count=count,
+                    url=explore_url(q=candidate),
                 )
             )
 
@@ -321,6 +332,7 @@ def build_theme_clouds(
                 node_id=stable_hash_id("pain", pain, length=10),
                 label_ru=pain,
                 item_count=count,
+                url=explore_url(pain=pain),
             )
         )
 

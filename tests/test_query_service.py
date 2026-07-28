@@ -18,12 +18,15 @@ from reddit_compass.db import get_db
 from reddit_compass.intelligence.migrations import migrate
 from reddit_compass.intelligence.models import (
     ContentItem,
+    ItemSignal,
     Observation,
     SourceHealth,
     Story,
     StoryMetric,
 )
 from reddit_compass.intelligence.repository import (
+    query_stories,
+    replace_run_signals,
     replace_run_stories,
     save_source_health,
     upsert_items,
@@ -177,6 +180,94 @@ class TestBuildThemeClouds:
         assert stable == []
         assert emerging == []
         assert pain == []
+
+    def test_cloud_nodes_link_to_explore_with_run_context(self, db_with_data):
+        replace_run_signals(
+            db_with_data,
+            "2026-07-27:ai-native",
+            [
+                ItemSignal(
+                    item_id="reddit:1",
+                    theme_ids=["ai_agents"],
+                    candidate_themes=["agent security"],
+                    pain_points=["security breach"],
+                ),
+                ItemSignal(
+                    item_id="reddit:2",
+                    theme_ids=["ai_agents"],
+                    candidate_themes=["agent security"],
+                    pain_points=["security breach"],
+                ),
+            ],
+        )
+        db_with_data.commit()
+
+        stable, emerging, pain = build_theme_clouds(
+            db_with_data,
+            "2026-07-27:ai-native",
+            [{"id": "ai_agents", "label": "AI-агенты"}],
+        )
+
+        assert stable[0].url == "/explore?date=2026-07-27&profile=ai-native&theme=ai_agents"
+        assert emerging[0].url == "/explore?date=2026-07-27&profile=ai-native&q=agent+security"
+        assert pain[0].url == "/explore?date=2026-07-27&profile=ai-native&pain=security+breach"
+
+    def test_query_stories_filters_by_item_signal_pain(self, db_with_data):
+        other_story = Story(
+            story_id="story_other",
+            canonical_key="other",
+            title="Other Story",
+            first_seen="2026-07-27",
+            item_ids=["reddit:2"],
+        )
+        other_metric = StoryMetric(
+            run_id="2026-07-27:ai-native",
+            story_id="story_other",
+            trend_score=20.0,
+            direction="new",
+            item_count=1,
+            source_count=1,
+        )
+        existing_story = Story(
+            story_id="story_test",
+            canonical_key="test",
+            title="Test Story",
+            first_seen="2026-07-27",
+            item_ids=["reddit:1"],
+        )
+        existing_metric = StoryMetric(
+            run_id="2026-07-27:ai-native",
+            story_id="story_test",
+            trend_score=75.0,
+            direction="new",
+            item_count=1,
+            source_count=1,
+        )
+        replace_run_stories(
+            db_with_data,
+            "2026-07-27:ai-native",
+            [existing_story, other_story],
+            [existing_metric, other_metric],
+        )
+        replace_run_signals(
+            db_with_data,
+            "2026-07-27:ai-native",
+            [
+                ItemSignal(item_id="reddit:1", pain_points=["security breach"]),
+                ItemSignal(item_id="reddit:2", pain_points=["pricing friction"]),
+            ],
+        )
+        db_with_data.commit()
+
+        stories, total = query_stories(
+            db_with_data,
+            date="2026-07-27",
+            profile="ai-native",
+            pain="security breach",
+        )
+
+        assert total == 1
+        assert stories[0]["story_id"] == "story_test"
 
 
 class TestViewLabels:

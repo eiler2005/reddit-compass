@@ -11,6 +11,10 @@
   `trend_id`, `lifecycle`, `project_scores`, URL/evidence/dedupe metadata.
 - SQLite projection поднята до schema v3 через `PRAGMA user_version`.
 - Radar получил category navigation, source-cluster matrix, trend shelves и Broad/AI-native switcher.
+- Pain points, stable themes и emerging theme chips стали drill-down навигацией в `/explore`
+  с сохранением `date/profile`.
+- `/explore` фильтрует stories по `theme`, `domain`, `source_cluster`, `direction`, `confidence`
+  и `pain`; `pain` резолвится через item-level `item_signals`.
 - `run --analyze` создаёт `item_signals`; при `0` разметок UI не рендерит фальшивый LLM-анализ.
 - Source coverage считается на уровне `provider × section/feed`.
 - Item count считается через `observations`, а не `items.snapshot_date`.
@@ -30,6 +34,8 @@
   мульти-доменным semantic lens.
 - Project history для книги/РБК использует `project_scores` и rankings; отдельные таблицы
   recurring thesis/counterpoints/column history ещё не введены.
+- Theme/pain drill-down показывает deduped stories; raw item-level материалы остаются внутри
+  story detail/evidence, а не дублируются в верхнем списке.
 
 ## Проверки
 
@@ -40,4 +46,4 @@ uv run mypy src
 uv run pytest
 ```
 
-Последний локальный прогон: 271 tests passed.
+Последний локальный прогон: 284 tests passed.

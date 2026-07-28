@@ -193,9 +193,9 @@
         <h2>Pain points</h2>
         <div class="cloud">
             {% for node in radar.pain_point_cloud %}
-            <span class="cloud-node cloud-pain">
+            <a href="{{ node.url }}" class="cloud-node cloud-pain" title="Открыть сюжеты с pain point: {{ node.label_ru }}">
                 {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
-            </span>
+            </a>
             {% endfor %}
         </div>
     </section>
@@ -233,7 +233,7 @@
                 <h3>Стабильные темы</h3>
                 <div class="cloud">
                     {% for node in radar.stable_themes %}
-                    <a href="{{ node.url }}" class="cloud-node">
+                    <a href="{{ node.url }}" class="cloud-node" title="Открыть сюжеты по теме: {{ node.label_ru }}">
                         {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
                     </a>
                     {% endfor %}
@@ -246,9 +246,9 @@
                 <h3>Новые сюжеты</h3>
                 <div class="cloud">
                     {% for node in radar.emerging_candidates %}
-                    <span class="cloud-node cloud-candidate">
+                    <a href="{{ node.url }}" class="cloud-node cloud-candidate" title="Открыть сюжеты по теме: {{ node.label_ru }}">
                         {{ node.label_ru }} <span class="cloud-count">{{ node.item_count }}</span>
-                    </span>
+                    </a>
                     {% endfor %}
                 </div>
             </div>

@@ -10,6 +10,7 @@ import secrets
 import sqlite3
 from collections.abc import Generator
 from pathlib import Path
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -218,7 +219,11 @@ async def explore_page(
     q: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
+    date: str | None = None,
+    profile: str | None = None,
     theme: str | None = None,
+    domain: str | None = None,
+    pain: str | None = None,
     provider: str | None = None,
     source_cluster: str | None = None,
     direction: str | None = None,
@@ -236,8 +241,12 @@ async def explore_page(
 
     stories, total = query_stories(
         conn,
+        date=date,
+        profile=profile,
         q=q,
         theme=theme,
+        domain=domain,
+        pain=pain,
         provider=provider,
         source_cluster=source_cluster,
         direction=direction,
@@ -248,6 +257,29 @@ async def explore_page(
     )
 
     total_pages = (total + page_size - 1) // page_size if total > 0 else 1
+    pagination_params = {
+        key: value
+        for key, value in {
+            "q": q,
+            "date": date,
+            "profile": profile,
+            "theme": theme,
+            "domain": domain,
+            "pain": pain,
+            "provider": provider,
+            "source_cluster": source_cluster,
+            "direction": direction,
+            "confidence": confidence,
+            "status": status,
+            "saved": str(saved).lower() if saved is not None else None,
+            "sort": sort,
+            "page_size": str(page_size),
+        }.items()
+        if value
+    }
+
+    def page_url(page_number: int) -> str:
+        return f"/explore?{urlencode({**pagination_params, 'page': str(page_number)})}"
 
     from .view_models import StoryCardView, direction_label
 
@@ -279,12 +311,19 @@ async def explore_page(
             "total_pages": total_pages,
             "filters": {
                 "q": q,
+                "date": date,
+                "profile": profile,
+                "domain": domain,
+                "pain": pain,
+                "provider": provider,
                 "source_cluster": source_cluster,
                 "theme": theme,
                 "direction": direction,
                 "confidence": confidence,
                 "sort": sort,
             },
+            "prev_url": page_url(page - 1) if page > 1 else "",
+            "next_url": page_url(page + 1) if page < total_pages else "",
         },
     )
 

@@ -949,6 +949,45 @@ h3 {
     box-shadow: var(--glow-accent);
 }
 
+.active-filters {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin: -0.75rem 0 1.25rem;
+}
+
+.filter-pill,
+.filter-clear {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.7rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+}
+
+.filter-pill {
+    color: var(--text-secondary);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.filter-pill-pain {
+    color: var(--accent-2);
+    border-color: color-mix(in srgb, var(--accent-2) 40%, transparent);
+    background: var(--accent-2-dim);
+}
+
+.filter-clear {
+    color: var(--accent);
+    text-decoration: none;
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.filter-clear:hover {
+    border-color: var(--accent);
+}
+
 /* ─── Pagination ────────────────────────────────────────────────────────── */
 
 .pagination {
