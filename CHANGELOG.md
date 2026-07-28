@@ -7,6 +7,22 @@
 
 ### Added
 
+- **Честные метрики clustering** (RADAR_CLUSTERING_IMPROVEMENT_TASK):
+  `candidate_story_count`, `single_item_story_count`, `multi_item_story_count`,
+  `cross_source_story_count`, `radar_ready_story_count`, `analyzed_coverage_ratio`,
+  `compression_ratio` в RunSummary. Radar KPI показывает все 6 метрик.
+  Warning при compression > 65% и analysis coverage < 95%.
+- **normalize_title v2**: `Opinion | Real title - NYT` → использует правую часть;
+  trailing publisher suffix (`- The New York Times`) удаляется; 16 provider aliases.
+- **Generic/low-signal guards**: `is_generic_title()`, `is_low_signal_title()`.
+  Generic titles (opinion, tech life, newsletter) не склеиваются по title-only.
+  URL-based story_id для generic/low-signal материалов.
+- **Deterministic canonical key**: `extract_ordered_tokens()` вместо `set→list`.
+  `cluster_items()` детерминирован по story_ids.
+- **Conservative clustering**: короткие заголовки (<4 tokens) без entity overlap
+  требуют similarity ≥ 0.85 (было 0.72).
+- **Radar-ready filtering**: `is_radar_ready()` — single-source материалы
+  не доминируют в top аналитике, доступны в Explore.
 - **Дизайн-система v2** (icreon.com palette через VPS + Wayback Machine):
   deep blue → purple → magenta gradient, Outfit (geometric sans-serif),
   ambient radial gradients, kinetic motion (reveal-up stagger, pulse-glow,
