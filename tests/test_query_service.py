@@ -16,8 +16,20 @@ from reddit_compass.api.query_service import (
 from reddit_compass.api.view_models import RunSummary
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.migrations import migrate
-from reddit_compass.intelligence.models import Story, StoryMetric
-from reddit_compass.intelligence.repository import replace_run_stories, upsert_run
+from reddit_compass.intelligence.models import (
+    ContentItem,
+    Observation,
+    SourceHealth,
+    Story,
+    StoryMetric,
+)
+from reddit_compass.intelligence.repository import (
+    replace_run_stories,
+    save_source_health,
+    upsert_items,
+    upsert_observations,
+    upsert_run,
+)
 
 
 @pytest.fixture
@@ -113,6 +125,50 @@ class TestBuildSourceCoverage:
         source_ids = {c.source_id for c in coverage}
         assert "reddit" in source_ids
         assert "hackernews" in source_ids
+
+    def test_builds_provider_section_coverage(self, db_with_data):
+        item = ContentItem(
+            item_id="bbc:1",
+            provider="bbc",
+            source_cluster="mainstream",
+            external_id="1",
+            canonical_url="https://bbc.com/news/world-1",
+            title="World news story",
+            source_section="world",
+            domain_ids=["world_geopolitics"],
+        )
+        upsert_items(db_with_data, [item])
+        upsert_observations(
+            db_with_data,
+            [
+                Observation(
+                    run_id="2026-07-27:ai-native",
+                    item_id=item.item_id,
+                    observed_at="2026-07-27T11:00:00Z",
+                )
+            ],
+        )
+        save_source_health(
+            db_with_data,
+            "2026-07-27:ai-native",
+            [
+                SourceHealth(
+                    source_id="bbc:world",
+                    provider="bbc",
+                    cluster="mainstream",
+                    status="ok",
+                    count=1,
+                    message="world",
+                )
+            ],
+        )
+        db_with_data.commit()
+
+        coverage = build_source_coverage(db_with_data, "2026-07-27:ai-native", "2026-07-27")
+        by_id = {row.source_id: row for row in coverage}
+
+        assert by_id["bbc:world"].item_count == 1
+        assert by_id["bbc:world"].label == "BBC / World"
 
 
 class TestBuildThemeClouds:

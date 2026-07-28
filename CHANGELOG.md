@@ -7,6 +7,19 @@
 
 ### Added
 
+- **Broad Radar / trendwatching core**: стабильная taxonomy из 12 `domain_id`
+  (`ai_technology`, `labor_career`, `business_markets`, `society_politics`,
+  `world_geopolitics`, `culture_media`, `sports`, `science_health_education`,
+  `finance_consumer`, `climate_energy_infrastructure`, `security_privacy`, `other`).
+- **Default `broad` profile** (`config/profiles/broad.json`): широкие Reddit packs,
+  broad keywords и goal profiles для книги, РБК и business signal.
+- **SQLite schema v3**: новые поля `domain_ids`, `trend_id`, `lifecycle`,
+  `project_scores`, `discussion_url`, `target_url`, `dedupe_group_id`, `evidence_refs`.
+- **Radar workspace**: category tabs, category × source-cluster matrix, trend shelves,
+  Broad/AI-native mode switcher, source-section coverage и domain labels.
+- **API v2 additions**: `/api/v2/domains`, `/api/v2/radar/{date}`,
+  `/api/v2/trends`, `/api/v2/trends/{trend_id}`,
+  `/api/v2/projects/{project_id}/radar`.
 - **Дизайн-система** (kinetic motion-first, dark tech aesthetic по описанию Awwwards
   icreon-digital-velocity): обе темы (dark default + light toggle с persistence),
   типографика Space Grotesk / Inter / JetBrains Mono, CSS design tokens, scroll-reveal,
@@ -41,6 +54,18 @@
 
 ### Changed
 
+- `reddit-compass run --analyze` теперь создаёт `item_signals` для каждого item
+  через deterministic facets layer; Radar больше не показывает фальшивый блок анализа,
+  если разметок `0`.
+- Item count в UI считается через `observations`, а не через `items.snapshot_date`.
+- Hacker News adapter собирает front page/new/weekly-top перед keyword search, поэтому
+  больше не является только AI-keyword источником.
+- RSS adapter расширен до section-level coverage: BBC, Guardian, Reuters, NYT/WaPo
+  via Google News RSS, FT/Fox Business/USA Today и tech/culture sources.
+- Reddit link-post теперь хранит два URL: `discussion_url` и внешний `target_url`;
+  canonical URL для link-post — внешний target, чтобы RSS/HN могли склеиться с Reddit.
+- Story clustering использует canonical/target URL, нормализованный title/entity overlap
+  и recent history; current-run ranking больше не тащит historical item_ids в метрики run.
 - **`REDDIT_COMPASS_ENGINE`** (`auto|playwright`): выбор движка Reddit-запросов.
   `playwright` пропускает aiohttp-попытку и сразу стартует Chromium — основной режим
   для ротационных residential proxy, где Reddit отдаёт 403 голому HTTP с pool-IP,

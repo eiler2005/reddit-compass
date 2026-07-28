@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from ..intelligence.models import Briefing, BriefingStory, ResearchState, Story
+from ..intelligence.taxonomy import DOMAIN_LABELS_RU
 
 
 @dataclass
@@ -42,7 +43,9 @@ class SourceCoverageRow:
     configured: bool = True
     expected: bool = True
     attempted: bool = False
-    status: Literal["ok", "empty", "error", "stale", "skipped", "not_configured"] = "skipped"
+    status: Literal["ok", "empty", "partial", "error", "stale", "skipped", "not_configured"] = (
+        "skipped"
+    )
     item_count: int = 0
     content_scope: Literal["headline", "abstract", "excerpt", "full"] = "headline"
     last_success_at: str | None = None
@@ -69,6 +72,19 @@ class CloudNode:
 
 
 @dataclass
+class DomainSummaryView:
+    """Broad Radar domain summary."""
+
+    domain_id: str
+    label_ru: str
+    item_count: int = 0
+    story_count: int = 0
+    source_count: int = 0
+    top_score: float = 0.0
+    url: str = ""
+
+
+@dataclass
 class StoryCardView:
     """View model для story card."""
 
@@ -82,6 +98,8 @@ class StoryCardView:
     why_it_matters: str
     source_count: int
     item_count: int
+    domain_ids: list[str] = field(default_factory=list)
+    domain_labels: list[str] = field(default_factory=list)
     clusters: list[str] = field(default_factory=list)
     clusters_display: list[str] = field(default_factory=list)
     evidence: list[dict[str, Any]] = field(default_factory=list)
@@ -209,6 +227,10 @@ def provider_label(provider: str) -> str:
     return _PROVIDER_LABELS.get(provider, provider)
 
 
+def domain_label(domain_id: str) -> str:
+    return DOMAIN_LABELS_RU.get(domain_id, domain_id)
+
+
 _STATUS_LABELS = {
     "complete": "✅ Полный",
     "partial": "⚠️ Частичный",
@@ -288,6 +310,8 @@ def briefing_to_view(briefing: Briefing) -> BriefingView:
             why_it_matters=bs.why_it_matters,
             source_count=bs.metric.source_count,
             item_count=bs.metric.item_count,
+            domain_ids=bs.story.domain_ids,
+            domain_labels=[domain_label(domain_id) for domain_id in bs.story.domain_ids],
             clusters=clusters,
             clusters_display=clusters_display,
             evidence=evidence_list,
@@ -397,6 +421,12 @@ class RadarPageView:
     profile: str
     run: RunSummary
     source_coverage: list[SourceCoverageRow]
+    mode: str = "broad"
+    selected_domain: str | None = None
+    selected_domain_label: str = ""
+    domain_summaries: list[DomainSummaryView] = field(default_factory=list)
+    domain_matrix: list[dict[str, Any]] = field(default_factory=list)
+    trend_shelves: dict[str, list[StoryCardView]] = field(default_factory=dict)
     top_changes: list[StoryCardView] = field(default_factory=list)
     mega_stories: list[StoryCardView] = field(default_factory=list)
     watchlist: list[StoryCardView] = field(default_factory=list)

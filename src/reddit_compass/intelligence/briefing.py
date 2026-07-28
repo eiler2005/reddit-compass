@@ -121,16 +121,9 @@ def build_deterministic_briefing(
     mega_stories: list[BriefingStory] = []
     watchlist: list[BriefingStory] = []
 
-    # Mega stories: top 10 по trend_score (все направления)
-    for metric in sorted_metrics[:_MEGA_STORIES_LIMIT]:
-        story = stories_by_id.get(metric.story_id)
-        if not story:
-            continue
-        items = items_by_story.get(metric.story_id, [])
-        mega_stories.append(build_briefing_story(story, metric, items))
-
     # Top changes: new/growing/resurfacing
     # Watchlist: остальные
+    used_story_ids: set[str] = set()
     for metric in sorted_metrics:
         story = stories_by_id.get(metric.story_id)
         if not story:
@@ -142,10 +135,23 @@ def build_deterministic_briefing(
         if metric.direction in ("new", "growing", "resurfacing"):
             if len(top_changes) < _TOP_CHANGES_LIMIT:
                 top_changes.append(briefing_story)
+                used_story_ids.add(metric.story_id)
             elif len(watchlist) < _WATCHLIST_LIMIT:
                 watchlist.append(briefing_story)
         elif metric.direction in ("stable", "fading") and len(watchlist) < _WATCHLIST_LIMIT:
             watchlist.append(briefing_story)
+
+    # Mega stories exclude already highlighted top changes to reduce Radar repeats.
+    for metric in sorted_metrics:
+        if metric.story_id in used_story_ids:
+            continue
+        story = stories_by_id.get(metric.story_id)
+        if not story:
+            continue
+        items = items_by_story.get(metric.story_id, [])
+        mega_stories.append(build_briefing_story(story, metric, items))
+        if len(mega_stories) >= _MEGA_STORIES_LIMIT:
+            break
 
     status: Literal["complete", "partial"] = "complete"
     if expected_sources:

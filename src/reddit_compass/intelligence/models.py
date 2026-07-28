@@ -28,6 +28,7 @@ StoryDirection = Literal["new", "growing", "stable", "fading", "resurfacing"]
 ConfidenceLevel = Literal["low", "medium", "high"]
 
 ResearchStatus = Literal["unread", "read", "in_progress", "archived", "dismissed"]
+SourceStatus = Literal["ok", "empty", "partial", "error", "not_configured", "skipped"]
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,11 @@ class ContentItem:
     language: str = "en"
     content_scope: ContentScope = "headline"
     source_section: str = ""
+    domain_ids: list[str] = field(default_factory=lambda: ["other"])
+    discussion_url: str = ""
+    target_url: str = ""
+    dedupe_group_id: str = ""
+    evidence_refs: list[str] = field(default_factory=list)
     raw_engagement: dict[str, float] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -71,6 +77,7 @@ class ItemSignal:
     """LLM-анализ отдельного item."""
 
     item_id: str
+    domain_ids: list[str] = field(default_factory=list)
     theme_ids: list[str] = field(default_factory=list)
     candidate_themes: list[str] = field(default_factory=list)
     pain_points: list[str] = field(default_factory=list)
@@ -103,7 +110,11 @@ class Story:
     canonical_key: str
     title: str
     summary_ru: str = ""
+    domain_ids: list[str] = field(default_factory=lambda: ["other"])
     theme_ids: list[str] = field(default_factory=list)
+    trend_id: str = ""
+    lifecycle: StoryDirection = "new"
+    project_scores: dict[str, int] = field(default_factory=dict)
     first_seen: str = ""
     last_seen: str = ""
     item_ids: list[str] = field(default_factory=list)
@@ -123,6 +134,9 @@ class StoryMetric:
     trend_score: float = 0.0
     confidence: ConfidenceLevel = "low"
     direction: StoryDirection = "new"
+    trend_id: str = ""
+    lifecycle: StoryDirection = "new"
+    project_scores: dict[str, int] = field(default_factory=dict)
     item_count: int = 0
     source_count: int = 0
 
@@ -153,7 +167,7 @@ class SourceHealth:
     source_id: str
     provider: str
     cluster: SourceCluster
-    status: Literal["ok", "partial", "error", "not_configured", "skipped"]
+    status: SourceStatus
     count: int = 0
     duration_sec: float = 0.0
     error_code: str | None = None

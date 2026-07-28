@@ -1,7 +1,8 @@
-"""SQLite v2 миграции для intelligence layer.
+"""SQLite migrations для intelligence layer.
 
 Миграция через PRAGMA user_version:
 - 0/1 → 2: создать intelligence tables.
+- 2 → 3: broad Radar taxonomy fields.
 
 Существующие таблицы (snapshots, posts, comments, virality_signals,
 tracked_threads) не изменяются.
@@ -14,7 +15,7 @@ import sqlite3
 
 logger = logging.getLogger("reddit_compass")
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 _V2_SCHEMA = """
 CREATE TABLE IF NOT EXISTS runs (
@@ -44,6 +45,11 @@ CREATE TABLE IF NOT EXISTS items (
     language        TEXT NOT NULL DEFAULT 'en',
     content_scope   TEXT NOT NULL DEFAULT 'headline',
     source_section  TEXT NOT NULL DEFAULT '',
+    domain_ids      TEXT NOT NULL DEFAULT '["other"]',
+    discussion_url  TEXT NOT NULL DEFAULT '',
+    target_url      TEXT NOT NULL DEFAULT '',
+    dedupe_group_id TEXT NOT NULL DEFAULT '',
+    evidence_refs   TEXT NOT NULL DEFAULT '[]',
     raw_engagement  TEXT NOT NULL DEFAULT '{}',
     metadata        TEXT NOT NULL DEFAULT '{}'
 );
@@ -76,7 +82,11 @@ CREATE TABLE IF NOT EXISTS stories (
     canonical_key   TEXT NOT NULL,
     title           TEXT NOT NULL,
     summary_ru      TEXT NOT NULL DEFAULT '',
+    domain_ids      TEXT NOT NULL DEFAULT '["other"]',
     theme_ids       TEXT NOT NULL DEFAULT '[]',
+    trend_id        TEXT NOT NULL DEFAULT '',
+    lifecycle       TEXT NOT NULL DEFAULT 'new',
+    project_scores  TEXT NOT NULL DEFAULT '{}',
     first_seen      TEXT NOT NULL DEFAULT '',
     last_seen       TEXT NOT NULL DEFAULT '',
     item_ids        TEXT NOT NULL DEFAULT '[]'
@@ -102,6 +112,9 @@ CREATE TABLE IF NOT EXISTS story_metrics (
     trend_score             REAL NOT NULL DEFAULT 0.0,
     confidence              TEXT NOT NULL DEFAULT 'low',
     direction               TEXT NOT NULL DEFAULT 'new',
+    trend_id                TEXT NOT NULL DEFAULT '',
+    lifecycle               TEXT NOT NULL DEFAULT 'new',
+    project_scores          TEXT NOT NULL DEFAULT '{}',
     item_count              INTEGER NOT NULL DEFAULT 0,
     source_count            INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (run_id, story_id)
@@ -113,6 +126,7 @@ CREATE INDEX IF NOT EXISTS idx_story_metrics_run_trend
 CREATE TABLE IF NOT EXISTS item_signals (
     run_id          TEXT NOT NULL,
     item_id         TEXT NOT NULL,
+    domain_ids      TEXT NOT NULL DEFAULT '[]',
     theme_ids       TEXT NOT NULL DEFAULT '[]',
     candidate_themes TEXT NOT NULL DEFAULT '[]',
     pain_points     TEXT NOT NULL DEFAULT '[]',
@@ -156,10 +170,47 @@ CREATE TABLE IF NOT EXISTS source_health (
 """
 
 
+_V3_COLUMNS: dict[str, list[tuple[str, str]]] = {
+    "items": [
+        ("domain_ids", "TEXT NOT NULL DEFAULT '[\"other\"]'"),
+        ("discussion_url", "TEXT NOT NULL DEFAULT ''"),
+        ("target_url", "TEXT NOT NULL DEFAULT ''"),
+        ("dedupe_group_id", "TEXT NOT NULL DEFAULT ''"),
+        ("evidence_refs", "TEXT NOT NULL DEFAULT '[]'"),
+    ],
+    "stories": [
+        ("domain_ids", "TEXT NOT NULL DEFAULT '[\"other\"]'"),
+        ("trend_id", "TEXT NOT NULL DEFAULT ''"),
+        ("lifecycle", "TEXT NOT NULL DEFAULT 'new'"),
+        ("project_scores", "TEXT NOT NULL DEFAULT '{}'"),
+    ],
+    "story_metrics": [
+        ("trend_id", "TEXT NOT NULL DEFAULT ''"),
+        ("lifecycle", "TEXT NOT NULL DEFAULT 'new'"),
+        ("project_scores", "TEXT NOT NULL DEFAULT '{}'"),
+    ],
+    "item_signals": [
+        ("domain_ids", "TEXT NOT NULL DEFAULT '[]'"),
+    ],
+}
+
+
 def get_user_version(conn: sqlite3.Connection) -> int:
     """Текущая версия схемы."""
     row = conn.execute("PRAGMA user_version").fetchone()
     return int(row[0]) if row else 0
+
+
+def _column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row[1] == column for row in rows)
+
+
+def _migrate_to_v3(conn: sqlite3.Connection) -> None:
+    for table, columns in _V3_COLUMNS.items():
+        for column, definition in columns:
+            if not _column_exists(conn, table, column):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def migrate(conn: sqlite3.Connection) -> None:
@@ -179,3 +230,11 @@ def migrate(conn: sqlite3.Connection) -> None:
         conn.execute("PRAGMA user_version = 2")
         conn.commit()
         logger.info("SQLite schema migrated to v2")
+        version = 2
+
+    if version < 3:
+        logger.info("Migrating SQLite schema: v%d → v3", version)
+        _migrate_to_v3(conn)
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+        logger.info("SQLite schema migrated to v3")

@@ -42,8 +42,10 @@ RSS_SOURCES: list[RSSSource] = [
         cluster="mainstream",
         country="UK",
         feeds=[
+            "https://feeds.bbci.co.uk/news/world/rss.xml",
             "https://feeds.bbci.co.uk/news/technology/rss.xml",
             "https://feeds.bbci.co.uk/news/business/rss.xml",
+            "https://feeds.bbci.co.uk/sport/rss.xml",
         ],
     ),
     RSSSource(
@@ -51,8 +53,12 @@ RSS_SOURCES: list[RSSSource] = [
         cluster="mainstream",
         country="UK",
         feeds=[
+            "https://www.theguardian.com/world/rss",
             "https://www.theguardian.com/technology/rss",
             "https://www.theguardian.com/business/rss",
+            "https://www.theguardian.com/culture/rss",
+            "https://www.theguardian.com/sport/rss",
+            "https://www.theguardian.com/environment/rss",
         ],
     ),
     # Кластер 2: Бизнес/финансы
@@ -62,6 +68,9 @@ RSS_SOURCES: list[RSSSource] = [
         country="US",
         feeds=[
             "https://news.google.com/rss/search?q=site:reuters.com+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:reuters.com+world+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:reuters.com+markets+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:reuters.com+sports+when:1d&hl=en-US&gl=US&ceid=US:en",
         ],
     ),
     # Кластер 3: Tech/культура
@@ -91,6 +100,30 @@ RSS_SOURCES: list[RSSSource] = [
         ],
     ),
     # SPA-сайты (Ladder не парсит JS → используем Google News RSS)
+    RSSSource(
+        name="nytimes",
+        cluster="mainstream",
+        country="US",
+        feeds=[
+            "https://news.google.com/rss/search?q=site:nytimes.com+home+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:nytimes.com+world+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:nytimes.com+business+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:nytimes.com+technology+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:nytimes.com+arts+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:nytimes.com+sports+when:1d&hl=en-US&gl=US&ceid=US:en",
+        ],
+    ),
+    RSSSource(
+        name="washingtonpost",
+        cluster="mainstream",
+        country="US",
+        feeds=[
+            "https://news.google.com/rss/search?q=site:washingtonpost.com+world+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:washingtonpost.com+politics+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:washingtonpost.com+business+when:1d&hl=en-US&gl=US&ceid=US:en",
+            "https://news.google.com/rss/search?q=site:washingtonpost.com+sports+when:1d&hl=en-US&gl=US&ceid=US:en",
+        ],
+    ),
     RSSSource(
         name="usatoday",
         cluster="mainstream",
@@ -124,6 +157,29 @@ RSS_SOURCES: list[RSSSource] = [
         ],
     ),
 ]
+
+
+def _section_from_feed_url(feed_url: str) -> str:
+    text = feed_url.lower()
+    for section in (
+        "world",
+        "business",
+        "markets",
+        "technology",
+        "innovation",
+        "science",
+        "culture",
+        "sport",
+        "sports",
+        "environment",
+        "politics",
+        "arts",
+        "style",
+        "health",
+    ):
+        if section in text:
+            return "sports" if section == "sport" else section
+    return "top"
 
 
 def _strip_html(html: str) -> str:
@@ -237,6 +293,7 @@ async def fetch_rss_source(
                         continue
                     text = await resp.text()
                     items = parse_feed(text, source.name)
+                    section = _section_from_feed_url(feed_url)
 
                     for item in items[:max_items_per_feed]:
                         url = item["url"]
@@ -261,7 +318,7 @@ async def fetch_rss_source(
                                 permalink=url,
                                 monitoring_type="rss",
                                 snapshot_date=snapshot_date,
-                                keyword=source.cluster,
+                                keyword=section,
                             )
                         )
 

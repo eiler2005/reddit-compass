@@ -75,10 +75,23 @@ def compute_percentiles(items: list[ContentItem]) -> dict[str, float]:
 
     percentiles: dict[str, float] = {}
     for _provider, values in by_provider.items():
+        if len({value for _, value in values}) == 1:
+            for item_id, _ in values:
+                percentiles[item_id] = 50.0
+            continue
         sorted_vals = sorted(values, key=lambda x: x[1])
         n = len(sorted_vals)
-        for rank, (item_id, _) in enumerate(sorted_vals):
-            percentiles[item_id] = (rank / n * 100) if n > 1 else 50.0
+        idx = 0
+        while idx < n:
+            value = sorted_vals[idx][1]
+            end = idx + 1
+            while end < n and sorted_vals[end][1] == value:
+                end += 1
+            avg_rank = (idx + end - 1) / 2
+            percentile = (avg_rank / (n - 1) * 100) if n > 1 else 50.0
+            for item_id, _ in sorted_vals[idx:end]:
+                percentiles[item_id] = percentile
+            idx = end
 
     return percentiles
 
@@ -105,7 +118,24 @@ def goal_relevance_score(
                 count += 1
         return total / count if count else 0.0
 
-    return min(60.0, len(items) * 10.0)
+    metadata_scores: list[float] = []
+    for item in items:
+        project_scores = item.metadata.get("project_scores", {})
+        if not isinstance(project_scores, dict) or not project_scores:
+            continue
+        if goal_weights:
+            total_weight = sum(goal_weights.values()) or 1.0
+            score = sum(float(project_scores.get(g, 0)) * w for g, w in goal_weights.items())
+            metadata_scores.append(score / total_weight)
+        else:
+            metadata_scores.append(
+                sum(float(v) for v in project_scores.values()) / len(project_scores)
+            )
+
+    if metadata_scores:
+        return sum(metadata_scores) / len(metadata_scores)
+
+    return 25.0
 
 
 def cross_source_coverage_score(clusters: set[Any]) -> float:
@@ -298,6 +328,9 @@ def rank_story(
         trend_score=trend,
         confidence=confidence,
         direction=direction,
+        trend_id=story.trend_id,
+        lifecycle=direction,
+        project_scores=story.project_scores,
         item_count=len(items),
         source_count=len(providers),
     )

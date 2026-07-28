@@ -82,7 +82,9 @@ class TestPostcardToContentItem:
         assert item.provider == "reddit"
         assert item.source_cluster == "voices"
         assert item.item_id == "reddit:abc123"
-        assert "reddit.com" in item.canonical_url
+        assert item.canonical_url == "https://example.com/article"
+        assert item.target_url == "https://example.com/article"
+        assert "reddit.com" in item.discussion_url
         assert item.raw_engagement["score"] == 100.0
         assert item.raw_engagement["comments"] == 42.0
 
@@ -190,6 +192,11 @@ class TestPostcardToContentItem:
 
     def test_reddit_permalink_to_full_url(self):
         card = _make_card(permalink="/r/test/comments/abc/post/")
+        item = postcard_to_content_item(card, "posts.jsonl", OBSERVED)
+        assert item.discussion_url.startswith("https://www.reddit.com/")
+
+    def test_reddit_self_post_uses_discussion_as_canonical_url(self):
+        card = _make_card(is_self=True, url="", permalink="/r/test/comments/abc/post/")
         item = postcard_to_content_item(card, "posts.jsonl", OBSERVED)
         assert item.canonical_url.startswith("https://www.reddit.com/")
 

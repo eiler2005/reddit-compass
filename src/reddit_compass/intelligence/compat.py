@@ -15,6 +15,7 @@ from urllib.parse import parse_qs, urlencode, urlparse, urlunparse
 
 from ..models import PostCard
 from .models import ContentItem, ContentScope, SourceCluster
+from .taxonomy import classify_domains, compute_project_scores, stable_hash_id
 
 logger = logging.getLogger("reddit_compass")
 
@@ -96,6 +97,12 @@ def _reddit_permalink_to_url(permalink: str) -> str:
     return f"https://www.reddit.com{permalink}"
 
 
+def _is_reddit_url(url: str) -> bool:
+    parsed = urlparse(url)
+    host = parsed.netloc.lower()
+    return host.endswith("reddit.com") or host.endswith("redd.it")
+
+
 def _cluster_for_rss_ladder(subreddit: str) -> SourceCluster:
     """Определяет cluster для RSS/Ladder по имени источника (поле subreddit)."""
     key = subreddit.lower().replace(" ", "").replace("-", "").replace("_", "")
@@ -132,11 +139,19 @@ def postcard_to_content_item(
         provider = "unknown"
         cluster = "mainstream"
 
+    discussion_url = ""
+    target_url = ""
     if provider == "reddit":
-        canonical_url = canonicalize_url(_reddit_permalink_to_url(card.permalink))
+        discussion_url = canonicalize_url(_reddit_permalink_to_url(card.permalink))
+        target_url = canonicalize_url(card.url)
+        if target_url and not _is_reddit_url(target_url) and not card.is_self:
+            canonical_url = target_url
+        else:
+            canonical_url = discussion_url
         external_id = card.post_id
     else:
         canonical_url = canonicalize_url(card.url)
+        target_url = canonical_url
         external_id = card.post_id if card.post_id else _external_id_from_url(canonical_url)
 
     item_id = f"{provider}:{external_id}"
@@ -174,6 +189,20 @@ def postcard_to_content_item(
         excerpt = card.selftext[:2000]
         content_scope = "abstract"
 
+    source_section = card.subreddit
+    if legacy_file in ("rss.jsonl", "ladder.jsonl") and card.keyword:
+        source_section = card.keyword
+
+    domain_ids = classify_domains(
+        title=card.title,
+        excerpt=excerpt,
+        provider=provider,
+        source_section=source_section,
+        keyword=card.keyword or "",
+        link_flair=card.link_flair_text or "",
+    )
+    project_scores = compute_project_scores(domain_ids, card.title, excerpt)
+
     return ContentItem(
         item_id=item_id,
         provider=provider,
@@ -187,13 +216,21 @@ def postcard_to_content_item(
         observed_at=observed_at,
         snapshot_date=card.snapshot_date,
         content_scope=content_scope,
-        source_section=card.subreddit,
+        source_section=source_section,
+        domain_ids=domain_ids,
+        discussion_url=discussion_url,
+        target_url=target_url,
+        dedupe_group_id=stable_hash_id("dedupe", canonical_url or item_id),
+        evidence_refs=[],
         raw_engagement=raw_engagement,
         metadata={
             "monitoring_type": card.monitoring_type,
             "keyword": card.keyword,
             "is_self": card.is_self,
             "link_flair_text": card.link_flair_text,
+            "discussion_url": discussion_url,
+            "target_url": target_url,
+            "project_scores": project_scores,
         },
     )
 

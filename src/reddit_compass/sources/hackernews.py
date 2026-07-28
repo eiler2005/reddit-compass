@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
+from urllib.parse import urlencode
 
 from ..models import PostCard
 
@@ -58,58 +59,114 @@ async def fetch_hn_stories(
     headers = {"User-Agent": "reddit-compass/0.2 (trend monitor)"}
 
     async with aiohttp.ClientSession(headers=headers) as session:
+        front_page_specs = [
+            (
+                "front_page",
+                _algolia_url(
+                    "search",
+                    {"tags": "front_page", "hitsPerPage": hits_per_query},
+                ),
+            ),
+            (
+                "new",
+                _algolia_url(
+                    "search_by_date",
+                    {
+                        "tags": "story",
+                        "hitsPerPage": hits_per_query,
+                        "numericFilters": f"created_at_i>{since_ts}",
+                    },
+                ),
+            ),
+            (
+                "weekly_top",
+                _algolia_url(
+                    "search",
+                    {
+                        "tags": "story",
+                        "hitsPerPage": hits_per_query,
+                        "numericFilters": f"created_at_i>{since_ts},points>50",
+                    },
+                ),
+            ),
+        ]
+        for label, url in front_page_specs:
+            await _fetch_algolia_url(session, url, label, snapshot_date, seen_ids, cards)
+
         for query in queries:
-            url = (
-                f"{ALGOLIA_BASE}/search"
-                f"?query={query.replace(' ', '+')}"
-                f"&tags=story&hitsPerPage={hits_per_query}"
-                f"&numericFilters=created_at_i>{since_ts}"
+            url = _algolia_url(
+                "search",
+                {
+                    "query": query,
+                    "tags": "story",
+                    "hitsPerPage": hits_per_query,
+                    "numericFilters": f"created_at_i>{since_ts}",
+                },
             )
-            try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
-                    if resp.status != 200:
-                        logger.warning("HN Algolia %r: HTTP %d", query, resp.status)
-                        continue
-                    data: dict[str, Any] = await resp.json()
-
-                    for hit in data.get("hits", []):
-                        object_id = hit.get("objectID", "")
-                        if object_id in seen_ids:
-                            continue
-                        seen_ids.add(object_id)
-
-                        title = hit.get("title", "")
-                        if not title:
-                            continue
-
-                        cards.append(
-                            PostCard(
-                                subreddit="hackernews",
-                                post_id=object_id,
-                                title=title,
-                                author=hit.get("author", ""),
-                                created_utc=hit.get("created_at"),
-                                score=hit.get("points", 0),
-                                upvote_ratio=0.0,
-                                num_comments=hit.get("num_comments", 0),
-                                url=hit.get(
-                                    "url", f"https://news.ycombinator.com/item?id={object_id}"
-                                ),
-                                selftext="",
-                                link_flair_text=None,
-                                is_self=not hit.get("url"),
-                                permalink=f"/item?id={object_id}",
-                                monitoring_type="search",
-                                snapshot_date=snapshot_date,
-                                keyword=query,
-                            )
-                        )
-
-                logger.info("HN %r: %d stories", query, len(data.get("hits", [])))
-
-            except Exception as exc:
-                logger.warning("HN fetch error for %r: %s", query, exc)
-                continue
+            await _fetch_algolia_url(session, url, query, snapshot_date, seen_ids, cards)
 
     logger.info("HN total: %d unique stories", len(cards))
     return cards
+
+
+async def _fetch_algolia_url(
+    session: Any,
+    url: str,
+    query_label: str,
+    snapshot_date: str,
+    seen_ids: set[str],
+    cards: list[PostCard],
+) -> None:
+    import aiohttp
+
+    try:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status != 200:
+                logger.warning("HN Algolia %r: HTTP %d", query_label, resp.status)
+                return
+            data: dict[str, Any] = await resp.json()
+
+            for hit in data.get("hits", []):
+                object_id = hit.get("objectID", "")
+                if object_id in seen_ids:
+                    continue
+                seen_ids.add(object_id)
+
+                title = hit.get("title", "")
+                if not title:
+                    continue
+
+                cards.append(
+                    PostCard(
+                        subreddit="hackernews",
+                        post_id=object_id,
+                        title=title,
+                        author=hit.get("author", ""),
+                        created_utc=hit.get("created_at"),
+                        score=hit.get("points", 0),
+                        upvote_ratio=0.0,
+                        num_comments=hit.get("num_comments", 0),
+                        url=hit.get("url", f"https://news.ycombinator.com/item?id={object_id}"),
+                        selftext="",
+                        link_flair_text=None,
+                        is_self=not hit.get("url"),
+                        permalink=f"/item?id={object_id}",
+                        monitoring_type=(
+                            "front_page"
+                            if query_label in {"front_page", "new", "weekly_top"}
+                            else "search"
+                        ),
+                        snapshot_date=snapshot_date,
+                        keyword=query_label,
+                    )
+                )
+
+        logger.info("HN %r: %d stories", query_label, len(data.get("hits", [])))
+
+    except Exception as exc:
+        logger.warning("HN fetch error for %r: %s", query_label, exc)
+        return
+
+
+def _algolia_url(endpoint: str, params: dict[str, object]) -> str:
+    return f"{ALGOLIA_BASE}/{endpoint}?{urlencode(params)}"

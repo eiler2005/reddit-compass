@@ -981,6 +981,116 @@ h3 {
 
 /* ─── Empty state ───────────────────────────────────────────────────────── */
 
+.mode-switcher {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin: 0 auto 1.25rem;
+    flex-wrap: wrap;
+}
+
+.mode-link,
+.domain-tab,
+.compact-story {
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: border-color var(--duration) var(--ease-out), color var(--duration) var(--ease-out),
+        background var(--duration) var(--ease-out);
+}
+
+.mode-link {
+    padding: 0.55rem 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+}
+
+.mode-link.active,
+.domain-tab.active {
+    color: var(--accent);
+    border-color: rgba(0, 212, 170, 0.45);
+    background: var(--accent-dim);
+}
+
+.domain-tabs {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: 0.7rem;
+}
+
+.domain-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    min-height: 74px;
+    padding: 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.domain-tab span {
+    color: var(--text);
+    font-weight: 700;
+}
+
+.domain-tab small {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.matrix-table .active-row td {
+    background: var(--accent-dim);
+}
+
+.shelf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1rem;
+}
+
+.shelf {
+    border-top: 1px solid var(--border);
+    padding-top: 0.85rem;
+}
+
+.shelf h3 {
+    margin-bottom: 0.65rem;
+    font-size: 0.95rem;
+}
+
+.compact-story-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.compact-story {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.65rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.compact-story:hover {
+    color: var(--text);
+    border-color: rgba(0, 212, 170, 0.35);
+}
+
+.compact-story span {
+    color: var(--text);
+    font-weight: 650;
+}
+
+.compact-story small {
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
 .empty-state {
     text-align: center;
     padding: 5rem 1rem;

@@ -124,6 +124,31 @@ class TestStoryClusterer:
 
         assert story1 == story2
 
+    def test_reddit_target_url_merges_with_article(self):
+        clusterer = StoryClusterer()
+        reddit_item = ContentItem(
+            item_id="reddit:1",
+            provider="reddit",
+            source_cluster="voices",
+            external_id="1",
+            canonical_url="https://www.reddit.com/r/technology/comments/1/story",
+            target_url="https://example.com/article",
+            discussion_url="https://www.reddit.com/r/technology/comments/1/story",
+            title="Discussion of the article",
+        )
+        rss_item = _make_item(
+            "bbc:2",
+            "Article title",
+            provider="bbc",
+            url="https://example.com/article",
+            cluster="mainstream",
+        )
+
+        story1 = clusterer.add_item(reddit_item)
+        story2 = clusterer.add_item(rss_item)
+
+        assert story1 == story2
+
     def test_similar_titles_same_story(self):
         clusterer = StoryClusterer()
         # Используем более похожие заголовки

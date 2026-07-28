@@ -17,10 +17,11 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ..config import DEFAULT_PROFILE
 from .compat import load_legacy_jsonl
 from .migrations import migrate
-from .models import ContentItem, Observation
-from .repository import upsert_items, upsert_observations, upsert_run
+from .models import ContentItem, Observation, SourceHealth
+from .repository import save_source_health, upsert_items, upsert_observations, upsert_run
 
 logger = logging.getLogger("reddit_compass")
 
@@ -82,7 +83,7 @@ def _compute_observations(
 def rebuild_from_snapshots(
     conn: sqlite3.Connection,
     snapshots_dir: Path,
-    profile: str = "ai-native",
+    profile: str = DEFAULT_PROFILE,
     target_date: str | None = None,
 ) -> dict[str, int]:
     """Перестраивает SQLite v2 из snapshots.
@@ -157,7 +158,8 @@ def rebuild_from_snapshots(
         if prev_date_row:
             prev_run_id = f"{prev_date_row[0]}:{profile}"
             prev_rows = conn.execute(
-                "SELECT s.story_id, s.canonical_key, s.title, "
+                "SELECT s.story_id, s.canonical_key, s.title, s.summary_ru, "
+                "s.domain_ids, s.theme_ids, s.trend_id, s.lifecycle, s.project_scores, "
                 "s.first_seen, s.last_seen, s.item_ids "
                 "FROM stories s "
                 "JOIN story_metrics sm ON s.story_id = sm.story_id "
@@ -175,6 +177,12 @@ def rebuild_from_snapshots(
                         story_id=row["story_id"],
                         canonical_key=row["canonical_key"],
                         title=row["title"],
+                        summary_ru=row["summary_ru"],
+                        domain_ids=_json.loads(row["domain_ids"] or '["other"]'),
+                        theme_ids=_json.loads(row["theme_ids"] or "[]"),
+                        trend_id=row["trend_id"],
+                        lifecycle=row["lifecycle"],
+                        project_scores=_json.loads(row["project_scores"] or "{}"),
                         first_seen=row["first_seen"],
                         last_seen=row["last_seen"],
                         item_ids=_json.loads(row["item_ids"]),
@@ -237,6 +245,8 @@ def rebuild_from_snapshots(
             metrics.append(metric)
 
         replace_run_stories(conn, run_id, stories, metrics)
+        source_health = _build_rebuild_source_health(items)
+        save_source_health(conn, run_id, source_health)
 
         briefing = build_deterministic_briefing(
             run_id=run_id,
@@ -245,7 +255,7 @@ def rebuild_from_snapshots(
             stories=stories,
             metrics=metrics,
             items_by_story=items_by_story,
-            source_health=[],
+            source_health=source_health,
         )
         save_briefing(conn, briefing)
 
@@ -259,3 +269,21 @@ def rebuild_from_snapshots(
         )
 
     return {"dates": len(dates), "items": total_items, "skipped": total_skipped}
+
+
+def _build_rebuild_source_health(items: list[ContentItem]) -> list[SourceHealth]:
+    by_provider_section: dict[tuple[str, str], list[ContentItem]] = {}
+    for item in items:
+        key = (item.provider, item.source_section or item.provider)
+        by_provider_section.setdefault(key, []).append(item)
+    return [
+        SourceHealth(
+            source_id=f"{provider}:{section}",
+            provider=provider,
+            cluster=section_items[0].source_cluster,
+            status="ok",
+            count=len(section_items),
+            message=section,
+        )
+        for (provider, section), section_items in sorted(by_provider_section.items())
+    ]

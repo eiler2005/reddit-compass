@@ -5,7 +5,7 @@
 [![CI](https://github.com/eiler2005/reddit-compass/actions/workflows/ci.yml/badge.svg)](https://github.com/eiler2005/reddit-compass/actions)
 [![Docker](https://github.com/eiler2005/reddit-compass/actions/workflows/docker.yml/badge.svg)](https://github.com/eiler2005/reddit-compass/actions)
 
-**Your AI trend radar. 21 sources. One compass that shows where to look.**
+**Your broad trendwatching radar. 12 stable domains, multi-source evidence, one compass.**
 
 ---
 
@@ -15,7 +15,8 @@ So you check Reddit. Then Hacker News. Then NYT. Then Wired. Then FT. Then TechC
 
 That's 45 minutes of tab-switching before your first coffee. And you *still* miss the thread that went viral at 2 AM — the one where 400 laid-off engineers described exactly the pain your product solves.
 
-**reddit-compass does this for you. Every night. Across 21 sources. With LLM analysis that tells you not just *what* happened, but *why it matters* for your work.**
+**reddit-compass does this for you. Every night. Broad Radar watches the world; AI-native Lens
+keeps book/RBC research focused on AI, work, institutions and markets.**
 
 ---
 
@@ -54,7 +55,7 @@ You wake up to a report that says:
 ### When you ask it
 
 ```bash
-reddit-compass run --sources reddit,hn,rss,ladder,ph  # Unified run (все источники)
+reddit-compass run --sources reddit,hn,rss,ladder,ph --analyze  # Broad run + facets
 reddit-compass run --sources reddit,hn --allow-partial  # Частичный run
 reddit-compass fetch --stealth     # Reddit: 40 subreddits, stealth mode
 reddit-compass hn                  # Hacker News: AI stories
@@ -63,7 +64,7 @@ reddit-compass ladder              # Paywall: 12 sources via Ladder
 reddit-compass ph                  # ProductHunt: top products
 reddit-compass signals             # LLM analysis (Qwen API, all sources)
 reddit-compass serve               # REST API + UI on :8900
-reddit-compass db rebuild          # Rebuild SQLite v2 из snapshots
+reddit-compass db rebuild          # Rebuild SQLite projection из snapshots
 reddit-compass db stats            # SQLite history
 reddit-compass fetch --dry-run     # Preview without network
 ```
@@ -85,37 +86,44 @@ Written into [`AGENTS.md`](AGENTS.md). The service refuses, by architecture:
 ## Architecture
 
 ```
-    🌐 Reddit (18 sub)     💬 Hacker News      📰 RSS (6)         🪜 Ladder (12)      🚀 ProductHunt
-    Playwright + JSON      Algolia API         aiohttp + XML      Ladder proxy        GraphQL API
+    🌐 Reddit packs       💬 Hacker News      📰 RSS sections    🪜 Ladder optional  🚀 ProductHunt
+    Playwright + JSON     Algolia front/search aiohttp + XML     fallback            GraphQL API
          │                      │                   │                   │                   │
          ▼                      ▼                   ▼                   ▼                   ▼
     ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
     │                          reddit-compass (unified pipeline)                                   │
     │                                                                                             │
-    │    collect ──► store ──► analyze (Qwen LLM) ──► report ──► notify ──► serve (API)           │
+    │    collect ──► normalize ──► classify ──► cluster ──► rank ──► serve Radar/Today           │
     └─────────────────────────────────────────────────────────────────────────────────────────────┘
          │                      │                        │                      │
          ▼                      ▼                        ▼                      ▼
-    posts.jsonl            compass.db              signals.jsonl          REST API :8900
-    (JSONL exchange)       (SQLite history)        (LLM synthesis)        (FastAPI + OAuth2)
+    JSONL snapshots        compass.db              item_signals           REST API :8900
+    (exchange format)      (SQLite projection)     (facets/evidence)      (FastAPI + OAuth2)
 ```
 
-**21 sources → 5 clusters → 1 unified schema → LLM intelligence → API**
+**Sources → 5 source clusters → 12 broad domains → stories/trends → Today + Radar**
 
 Full architecture with deployment diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
 ---
 
-## Sources (21, five clusters)
+## Sources and domains
+
+Default collection profile is [`config/profiles/broad.json`](config/profiles/broad.json):
+AI/technology, labor/career, business/markets, society/politics, world/geopolitics,
+culture/media, sports, science/health/education, finance/consumer,
+climate/energy/infrastructure, security/privacy, and `other`.
 
 | Cluster | Sources | Access |
 |---|---|---|
-| 📰 **Mainstream** | NYT, WaPo, Time, USA Today, BBC, Guardian | Ladder + RSS |
-| 💰 **Business** | FT, American Banker, Fox Business, Reuters | Ladder + RSS |
-| 🔬 **Tech/Culture** | Wired, New Yorker, Vanity Fair, TechCrunch, Verge, Ars Technica | Ladder + RSS |
-| 🗣 **Voices** | Reddit (18 subreddits), Hacker News, Medium | Playwright + Algolia + Ladder |
-| 📊 **Pulse** | Fox News, ProductHunt | Ladder + GraphQL |
+| **Mainstream** | BBC, Guardian, NYT/WaPo/USA Today via RSS/Google News; optional Ladder | RSS + Ladder fallback |
+| **Business** | Reuters, FT, Fox Business, American Banker | RSS + Ladder fallback |
+| **Tech/Culture** | TechCrunch, Verge, Ars Technica, Wired, New Yorker, Vanity Fair | RSS + Ladder fallback |
+| **Voices** | Reddit broad packs, Medium | Public JSON/RSS + Ladder fallback |
+| **Developers / Pulse** | Hacker News, ProductHunt | Algolia + GraphQL/feed |
 
+Implementation note: [`docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md).
+Prompt contracts: [`docs/RADAR_PROMPTS.md`](docs/RADAR_PROMPTS.md).
 Full source map: [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md)
 
 ---

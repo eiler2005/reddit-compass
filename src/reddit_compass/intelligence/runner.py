@@ -6,20 +6,23 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from ..config import MonitorConfig
+from ..config import DEFAULT_PROFILE, MonitorConfig
 from ..intelligence.briefing import build_deterministic_briefing
-from ..intelligence.clustering import cluster_items
+from ..intelligence.clustering import cluster_items_with_history
 from ..intelligence.compat import load_legacy_jsonl
 from ..intelligence.migrations import migrate
-from ..intelligence.models import ContentItem, SourceHealth
+from ..intelligence.models import ContentItem, SourceHealth, Story
 from ..intelligence.ranking import compute_percentiles, rank_story
 from ..intelligence.repository import (
+    replace_run_signals,
     replace_run_stories,
     save_briefing,
     save_source_health,
@@ -66,7 +69,7 @@ async def run_sources(
     snapshots_dir: Path,
     db_path: Path,
     sources: list[str] | None = None,
-    profile: str = "ai-native",
+    profile: str = DEFAULT_PROFILE,
     analyze: bool = False,
     allow_partial: bool = False,
 ) -> RunResult:
@@ -108,6 +111,7 @@ async def run_sources(
 
     source_results: list[SourceResult] = []
     all_items: list[ContentItem] = []
+    analyzed_count = 0
 
     if sources is None:
         sources = ["reddit", "hackernews", "rss", "ladder", "producthunt"]
@@ -148,8 +152,32 @@ async def run_sources(
         ]
         upsert_observations(conn, observations)
 
-        stories, _ = cluster_items(all_items)
+        existing_stories = _load_recent_stories(conn, snapshot_date, profile)
+        stories, _ = cluster_items_with_history(all_items, existing_stories)
+        current_item_ids = {item.item_id for item in all_items}
+        stories = [s for s in stories if any(item_id in current_item_ids for item_id in s.item_ids)]
+        stories = [
+            replace(
+                story,
+                item_ids=[item_id for item_id in story.item_ids if item_id in current_item_ids],
+            )
+            for story in stories
+        ]
         percentiles = compute_percentiles(all_items)
+
+        item_signal_scores: dict[str, dict[str, int]] = {}
+        if analyze:
+            from ..intelligence.llm_pipeline import build_deterministic_item_signals
+
+            theme_catalog = {theme.id: theme.keywords for theme in config.themes}
+            signals = build_deterministic_item_signals(
+                all_items,
+                theme_catalog=theme_catalog,
+                analyzed_at=_now_iso(),
+            )
+            replace_run_signals(conn, run_id, signals)
+            item_signal_scores = {sig.item_id: sig.goal_relevance for sig in signals}
+            analyzed_count = len(signals)
 
         items_by_story: dict[str, list[ContentItem]] = {}
         for story in stories:
@@ -166,29 +194,13 @@ async def run_sources(
                 current_date=snapshot_date,
                 percentiles=percentiles,
                 run_id=run_id,
+                item_signals=item_signal_scores or None,
             )
             metrics.append(metric)
 
         replace_run_stories(conn, run_id, stories, metrics)
 
-        from ..sources.registry import SOURCES
-
-        source_health = []
-        for r in source_results:
-            source_def = SOURCES.get(r.source_id)
-            cluster = source_def.cluster if source_def else "voices"
-            source_health.append(
-                SourceHealth(
-                    source_id=r.source_id,
-                    provider=r.source_id,
-                    cluster=cluster,
-                    status=r.status,  # type: ignore[arg-type]
-                    count=r.count,
-                    duration_sec=r.duration_sec,
-                    error_code=r.error_code,
-                    message=r.message,
-                )
-            )
+        source_health = _build_source_health(source_results, all_items)
         save_source_health(conn, run_id, source_health)
 
         briefing = build_deterministic_briefing(
@@ -204,6 +216,8 @@ async def run_sources(
 
     finished_at = _now_iso()
     status = "complete" if all(r.status == "ok" for r in source_results) else "partial"
+    if analyze and all_items and analyzed_count != len(all_items):
+        status = "partial"
 
     upsert_run(
         conn,
@@ -227,6 +241,97 @@ async def run_sources(
         started_at=started_at,
         finished_at=finished_at,
     )
+
+
+def _load_recent_stories(
+    conn: sqlite3.Connection,
+    snapshot_date: str,
+    profile: str,
+) -> list[Story]:
+    """Load recent stories for cross-date continuity."""
+    rows = conn.execute(
+        """SELECT s.story_id, s.canonical_key, s.title, s.summary_ru, s.domain_ids,
+                  s.theme_ids, s.trend_id, s.lifecycle, s.project_scores,
+                  s.first_seen, s.last_seen, s.item_ids
+           FROM stories s
+           JOIN story_metrics sm ON s.story_id = sm.story_id
+           JOIN runs r ON r.run_id = sm.run_id
+           WHERE r.snapshot_date < ? AND r.profile = ?
+           ORDER BY r.snapshot_date DESC, sm.trend_score DESC
+           LIMIT 500""",
+        (snapshot_date, profile),
+    ).fetchall()
+    stories = []
+    seen: set[str] = set()
+    for row in rows:
+        if row["story_id"] in seen:
+            continue
+        seen.add(row["story_id"])
+        stories.append(
+            Story(
+                story_id=row["story_id"],
+                canonical_key=row["canonical_key"],
+                title=row["title"],
+                summary_ru=row["summary_ru"],
+                domain_ids=json.loads(row["domain_ids"] or '["other"]'),
+                theme_ids=json.loads(row["theme_ids"] or "[]"),
+                trend_id=row["trend_id"],
+                lifecycle=row["lifecycle"],
+                project_scores=json.loads(row["project_scores"] or "{}"),
+                first_seen=row["first_seen"],
+                last_seen=row["last_seen"],
+                item_ids=json.loads(row["item_ids"] or "[]"),
+            )
+        )
+    return stories
+
+
+def _build_source_health(
+    source_results: list[SourceResult],
+    items: list[ContentItem],
+) -> list[SourceHealth]:
+    """Build provider-section source health rows for Radar coverage."""
+    from ..sources.registry import SOURCES
+
+    health: list[SourceHealth] = []
+    by_provider_section: dict[tuple[str, str], list[ContentItem]] = {}
+    for item in items:
+        section = item.source_section or item.provider
+        by_provider_section.setdefault((item.provider, section), []).append(item)
+
+    for (provider, section), section_items in sorted(by_provider_section.items()):
+        cluster = section_items[0].source_cluster
+        source_id = f"{provider}:{section}"
+        health.append(
+            SourceHealth(
+                source_id=source_id,
+                provider=provider,
+                cluster=cluster,
+                status="ok",
+                count=len(section_items),
+                message=section,
+            )
+        )
+
+    for result in source_results:
+        source_def = SOURCES.get(result.source_id)
+        cluster = source_def.cluster if source_def else "voices"
+        ok_statuses = {"ok", "empty", "error", "not_configured", "skipped"}
+        status = result.status if result.status in ok_statuses else "partial"
+        health.append(
+            SourceHealth(
+                source_id=result.source_id,
+                provider=source_def.provider if source_def else result.source_id,
+                cluster=cluster,
+                status=status,  # type: ignore[arg-type]
+                count=result.count,
+                duration_sec=result.duration_sec,
+                error_code=result.error_code,
+                message=result.message,
+            )
+        )
+
+    return health
 
 
 async def _run_single_source(

@@ -6,12 +6,17 @@
 <div class="container">
     <div class="date-switcher">
         {% if radar.prev_date %}
-        <a href="/runs/{{ radar.prev_date }}/radar" class="btn">← {{ radar.prev_date }}</a>
+        <a href="/runs/{{ radar.prev_date }}/radar?profile={{ radar.profile }}&mode={{ radar.mode }}{% if radar.selected_domain %}&domain={{ radar.selected_domain }}{% endif %}" class="btn">← {{ radar.prev_date }}</a>
         {% endif %}
         <h1 class="date-title">Trend Radar · {{ radar.date }}</h1>
         {% if radar.next_date %}
-        <a href="/runs/{{ radar.next_date }}/radar" class="btn">{{ radar.next_date }} →</a>
+        <a href="/runs/{{ radar.next_date }}/radar?profile={{ radar.profile }}&mode={{ radar.mode }}{% if radar.selected_domain %}&domain={{ radar.selected_domain }}{% endif %}" class="btn">{{ radar.next_date }} →</a>
         {% endif %}
+    </div>
+
+    <div class="mode-switcher" aria-label="Radar mode">
+        <a href="/runs/{{ radar.date }}/radar?profile={{ radar.profile }}&mode=broad{% if radar.selected_domain %}&domain={{ radar.selected_domain }}{% endif %}" class="mode-link {% if radar.mode == 'broad' %}active{% endif %}">Broad Radar</a>
+        <a href="/runs/{{ radar.date }}/radar?profile={{ radar.profile }}&mode=ai-native{% if radar.selected_domain %}&domain={{ radar.selected_domain }}{% endif %}" class="mode-link {% if radar.mode == 'ai-native' %}active{% endif %}">AI-native Lens</a>
     </div>
 
     <div class="freshness-bar">
@@ -33,7 +38,7 @@
             </div>
             <div class="kpi-card">
                 <div class="kpi-num">{{ radar.run.analyzed_item_count }}</div>
-                <div class="kpi-label">LLM-сигналов</div>
+                <div class="kpi-label">Разметок</div>
             </div>
             <div class="kpi-card">
                 <div class="kpi-num">{{ radar.run.story_count }}</div>
@@ -46,8 +51,8 @@
         </div>
         {% if radar.run.analyzed_item_count == 0 %}
         <p class="section-note" style="color: var(--warning); margin-top: 0.75rem;">
-            ⚠️ LLM-анализ не выполнен для этого run. Облака тем и pain points пустые.
-            Запустите <code>reddit-compass run --analyze</code> для полного анализа.
+            ⚠️ Разметка не выполнена для этого run. Облака тем и pain points пустые.
+            Запустите <code>reddit-compass run --analyze</code>.
         </p>
         {% endif %}
         {% if radar.run.story_count > 0 and radar.run.unique_item_count > 0 %}
@@ -61,10 +66,94 @@
         {% endif %}
     </section>
 
-    <!-- LLM-анализ: топ-темы -->
-    {% if radar.top_changes %}
+    <!-- Broad category navigation -->
+    {% if radar.domain_summaries %}
     <section class="section">
-        <h2>LLM-анализ: редакционные сюжеты</h2>
+        <h2>Рубрики trendwatching</h2>
+        <div class="domain-tabs">
+            <a class="domain-tab {% if not radar.selected_domain %}active{% endif %}" href="/runs/{{ radar.date }}/radar?profile={{ radar.profile }}&mode={{ radar.mode }}">
+                Все
+            </a>
+            {% for domain in radar.domain_summaries %}
+            <a class="domain-tab {% if radar.selected_domain == domain.domain_id %}active{% endif %}" href="/runs/{{ radar.date }}/radar?profile={{ radar.profile }}&mode={{ radar.mode }}&domain={{ domain.domain_id }}">
+                <span>{{ domain.label_ru }}</span>
+                <small>{{ domain.story_count }} сюж. · {{ domain.item_count }} мат.</small>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- Category x source cluster matrix -->
+    {% if radar.domain_matrix %}
+    <section class="section">
+        <h2>Карта охвата</h2>
+        <table class="table matrix-table">
+            <thead>
+                <tr>
+                    <th>Рубрика</th>
+                    <th>Люди</th>
+                    <th>Dev/HN</th>
+                    <th>Мейнстрим</th>
+                    <th>Бизнес</th>
+                    <th>Tech/культура</th>
+                    <th>Продукты</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in radar.domain_matrix %}
+                <tr class="{% if radar.selected_domain == row.domain_id %}active-row{% endif %}">
+                    <td>{{ row.label_ru }}</td>
+                    <td>{{ row.voices }}</td>
+                    <td>{{ row.developers }}</td>
+                    <td>{{ row.mainstream }}</td>
+                    <td>{{ row.business }}</td>
+                    <td>{{ row.tech_culture }}</td>
+                    <td>{{ row.product_pulse }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+
+    <!-- Trend shelves -->
+    {% if radar.trend_shelves %}
+    <section class="section">
+        <h2>Trend landscape{% if radar.selected_domain_label %}: {{ radar.selected_domain_label }}{% endif %}</h2>
+        {% set shelf_labels = {
+            "top_growing": "Растёт",
+            "new": "Новое",
+            "resurfacing": "Возвращается",
+            "cross_source_confirmed": "Подтверждено разными источниками",
+            "undercovered": "Недоосвещено",
+            "mainstream_only": "В основном СМИ",
+            "people_only": "В основном люди/разработчики"
+        } %}
+        <div class="shelf-grid">
+            {% for shelf_id, stories in radar.trend_shelves.items() %}
+            {% if stories %}
+            <div class="shelf">
+                <h3>{{ shelf_labels.get(shelf_id, shelf_id) }}</h3>
+                <div class="compact-story-list">
+                    {% for story in stories %}
+                    <a href="/stories/{{ story.story_id }}" class="compact-story">
+                        <span>{{ story.title }}</span>
+                        <small>{{ "%.0f"|format(story.trend_score) }} · {{ story.item_count }} мат. · {{ story.source_count }} ист.</small>
+                    </a>
+                    {% endfor %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <!-- LLM/analysis top stories -->
+    {% if radar.run.analyzed_item_count > 0 and radar.top_changes %}
+    <section class="section">
+        <h2>Редакционные сюжеты</h2>
         <div class="story-grid">
             {% for story in radar.top_changes %}
             {% include "components/story_card.html" %}

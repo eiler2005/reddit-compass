@@ -33,6 +33,25 @@ reddit-compass растёт от автономного коллектора т�
 - **CLI**: `db rebuild` — перестройка SQLite v2 из snapshots.
 - 268 тестов, coverage 71%, ruff/mypy strict зелёные.
 
+## v0.4 — Broad Radar / trendwatching core (готово, 2026-07-28)
+
+- **Broad taxonomy в коде**: 12 стабильных `domain_id` для AI/tech, труда,
+  бизнеса, политики, мира, культуры, спорта, науки/здоровья/образования,
+  потребителя, климата/инфраструктуры, security/privacy и fallback `other`.
+- **Default profile `broad`**: широкий Reddit corpus + RSS sections + HN front/search.
+  `ai-native` сохранён как отдельная линза/профиль.
+- **SQLite schema v3**: `domain_ids`, `trend_id`, `lifecycle`, `project_scores`,
+  `discussion_url`, `target_url`, `dedupe_group_id`, `evidence_refs`.
+- **Radar workspace**: category tabs, category × source-cluster matrix, shelves
+  (`new`, `growing`, `resurfacing`, `undercovered`, cross-source confirmed),
+  project panels, theme clouds, pain points, mega stories и raw popular.
+- **Signal fixes**: `run --analyze` создаёт `item_signals`, Radar не показывает
+  фальшивый LLM-анализ при `0` разметок, item count считается через `observations`.
+- **Dedup/continuity fixes**: Reddit `target_url` отделён от `discussion_url`;
+  clustering использует canonical/target URL, историю последних runs и обрезает
+  story до current-run items перед ranking.
+- 271 тест проходит; ruff, format-check, mypy зелёные.
+
 ## Phase 2 — планировщик на VPS (HostKey «Hermes»)
 
 - App-owned compose-стек `/opt/reddit-compass`, изолированный от прочих стеков (своя сеть + volume).

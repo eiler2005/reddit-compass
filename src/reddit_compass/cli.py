@@ -21,12 +21,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from .config import (
-    DEFAULT_CONFIG_PATH,
-    DEFAULT_HARVESTS_DIR,
-    DEFAULT_SNAPSHOTS_DIR,
-    MonitorConfig,
-)
+from .config import DEFAULT_HARVESTS_DIR, DEFAULT_PROFILE, DEFAULT_SNAPSHOTS_DIR, MonitorConfig
 from .detect_virality import detect_virality
 from .export import render_trends_report, write_snapshot, write_trends_report
 from .fetch_subreddits import fetch_all_subreddits
@@ -51,8 +46,10 @@ def _setup_logging(verbose: bool) -> None:
 
 
 def _load_config(args: argparse.Namespace) -> MonitorConfig:
-    config_path = Path(args.config) if args.config else DEFAULT_CONFIG_PATH
-    config = MonitorConfig.from_file(config_path)
+    if args.config:
+        config = MonitorConfig.from_file(Path(args.config))
+    else:
+        config = MonitorConfig.from_profile(getattr(args, "profile", DEFAULT_PROFILE))
     if args.limit:
         config.settings.posts_per_subreddit = args.limit
     if args.time_filter:
@@ -498,7 +495,7 @@ async def _cmd_run(args: argparse.Namespace) -> None:
     if args.sources:
         sources = [s.strip() for s in args.sources.split(",")]
 
-    profile = getattr(args, "profile", "ai-native")
+    profile = getattr(args, "profile", DEFAULT_PROFILE)
     analyze = getattr(args, "analyze", False)
     allow_partial = getattr(args, "allow_partial", False)
 
@@ -570,7 +567,7 @@ async def _cmd_db(args: argparse.Namespace) -> None:
         migrate(conn)
         snapshots_dir = _snapshots_dir(args)
         target_date = getattr(args, "date", None)
-        profile = getattr(args, "profile", "ai-native")
+        profile = getattr(args, "profile", DEFAULT_PROFILE)
 
         print(f"🔄 Rebuild из {snapshots_dir}...")
         stats = rebuild_from_snapshots(conn, snapshots_dir, profile, target_date)
@@ -652,7 +649,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Источники через запятую: reddit,hn,rss,ladder,ph",
     )
-    run_p.add_argument("--profile", type=str, default="ai-native", help="Профиль")
+    run_p.add_argument("--profile", type=str, default=DEFAULT_PROFILE, help="Профиль")
     run_p.add_argument("--analyze", action="store_true", help="Запустить LLM-анализ")
     run_p.add_argument("--allow-partial", action="store_true", help="Разрешить partial run")
 
@@ -661,7 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
     db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats / rebuild")
     db_p.add_argument("db_action", choices=["init", "stats", "rebuild"], help="Действие с БД")
     db_p.add_argument("--date", type=str, default=None, help="Дата для rebuild (YYYY-MM-DD)")
-    db_p.add_argument("--profile", type=str, default="ai-native", help="Профиль для rebuild")
+    db_p.add_argument("--profile", type=str, default=DEFAULT_PROFILE, help="Профиль для rebuild")
 
     return parser
 

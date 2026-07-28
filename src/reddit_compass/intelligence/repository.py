@@ -54,12 +54,19 @@ def upsert_items(conn: sqlite3.Connection, items: list[ContentItem]) -> None:
             """INSERT INTO items (item_id, provider, source_cluster, external_id, canonical_url,
                                   title, summary_ru, excerpt, author, published_at, observed_at,
                                   snapshot_date, language, content_scope, source_section,
-                                  raw_engagement, metadata)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                  domain_ids, discussion_url, target_url, dedupe_group_id,
+                                  evidence_refs, raw_engagement, metadata)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(item_id) DO UPDATE SET
                    title = excluded.title,
                    summary_ru = excluded.summary_ru,
                    excerpt = excluded.excerpt,
+                   source_section = excluded.source_section,
+                   domain_ids = excluded.domain_ids,
+                   discussion_url = excluded.discussion_url,
+                   target_url = excluded.target_url,
+                   dedupe_group_id = excluded.dedupe_group_id,
+                   evidence_refs = excluded.evidence_refs,
                    raw_engagement = excluded.raw_engagement,
                    metadata = excluded.metadata""",
             (
@@ -78,6 +85,11 @@ def upsert_items(conn: sqlite3.Connection, items: list[ContentItem]) -> None:
                 item.language,
                 item.content_scope,
                 item.source_section,
+                json.dumps(item.domain_ids, ensure_ascii=False),
+                item.discussion_url,
+                item.target_url,
+                item.dedupe_group_id,
+                json.dumps(item.evidence_refs, ensure_ascii=False),
                 json.dumps(item.raw_engagement, ensure_ascii=False),
                 json.dumps(item.metadata, ensure_ascii=False),
             ),
@@ -110,13 +122,19 @@ def upsert_observations(conn: sqlite3.Connection, observations: list[Observation
 
 def upsert_story(conn: sqlite3.Connection, story: Story) -> None:
     conn.execute(
-        """INSERT INTO stories (story_id, canonical_key, title, summary_ru, theme_ids,
+        """INSERT INTO stories (
+                                story_id, canonical_key, title, summary_ru, domain_ids, theme_ids,
+                                trend_id, lifecycle, project_scores,
                                 first_seen, last_seen, item_ids)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(story_id) DO UPDATE SET
                title = excluded.title,
                summary_ru = excluded.summary_ru,
+               domain_ids = excluded.domain_ids,
                theme_ids = excluded.theme_ids,
+               trend_id = excluded.trend_id,
+               lifecycle = excluded.lifecycle,
+               project_scores = excluded.project_scores,
                last_seen = excluded.last_seen,
                item_ids = excluded.item_ids""",
         (
@@ -124,7 +142,11 @@ def upsert_story(conn: sqlite3.Connection, story: Story) -> None:
             story.canonical_key,
             story.title,
             story.summary_ru,
+            json.dumps(story.domain_ids, ensure_ascii=False),
             json.dumps(story.theme_ids, ensure_ascii=False),
+            story.trend_id,
+            story.lifecycle,
+            json.dumps(story.project_scores, ensure_ascii=False),
             story.first_seen,
             story.last_seen,
             json.dumps(story.item_ids, ensure_ascii=False),
@@ -154,8 +176,9 @@ def replace_run_stories(
         conn.execute(
             """INSERT INTO story_metrics (run_id, story_id, goal_relevance, cross_source_coverage,
                                           momentum, novelty, evidence_quality, trend_score,
-                                          confidence, direction, item_count, source_count)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                          confidence, direction, trend_id, lifecycle,
+                                          project_scores, item_count, source_count)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(run_id, story_id) DO UPDATE SET
                    goal_relevance = excluded.goal_relevance,
                    cross_source_coverage = excluded.cross_source_coverage,
@@ -165,6 +188,9 @@ def replace_run_stories(
                    trend_score = excluded.trend_score,
                    confidence = excluded.confidence,
                    direction = excluded.direction,
+                   trend_id = excluded.trend_id,
+                   lifecycle = excluded.lifecycle,
+                   project_scores = excluded.project_scores,
                    item_count = excluded.item_count,
                    source_count = excluded.source_count""",
             (
@@ -178,6 +204,9 @@ def replace_run_stories(
                 metric.trend_score,
                 metric.confidence,
                 metric.direction,
+                metric.trend_id,
+                metric.lifecycle,
+                json.dumps(metric.project_scores, ensure_ascii=False),
                 metric.item_count,
                 metric.source_count,
             ),
@@ -188,13 +217,14 @@ def replace_run_signals(conn: sqlite3.Connection, run_id: str, signals: list[Ite
     conn.execute("DELETE FROM item_signals WHERE run_id = ?", (run_id,))
     for sig in signals:
         conn.execute(
-            """INSERT INTO item_signals (run_id, item_id, theme_ids, candidate_themes,
+            """INSERT INTO item_signals (run_id, item_id, domain_ids, theme_ids, candidate_themes,
                                          pain_points, buying_intent, goal_relevance,
                                          summary_ru, evidence_scope, model, analyzed_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 run_id,
                 sig.item_id,
+                json.dumps(sig.domain_ids, ensure_ascii=False),
                 json.dumps(sig.theme_ids, ensure_ascii=False),
                 json.dumps(sig.candidate_themes, ensure_ascii=False),
                 json.dumps(sig.pain_points, ensure_ascii=False),
@@ -242,6 +272,7 @@ def query_stories(
     date: str | None = None,
     profile: str | None = None,
     theme: str | None = None,
+    domain: str | None = None,
     provider: str | None = None,
     source_cluster: str | None = None,
     direction: str | None = None,
@@ -270,6 +301,21 @@ def query_stories(
     if theme:
         where.append("s.theme_ids LIKE ?")
         params.append(f'%"{theme}"%')
+    if domain:
+        where.append("s.domain_ids LIKE ?")
+        params.append(f'%"{domain}"%')
+    if provider:
+        where.append(
+            "EXISTS (SELECT 1 FROM story_items si JOIN items i ON i.item_id = si.item_id "
+            "WHERE si.run_id = sm.run_id AND si.story_id = sm.story_id AND i.provider = ?)"
+        )
+        params.append(provider)
+    if source_cluster:
+        where.append(
+            "EXISTS (SELECT 1 FROM story_items si JOIN items i ON i.item_id = si.item_id "
+            "WHERE si.run_id = sm.run_id AND si.story_id = sm.story_id AND i.source_cluster = ?)"
+        )
+        params.append(source_cluster)
     if direction:
         where.append("sm.direction = ?")
         params.append(direction)
@@ -296,14 +342,29 @@ def query_stories(
     offset = (page - 1) * page_size
     data_sql = f"""SELECT s.*, sm.run_id, sm.goal_relevance, sm.cross_source_coverage,
                           sm.momentum, sm.novelty, sm.evidence_quality, sm.trend_score,
-                          sm.confidence, sm.direction, sm.item_count, sm.source_count
+                          sm.confidence, sm.direction, sm.trend_id AS metric_trend_id,
+                          sm.lifecycle AS metric_lifecycle,
+                          sm.project_scores AS metric_project_scores,
+                          sm.item_count, sm.source_count
                    FROM story_metrics sm
                    JOIN stories s ON sm.story_id = s.story_id
                    {where_clause}
                    ORDER BY {sort_col}
                    LIMIT ? OFFSET ?"""
     rows = conn.execute(data_sql, [*params, page_size, offset]).fetchall()
-    return [dict(r) for r in rows], total
+    return [_decode_story_row(dict(r)) for r in rows], total
+
+
+def _decode_story_row(row: dict[str, Any]) -> dict[str, Any]:
+    for field in ("theme_ids", "domain_ids"):
+        raw = row.get(field)
+        if isinstance(raw, str):
+            row[field] = json.loads(raw) if raw else []
+    for field in ("project_scores", "metric_project_scores"):
+        raw = row.get(field)
+        if isinstance(raw, str):
+            row[field] = json.loads(raw) if raw else {}
+    return row
 
 
 def get_story(conn: sqlite3.Connection, story_id: str) -> dict[str, Any] | None:
@@ -312,7 +373,9 @@ def get_story(conn: sqlite3.Connection, story_id: str) -> dict[str, Any] | None:
         return None
     story = dict(row)
     story["theme_ids"] = json.loads(story["theme_ids"])
+    story["domain_ids"] = json.loads(story.get("domain_ids") or '["other"]')
     story["item_ids"] = json.loads(story["item_ids"])
+    story["project_scores"] = json.loads(story.get("project_scores") or "{}")
 
     metrics = conn.execute(
         "SELECT * FROM story_metrics WHERE story_id = ? ORDER BY run_id", (story_id,)
@@ -437,7 +500,11 @@ def _dict_to_briefing(d: dict[str, Any]) -> Briefing:
                 canonical_key=story_data["canonical_key"],
                 title=story_data["title"],
                 summary_ru=story_data.get("summary_ru", ""),
+                domain_ids=story_data.get("domain_ids", ["other"]),
                 theme_ids=story_data.get("theme_ids", []),
+                trend_id=story_data.get("trend_id", ""),
+                lifecycle=story_data.get("lifecycle", "new"),
+                project_scores=story_data.get("project_scores", {}),
                 first_seen=story_data.get("first_seen", ""),
                 last_seen=story_data.get("last_seen", ""),
                 item_ids=story_data.get("item_ids", []),
@@ -453,6 +520,9 @@ def _dict_to_briefing(d: dict[str, Any]) -> Briefing:
                 trend_score=metric_data.get("trend_score", 0.0),
                 confidence=metric_data.get("confidence", "low"),
                 direction=metric_data.get("direction", "new"),
+                trend_id=metric_data.get("trend_id", ""),
+                lifecycle=metric_data.get("lifecycle", metric_data.get("direction", "new")),
+                project_scores=metric_data.get("project_scores", {}),
                 item_count=metric_data.get("item_count", 0),
                 source_count=metric_data.get("source_count", 0),
             ),

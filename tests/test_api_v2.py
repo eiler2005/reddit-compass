@@ -36,6 +36,9 @@ def client(tmp_path: Path):
         canonical_key="test story",
         title="Test Story Title",
         summary_ru="Тестовый сюжет",
+        domain_ids=["ai_technology"],
+        trend_id="trend_test123",
+        project_scores={"book": 80, "rbc": 60, "business": 40},
         first_seen="2026-07-27",
         last_seen="2026-07-27",
         item_ids=["reddit:1", "hackernews:2"],
@@ -46,6 +49,8 @@ def client(tmp_path: Path):
         trend_score=75.0,
         confidence="high",
         direction="new",
+        trend_id="trend_test123",
+        project_scores={"book": 80, "rbc": 60, "business": 40},
         item_count=2,
         source_count=2,
     )
@@ -93,6 +98,27 @@ class TestStoriesEndpoint:
         data = response.json()
         assert data["story_id"] == "story_test123"
         assert data["title"] == "Test Story Title"
+
+    def test_list_domains(self, client: TestClient):
+        response = client.get("/api/v2/domains")
+        assert response.status_code == 200
+        ids = {item["domain_id"] for item in response.json()}
+        assert "ai_technology" in ids
+        assert "sports" in ids
+
+    def test_get_radar(self, client: TestClient):
+        response = client.get("/api/v2/radar/2026-07-27?profile=ai-native")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["date"] == "2026-07-27"
+        assert "domains" in data
+        assert "matrix" in data
+        assert "shelves" in data
+
+    def test_get_trend(self, client: TestClient):
+        response = client.get("/api/v2/trends/trend_test123")
+        assert response.status_code == 200
+        assert response.json()["story_id"] == "story_test123"
 
     def test_get_story_not_found(self, client: TestClient):
         response = client.get("/api/v2/stories/nonexistent")

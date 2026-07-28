@@ -90,6 +90,26 @@ def test_v2_indexes_created(tmp_path: Path):
     conn.close()
 
 
+def test_v3_columns_created(tmp_path: Path):
+    conn = get_db(tmp_path / "test.db")
+    migrate(conn)
+
+    def columns(table: str) -> set[str]:
+        return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+    assert {
+        "domain_ids",
+        "discussion_url",
+        "target_url",
+        "dedupe_group_id",
+        "evidence_refs",
+    }.issubset(columns("items"))
+    assert {"domain_ids", "trend_id", "lifecycle", "project_scores"}.issubset(columns("stories"))
+    assert {"trend_id", "lifecycle", "project_scores"}.issubset(columns("story_metrics"))
+    assert "domain_ids" in columns("item_signals")
+    conn.close()
+
+
 def test_reopen_db_no_change(tmp_path: Path):
     """Повторное открытие БД ничего не меняет."""
     db_path = tmp_path / "test.db"

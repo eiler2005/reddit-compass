@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Form, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from ..config import DEFAULT_PROFILE
 from ..intelligence.repository import (
     get_briefing,
     get_research_state,
@@ -70,7 +71,7 @@ def _safe_url(url: str) -> str:
 async def today_page(
     request: Request,
     date: str | None = None,
-    profile: str = "ai-native",
+    profile: str = DEFAULT_PROFILE,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
@@ -112,7 +113,7 @@ async def today_page(
     # Theme clouds
     from ..config import MonitorConfig
 
-    config = MonitorConfig.from_file()
+    config = MonitorConfig.from_profile(profile)
     theme_catalog = [{"id": t.id, "label": t.label} for t in config.themes]
     stable_themes, emerging_candidates, pain_point_cloud = build_theme_clouds(
         conn, f"{date}:{profile}", theme_catalog
@@ -237,6 +238,8 @@ async def explore_page(
         conn,
         q=q,
         theme=theme,
+        provider=provider,
+        source_cluster=source_cluster,
         direction=direction,
         confidence=confidence,
         sort=sort,
@@ -391,20 +394,25 @@ async def radar_redirect(
 async def radar_page(
     request: Request,
     date: str,
-    profile: str = "ai-native",
+    profile: str = DEFAULT_PROFILE,
+    mode: str = "broad",
+    domain: str | None = None,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Полный аналитический Radar."""
     from ..config import MonitorConfig
     from .query_service import (
+        build_domain_matrix,
+        build_domain_summaries,
         build_goal_relevance_rankings,
         build_raw_popular_items,
         build_run_summary,
         build_source_coverage,
         build_theme_clouds,
+        build_trend_shelves,
         build_trend_strength,
     )
-    from .view_models import RadarPageView
+    from .view_models import RadarPageView, domain_label
 
     run_id = f"{date}:{profile}"
     run_summary = build_run_summary(conn, date, profile)
@@ -436,7 +444,7 @@ async def radar_page(
         narrative_shifts = view.narrative_shifts
 
     # Theme clouds
-    config = MonitorConfig.from_file()
+    config = MonitorConfig.from_profile(profile)
     theme_catalog = [{"id": t.id, "label": t.label} for t in config.themes]
     stable_themes, emerging_candidates, pain_point_cloud = build_theme_clouds(
         conn, run_id, theme_catalog
@@ -446,11 +454,17 @@ async def radar_page(
     trend_strength_rows = build_trend_strength(conn, run_id)
 
     # Raw popular items
-    raw_popular_items = build_raw_popular_items(conn, date)
+    raw_popular_items = build_raw_popular_items(conn, date, profile=profile)
 
     # Goal relevance rankings
     goals = [g.id for g in config.goals]
     goal_relevance_rankings = build_goal_relevance_rankings(conn, run_id, goals)
+    domain_summaries = build_domain_summaries(conn, run_id)
+    domain_matrix = build_domain_matrix(conn, run_id)
+    shelf_domain = domain
+    if mode == "ai-native" and shelf_domain is None:
+        shelf_domain = "ai_technology"
+    trend_shelves = build_trend_shelves(conn, run_id, domain=shelf_domain)
 
     # Prev/next dates
     prev_row = conn.execute(
@@ -466,8 +480,14 @@ async def radar_page(
     radar = RadarPageView(
         date=date,
         profile=profile,
+        mode=mode,
+        selected_domain=domain,
+        selected_domain_label=domain_label(domain) if domain else "",
         run=run_summary,
         source_coverage=source_coverage,
+        domain_summaries=domain_summaries,
+        domain_matrix=domain_matrix,
+        trend_shelves=trend_shelves,
         top_changes=top_changes,
         mega_stories=mega_stories,
         watchlist=watchlist,

@@ -10,7 +10,8 @@ import logging
 import random
 from dataclasses import dataclass
 
-from .models import ContentItem
+from .models import ContentItem, ItemSignal
+from .taxonomy import compute_project_scores, normalize_domain_ids
 
 logger = logging.getLogger("reddit_compass")
 
@@ -180,6 +181,76 @@ excerpt: {item.excerpt or "отсутствует"}
   "summary_ru": ""
 }}
 """
+
+
+def build_deterministic_item_signals(
+    items: list[ContentItem],
+    theme_catalog: dict[str, list[str]] | None = None,
+    analyzed_at: str = "",
+) -> list[ItemSignal]:
+    """Build structured item signals without network access.
+
+    This is a deterministic fallback for `run --analyze`: it marks the full
+    corpus with broad domains and project scores, while Qwen-specific narrative
+    synthesis can be added as a later refinement.
+    """
+    theme_catalog = theme_catalog or {}
+    signals: list[ItemSignal] = []
+
+    for item in items:
+        text = f"{item.title} {item.excerpt}".lower()
+        theme_ids = [
+            theme_id
+            for theme_id, keywords in theme_catalog.items()
+            if any(keyword.lower() in text for keyword in keywords)
+        ][:5]
+        pain_points = _extract_rule_based_pain_points(text)
+        domain_ids = normalize_domain_ids(item.domain_ids)
+        project_scores = compute_project_scores(domain_ids, item.title, item.excerpt)
+
+        signals.append(
+            ItemSignal(
+                item_id=item.item_id,
+                domain_ids=domain_ids,
+                theme_ids=theme_ids,
+                candidate_themes=[],
+                pain_points=pain_points,
+                buying_intent=any(token in text for token in ("buy", "pricing", "vendor")),
+                goal_relevance=project_scores,
+                summary_ru=item.summary_ru or item.title,
+                evidence_scope=item.content_scope,
+                model="deterministic-facets-v1",
+                analyzed_at=analyzed_at,
+            )
+        )
+
+    return signals
+
+
+def _extract_rule_based_pain_points(text: str) -> list[str]:
+    pain_rules = (
+        ("layoff", "career uncertainty"),
+        ("laid off", "career uncertainty"),
+        ("burnout", "burnout"),
+        ("privacy", "privacy risk"),
+        ("surveillance", "surveillance risk"),
+        ("breach", "security breach"),
+        ("hack", "security breach"),
+        ("lawsuit", "legal risk"),
+        ("court", "legal risk"),
+        ("debt", "financial pressure"),
+        ("pricing", "pricing friction"),
+        ("inflation", "consumer pressure"),
+        ("protest", "public backlash"),
+        ("ban", "regulatory friction"),
+        ("shortage", "supply shortage"),
+        ("water", "infrastructure constraint"),
+    )
+    pains: list[str] = []
+    for token, label in pain_rules:
+        if token in text and label not in pains:
+            pains.append(label)
+    return pains[:5]
 
 
 def build_repair_prompt(original_response: str, validation_errors: list[str]) -> str:

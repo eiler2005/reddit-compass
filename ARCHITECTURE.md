@@ -6,12 +6,13 @@
 
 ## 1. Миссия
 
-reddit-compass — **трендовый радар**: собирает «голос улицы», «голос разработчика», «голос СМИ»
-и «голос рынка» из 21 источника, анализирует через LLM и показывает, **куда смотреть**.
+reddit-compass — **трендовый радар**: собирает «голос людей», «голос разработчиков»,
+«голос СМИ», «голос бизнеса» и «product pulse», раскладывает материалы по стабильной
+broad taxonomy и показывает, **куда смотреть**.
 
 ```
-    🌐 Reddit          💬 Hacker News       📰 СМИ (NYT, FT...)    🚀 ProductHunt
-    18 сабреддитов     Algolia API          12 via Ladder          GraphQL API
+    🌐 Reddit packs    💬 Hacker News       📰 RSS/Ladder СМИ      🚀 ProductHunt
+    broad profile      Algolia front/search sections + fallback    GraphQL/feed
          │                   │                    │                     │
          ▼                   ▼                    ▼                     ▼
     ┌─────────────────────────────────────────────────────────────────────────┐
@@ -21,8 +22,8 @@ reddit-compass — **трендовый радар**: собирает «гол�
     └─────────────────────────────────────────────────────────────────────────┘
          │                   │                    │                     │
          ▼                   ▼                    ▼                     ▼
-    posts.jsonl         compass.db          signals.jsonl        REST API
-    (JSONL обмен)       (SQLite история)    (LLM-синтез)         (FastAPI :8900)
+    JSONL snapshots     compass.db          item_signals         REST API
+    (обмен)             (SQLite v3)         (facets/evidence)    (FastAPI :8900)
 ```
 
 **Главный инвариант:** сервис собирает данные и генерирует артефакты. Потребители
@@ -30,7 +31,24 @@ reddit-compass — **трендовый радар**: собирает «гол�
 
 ---
 
-## 2. Источники (21, пять кластеров)
+## 2. Источники, кластеры и broad taxonomy
+
+Данные идут через пять source clusters:
+
+- `voices`: Reddit, Medium.
+- `developers`: Hacker News.
+- `mainstream`: BBC, Guardian, NYT/WaPo/USA Today/Fox News via RSS/Ladder.
+- `business`: Reuters, FT, Fox Business, American Banker.
+- `tech_culture`: TechCrunch, Verge, Ars Technica, Wired, New Yorker, Vanity Fair.
+- `product_pulse`: ProductHunt.
+
+Каждый item/story получает один или несколько `domain_ids`:
+`ai_technology`, `labor_career`, `business_markets`, `society_politics`,
+`world_geopolitics`, `culture_media`, `sports`, `science_health_education`,
+`finance_consumer`, `climate_energy_infrastructure`, `security_privacy`, `other`.
+
+Default collection profile: `config/profiles/broad.json`.
+`config/profiles/ai-native.json` остаётся отдельным узким профилем/линзой.
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐

@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from rapidfuzz import fuzz
 
 from .models import ContentItem, Story
+from .taxonomy import compute_project_scores, normalize_domain_ids, stable_hash_id
 
 _STOPWORDS_EN = {
     "the",
@@ -352,6 +353,7 @@ class StoryCluster:
     title: str
     item_ids: list[str] = field(default_factory=list)
     canonical_urls: set[str] = field(default_factory=set)
+    domain_ids: set[str] = field(default_factory=set)
     tokens: set[str] = field(default_factory=set)
     entities: set[str] = field(default_factory=set)
     first_seen: str = ""
@@ -392,14 +394,15 @@ class StoryClusterer:
         return self._create_new_story(item)
 
     def _find_matching_story(self, item: ContentItem) -> str | None:
-        if item.canonical_url and item.canonical_url in self._url_to_story:
-            return self._url_to_story[item.canonical_url]
+        for url in self._match_urls(item):
+            if url in self._url_to_story:
+                return self._url_to_story[url]
 
         candidates: list[tuple[str, float]] = []
         item_entities = extract_entities(item.title)
 
         for story_id, cluster in self._clusters.items():
-            if item.canonical_url and item.canonical_url in cluster.canonical_urls:
+            if cluster.canonical_urls & self._match_urls(item):
                 return story_id
 
             similarity = title_similarity(item.title, cluster.title, item.provider)
@@ -429,8 +432,8 @@ class StoryClusterer:
         cluster = self._clusters[story_id]
         if item.item_id not in cluster.item_ids:
             cluster.item_ids.append(item.item_id)
-        if item.canonical_url:
-            cluster.canonical_urls.add(item.canonical_url)
+        cluster.canonical_urls.update(self._match_urls(item))
+        cluster.domain_ids.update(normalize_domain_ids(item.domain_ids))
         cluster.tokens.update(extract_tokens(normalize_title(item.title, item.provider)))
         cluster.entities.update(extract_entities(item.title))
         if item.snapshot_date:
@@ -454,7 +457,8 @@ class StoryClusterer:
             canonical_key=canonical_key,
             title=item.title,
             item_ids=[item.item_id],
-            canonical_urls={item.canonical_url} if item.canonical_url else set(),
+            canonical_urls=self._match_urls(item),
+            domain_ids=set(normalize_domain_ids(item.domain_ids)),
             tokens=extract_tokens(normalized),
             entities=extract_entities(item.title),
             first_seen=item.snapshot_date,
@@ -462,10 +466,20 @@ class StoryClusterer:
         )
         self._clusters[story_id] = cluster
 
-        if item.canonical_url:
-            self._url_to_story[item.canonical_url] = story_id
+        for url in self._match_urls(item):
+            self._url_to_story[url] = story_id
 
         return story_id
+
+    def _match_urls(self, item: ContentItem) -> set[str]:
+        urls = {
+            url
+            for url in (item.canonical_url, item.target_url)
+            if url and not url.startswith("https://www.reddit.com/")
+        }
+        if not urls and item.canonical_url:
+            urls.add(item.canonical_url)
+        return urls
 
     def get_stories(self) -> list[Story]:
         """Возвращает все stories."""
@@ -474,6 +488,10 @@ class StoryClusterer:
                 story_id=c.story_id,
                 canonical_key=c.canonical_key,
                 title=c.title,
+                domain_ids=normalize_domain_ids(list(c.domain_ids)),
+                trend_id=stable_hash_id("trend", c.canonical_key),
+                lifecycle="new",
+                project_scores=compute_project_scores(list(c.domain_ids), c.title),
                 item_ids=list(c.item_ids),
                 first_seen=c.first_seen,
                 last_seen=c.last_seen,
@@ -492,6 +510,7 @@ class StoryClusterer:
                 title=story.title,
                 item_ids=list(story.item_ids),
                 canonical_urls=set(),
+                domain_ids=set(normalize_domain_ids(story.domain_ids)),
                 tokens=tokens,
                 entities=entities,
                 first_seen=story.first_seen,

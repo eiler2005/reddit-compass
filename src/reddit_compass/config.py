@@ -14,6 +14,7 @@ from typing import Any
 
 # Корень репозитория: src/reddit_compass/config.py -> parents[2].
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROFILES_DIR = PROJECT_ROOT / "config" / "profiles"
 
 
 def _dir(env: str, default: Path) -> Path:
@@ -25,9 +26,8 @@ def _dir(env: str, default: Path) -> Path:
 DEFAULT_DATA_DIR = _dir("DATA_DIR", PROJECT_ROOT / "data")
 DEFAULT_SNAPSHOTS_DIR = DEFAULT_DATA_DIR / "snapshots"
 DEFAULT_HARVESTS_DIR = _dir("HARVESTS_DIR", DEFAULT_DATA_DIR / "harvests")
-DEFAULT_CONFIG_PATH = _dir(
-    "REDDIT_COMPASS_CONFIG", PROJECT_ROOT / "config" / "profiles" / "ai-native.json"
-)
+DEFAULT_CONFIG_PATH = _dir("REDDIT_COMPASS_CONFIG", PROFILES_DIR / "broad.json")
+DEFAULT_PROFILE = "broad"
 
 
 @dataclass
@@ -86,6 +86,13 @@ class MonitorConfig:
     @property
     def subreddit_clusters(self) -> dict[str, list[str]]:
         return dict(self.subreddits)
+
+    @classmethod
+    def from_profile(cls, profile: str) -> MonitorConfig:
+        profile_path = PROFILES_DIR / f"{profile}.json"
+        if profile_path.exists():
+            return cls.from_file(profile_path)
+        return cls.from_file(DEFAULT_CONFIG_PATH)
 
     @classmethod
     def from_file(cls, path: Path = DEFAULT_CONFIG_PATH) -> MonitorConfig:
