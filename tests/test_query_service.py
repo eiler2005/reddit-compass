@@ -316,3 +316,29 @@ class TestViewLabels:
         assert provider_label("hackernews") == "HN"
         assert provider_label("bbc") == "BBC"
         assert provider_label("unknown_source") == "unknown_source"
+
+
+class TestAnalysisCoverage:
+    def test_deterministic_signals_cover_all_items(self):
+        """build_deterministic_item_signals покрывает 100% items."""
+        from reddit_compass.intelligence.llm_pipeline import (
+            build_deterministic_item_signals,
+        )
+        from reddit_compass.intelligence.models import ContentItem
+
+        items = [
+            ContentItem(
+                item_id=f"test:{i}",
+                provider="reddit",
+                source_cluster="voices",
+                external_id=str(i),
+                canonical_url=f"https://r.com/{i}",
+                title=f"Test story number {i}",
+            )
+            for i in range(10)
+        ]
+        signals = build_deterministic_item_signals(items)
+        assert len(signals) == len(items)
+        signal_ids = {s.item_id for s in signals}
+        item_ids = {i.item_id for i in items}
+        assert signal_ids == item_ids
