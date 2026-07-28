@@ -370,6 +370,33 @@ def normalize_title(title: str, provider: str = "") -> str:
     return " ".join(filtered)
 
 
+_LOW_SIGNAL_PATTERNS = [
+    r"^sign\s+up",
+    r"^subscribe",
+    r"^newsletter",
+    r"^methodology",
+    r"^tech\s+life$",
+    r"^tech\s+now$",
+    r"^morning\s+briefing",
+    r"^podcast",
+    r"^live\s+updates?$",
+    r"^latest\s+news$",
+    r"^top\s+stories$",
+    r"^breaking\s+news?$",
+]
+_LOW_SIGNAL_RE = re.compile("|".join(_LOW_SIGNAL_PATTERNS), re.IGNORECASE)
+
+
+def is_generic_title(normalized_title: str) -> bool:
+    """True если заголовок слишком общий для title-only merge."""
+    return normalized_title in _GENERIC_PREFIXES or len(normalized_title.split()) < 3
+
+
+def is_low_signal_title(title: str) -> bool:
+    """True если материал — newsletter/methodology/listing/podcast."""
+    return bool(_LOW_SIGNAL_RE.search(title.strip()))
+
+
 def extract_tokens(normalized: str) -> set[str]:
     """Извлекает токены из нормализованного заголовка."""
     return set(normalized.split())
@@ -472,9 +499,15 @@ class StoryClusterer:
         return self._create_new_story(item)
 
     def _find_matching_story(self, item: ContentItem) -> str | None:
+        # URL matching always allowed
         for url in self._match_urls(item):
             if url in self._url_to_story:
                 return self._url_to_story[url]
+
+        # Generic/low-signal titles: no title-only merge
+        normalized = normalize_title(item.title, item.provider)
+        if is_generic_title(normalized) or is_low_signal_title(item.title):
+            return None
 
         candidates: list[tuple[str, float]] = []
         item_entities = extract_entities(item.title)
@@ -522,9 +555,16 @@ class StoryClusterer:
 
     def _create_new_story(self, item: ContentItem) -> str:
         normalized = normalize_title(item.title, item.provider)
-        tokens = list(extract_tokens(normalized))
-        canonical_key = _canonical_key_from_tokens(tokens)
-        story_id = generate_story_id(canonical_key)
+
+        # Generic/low-signal titles: use URL-based ID to prevent false merges
+        if is_generic_title(normalized) or is_low_signal_title(item.title):
+            url = item.canonical_url or item.item_id
+            canonical_key = f"url:{url}"
+            story_id = generate_story_id(canonical_key)
+        else:
+            tokens = list(extract_tokens(normalized))
+            canonical_key = _canonical_key_from_tokens(tokens)
+            story_id = generate_story_id(canonical_key)
 
         if story_id in self._clusters:
             self._add_to_cluster(story_id, item)

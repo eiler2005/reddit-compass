@@ -6,6 +6,8 @@ from reddit_compass.intelligence.clustering import (
     StoryClusterer,
     cluster_items,
     extract_entities,
+    is_generic_title,
+    is_low_signal_title,
     normalize_title,
     title_similarity,
     token_jaccard,
@@ -94,6 +96,30 @@ class TestNormalizeTitle:
         r2 = normalize_title("Tech Life", "bbc")
         # Same normalized title — but clustering should use URL guard
         assert r1 == r2  # normalization is same, guard is in clustering
+
+
+class TestGenericAndLowSignal:
+    def test_generic_titles(self):
+        assert is_generic_title("opinion") is True
+        assert is_generic_title("analysis") is True
+        assert is_generic_title("tech life") is True
+        assert is_generic_title("ai agents replace jobs") is False
+
+    def test_low_signal_titles(self):
+        assert is_low_signal_title("Sign up for the Spin newsletter") is True
+        assert is_low_signal_title("Methodology for America's Top WorkTech") is True
+        assert is_low_signal_title("Tech Life") is True
+        assert is_low_signal_title("Morning Briefing") is True
+        assert is_low_signal_title("AI agents escape sandbox") is False
+
+    def test_generic_title_blocks_merge(self):
+        """Generic titles не должны склеиваться по title-only."""
+        clusterer = StoryClusterer()
+        item1 = _make_item("a1", "Tech Life", "bbc", "https://bbc.com/1")
+        item2 = _make_item("a2", "Tech Life", "bbc", "https://bbc.com/2")
+        s1 = clusterer.add_item(item1)
+        s2 = clusterer.add_item(item2)
+        assert s1 != s2  # Different URLs, generic title → no merge
 
 
 class TestTokenJaccard:
