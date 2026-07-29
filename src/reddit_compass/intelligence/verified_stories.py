@@ -106,8 +106,9 @@ def get_verified_stories(
            FROM engine_story_items esi
            JOIN release_items ri
              ON ri.release_id = (
-               SELECT data_release_id FROM story_releases
-               WHERE story_release_id = ?
+               SELECT fr.data_release_id FROM facet_releases fr
+               JOIN story_releases sr ON sr.facet_release_id = fr.facet_release_id
+               WHERE sr.story_release_id = ?
              ) AND ri.item_id = esi.item_id
            WHERE esi.story_release_id = ?""",
         (story_release_id, story_release_id),
@@ -243,8 +244,9 @@ def check_group_size_guards(
                FROM engine_story_items esi
                JOIN release_items ri
                  ON ri.release_id = (
-                   SELECT data_release_id FROM story_releases
-                   WHERE story_release_id = ?
+                   SELECT fr.data_release_id FROM facet_releases fr
+                   JOIN story_releases sr ON sr.facet_release_id = fr.facet_release_id
+                   WHERE sr.story_release_id = ?
                  ) AND ri.item_id = esi.item_id
                WHERE esi.story_release_id = ? AND esi.story_id = ?""",
             (story_release_id, story_release_id, sid),

@@ -24,9 +24,24 @@ def _setup_engine_db(conn: sqlite3.Connection) -> None:
         );
         CREATE TABLE IF NOT EXISTS story_releases (
             story_release_id TEXT PRIMARY KEY,
-            data_release_id TEXT NOT NULL,
             facet_release_id TEXT NOT NULL DEFAULT '',
+            method TEXT NOT NULL DEFAULT '',
+            params_hash TEXT NOT NULL DEFAULT '',
             status TEXT NOT NULL DEFAULT 'finalized',
+            metrics_json TEXT NOT NULL DEFAULT '{}',
+            git_sha TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT ''
+        );
+        CREATE TABLE IF NOT EXISTS facet_releases (
+            facet_release_id TEXT PRIMARY KEY,
+            data_release_id TEXT NOT NULL,
+            method TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            params_hash TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'finalized',
+            metrics_json TEXT NOT NULL DEFAULT '{}',
+            git_sha TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL DEFAULT ''
         );
         CREATE TABLE IF NOT EXISTS release_items (
@@ -119,6 +134,13 @@ def _setup_engine_db(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _insert_releases(conn: sqlite3.Connection) -> None:
+    """Insert standard test releases (sr1 → fr1 → dr1)."""
+    conn.execute("INSERT INTO story_releases VALUES ('sr1','fr1','','','finalized','','','')")
+    conn.execute("INSERT INTO facet_releases VALUES ('fr1','dr1','','','','','finalized','','','')")
+    conn.execute("INSERT INTO data_releases VALUES ('dr1','test','finalized','')")
+
+
 def _insert_story(
     conn: sqlite3.Connection,
     release_id: str,
@@ -182,8 +204,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Cross-source story", source_count=2, item_count=2)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "rss", "story medoid")
         _insert_item(conn, "dr1", "sr1", "s1", "i2", "reddit", "shared canonical/target URL")
@@ -197,8 +218,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Semantic only story", source_count=2, item_count=2)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "rss", "story medoid")
         _insert_item(conn, "dr1", "sr1", "s1", "i2", "reddit", "semantic embedding dedup")
@@ -211,8 +231,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Near-dup story", source_count=1, item_count=2)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "rss", "story medoid")
         _insert_item(conn, "dr1", "sr1", "s1", "i2", "rss", "near-duplicate title fingerprint")
@@ -226,8 +245,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Qwen story", source_count=2, item_count=2)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "rss", "story medoid")
         _insert_item(
@@ -243,8 +261,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Manual story", source_count=1, item_count=1)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "rss", "story medoid")
         conn.execute(
@@ -261,8 +278,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Reddit pulse story", source_count=1, item_count=1)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "reddit", "story medoid")
         conn.execute(
@@ -282,8 +298,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Low pulse story", source_count=1, item_count=1)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "reddit", "story medoid")
         conn.execute(
@@ -302,8 +317,7 @@ class TestVerifiedStories:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Verified", source_count=2, item_count=2)
         _insert_item(conn, "dr1", "sr1", "s1", "i1", "rss", "story medoid")
         _insert_item(conn, "dr1", "sr1", "s1", "i2", "reddit", "shared canonical/target URL")
@@ -320,8 +334,7 @@ class TestGroupSizeGuards:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Big same-provider", source_count=1, item_count=10)
         for i in range(10):
             _insert_item(conn, "dr1", "sr1", "s1", f"i{i}", "rss", "semantic embedding dedup")
@@ -335,8 +348,7 @@ class TestGroupSizeGuards:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Big with provenance", source_count=1, item_count=10)
         _insert_item(conn, "dr1", "sr1", "s1", "i0", "rss", "story medoid")
         for i in range(1, 10):
@@ -352,8 +364,7 @@ class TestGroupSizeGuards:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Big cross-source", source_count=3, item_count=20)
         _insert_item(conn, "dr1", "sr1", "s1", "i0", "rss", "story medoid")
         for i in range(1, 10):
@@ -370,8 +381,7 @@ class TestGroupSizeGuards:
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row
         _setup_engine_db(conn)
-        conn.execute("INSERT INTO story_releases VALUES ('sr1', 'dr1', '', 'finalized', '')")
-        conn.execute("INSERT INTO data_releases VALUES ('dr1', 'test', 'finalized', '')")
+        _insert_releases(conn)
         _insert_story(conn, "sr1", "s1", "Small story", source_count=1, item_count=3)
         for i in range(3):
             _insert_item(conn, "dr1", "sr1", "s1", f"i{i}", "rss", "story medoid")
