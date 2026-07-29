@@ -2296,6 +2296,10 @@ def _score_story_pair(
     left_entities = _facet_entities(left_facets) or _meaningful_entities(left.title)
     right_entities = _facet_entities(right_facets) or _meaningful_entities(right.title)
     shared_entities = left_entities & right_entities
+    # Hard guard: generic anchors do not count as entity anchors
+    from .verified_stories import GENERIC_ANCHORS
+
+    shared_entities = {e for e in shared_entities if e.lower() not in GENERIC_ANCHORS}
     entity_score = len(shared_entities) / max(min(len(left_entities), len(right_entities)), 1)
     left_numbers = set(_event_numbers(left_facets))
     right_numbers = set(_event_numbers(right_facets))
@@ -2381,17 +2385,34 @@ def _score_story_pair(
             or title_score >= 0.86
         )
     )
-    semantic_dedup_match = bool(
-        params.get("semantic_dedup_enabled", False)
-        and dense_similarity is not None
-        and dense_similarity >= float(params.get("semantic_dedup_threshold", 0.92))
-        and date_distance <= int(params.get("semantic_dedup_max_days", 7))
-        and (
+    _safe_e5 = bool(params.get("safe_e5_mode", False))
+    _semantic_threshold = 0.94 if _safe_e5 else float(params.get("semantic_dedup_threshold", 0.92))
+    _semantic_max_days = 3 if _safe_e5 else int(params.get("semantic_dedup_max_days", 7))
+    _semantic_provenance = (
+        (title_score >= 0.75 or token_jaccard >= 0.45 or bool(shared_urls))
+        if _safe_e5
+        else (
             shared_entities
             or token_jaccard >= 0.34
             or title_score >= 0.78
             or bool(left_numbers & right_numbers)
         )
+    )
+    semantic_dedup_match = bool(
+        params.get("semantic_dedup_enabled", False)
+        and dense_similarity is not None
+        and dense_similarity >= _semantic_threshold
+        and date_distance <= _semantic_max_days
+        and _semantic_provenance
+        and (not _safe_e5 or bool(shared_entities))
+    )
+    # Safe E5: semantic pairs that don't meet strict auto-merge go to review
+    _semantic_review_fallback = bool(
+        _safe_e5
+        and params.get("semantic_dedup_enabled", False)
+        and dense_similarity is not None
+        and dense_similarity >= 0.88
+        and not semantic_dedup_match
     )
     dense_event_match = bool(
         dense_similarity is not None
@@ -2419,6 +2440,20 @@ def _score_story_pair(
             or left.canonical_url != right.canonical_url
         )
     )
+    # --- Hard guards: block semantic-only auto-merge for risky patterns ---
+    _show_hn_left = "show hn" in left_norm.lower()
+    _show_hn_right = "show hn" in right_norm.lower()
+    _both_show_hn = _show_hn_left and _show_hn_right
+    _same_provider_hn = (
+        left.provider == right.provider
+        and left.provider in ("hackernews", "hn")
+        and not shared_urls
+        and not near_duplicate_title_match
+    )
+    if _both_show_hn or _same_provider_hn:
+        # Show HN / same-provider HN: semantic-only merge blocked
+        semantic_dedup_match = False
+        dense_event_match = False
     if hard_conflict:
         decision = "reject"
         reason = "number/date event conflict"
@@ -2442,7 +2477,7 @@ def _score_story_pair(
     elif score >= auto_threshold and (shared_entities or title_score >= 0.9):
         decision = "auto_merge"
         reason = "high event similarity without hard conflict"
-    elif score >= review_threshold or dense_review_match:
+    elif score >= review_threshold or dense_review_match or _semantic_review_fallback:
         decision = "review"
         reason = "ambiguous event similarity; LLM/manual review required"
     else:
