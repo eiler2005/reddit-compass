@@ -14,6 +14,7 @@ from __future__ import annotations
 import logging
 import re
 import sqlite3
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -196,6 +197,24 @@ def rebuild_from_snapshots(
         # Фильтруем: оставляем только stories с items из текущего run
         current_item_ids = {item.item_id for item in items}
         stories = [s for s in stories if any(iid in current_item_ids for iid in s.item_ids)]
+        stories = [
+            replace(
+                story,
+                item_ids=[item_id for item_id in story.item_ids if item_id in current_item_ids],
+            )
+            for story in stories
+        ]
+
+        # Cross-source second pass: merge stories from different providers
+        from .clustering import merge_cross_source_candidates
+
+        items_by_id = {item.item_id: item for item in items}
+        items_by_story: dict[str, list[ContentItem]] = {}
+        for story in stories:
+            items_by_story[story.story_id] = [
+                items_by_id[iid] for iid in story.item_ids if iid in items_by_id
+            ]
+        stories = merge_cross_source_candidates(stories, items_by_story)
 
         percentiles = compute_percentiles(items)
 
@@ -207,13 +226,12 @@ def rebuild_from_snapshots(
         replace_run_signals(conn, run_id, signals)
         item_signal_scores = {sig.item_id: sig.goal_relevance for sig in signals}
 
-        # Быстрый lookup: item_id → ContentItem
+        # Быстрый lookup: item_id → ContentItem (перестраиваем после merge)
         items_by_id = {item.item_id: item for item in items}
-        items_by_story: dict[str, list[ContentItem]] = {}
-        for story in stories:
-            items_by_story[story.story_id] = [
-                items_by_id[iid] for iid in story.item_ids if iid in items_by_id
-            ]
+        items_by_story = {
+            story.story_id: [items_by_id[iid] for iid in story.item_ids if iid in items_by_id]
+            for story in stories
+        }
 
         metrics = []
         for story in stories:

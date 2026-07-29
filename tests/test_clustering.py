@@ -8,6 +8,7 @@ from reddit_compass.intelligence.clustering import (
     extract_entities,
     is_generic_title,
     is_low_signal_title,
+    merge_cross_source_candidates,
     normalize_title,
     title_similarity,
     token_jaccard,
@@ -149,6 +150,116 @@ class TestGenericAndLowSignal:
         clusterer.add_item(normal_item)
         stories = clusterer.get_stories()
         assert len(stories) == 2
+
+
+class TestCrossSourceMerge:
+    def test_same_event_different_providers_merges(self):
+        """Reuters + BBC + NYT про одно событие → один story."""
+        from reddit_compass.intelligence.models import Story
+
+        stories = [
+            Story(
+                story_id="s1",
+                canonical_key="japan earthquake tsunami",
+                title="Japan hit by 7.1 earthquake, tsunami warning issued",
+                item_ids=["reuters:1"],
+            ),
+            Story(
+                story_id="s2",
+                canonical_key="tsunami alert japan quake",
+                title="Tsunami alert after magnitude 7.1 quake strikes Japan",
+                item_ids=["bbc:1"],
+            ),
+            Story(
+                story_id="s3",
+                canonical_key="japan tsunami warning earthquake",
+                title="Japan issues tsunami warning after powerful earthquake",
+                item_ids=["nytimes:1"],
+            ),
+        ]
+        items_by_story = {
+            "s1": [_make_item("reuters:1", stories[0].title, "reuters")],
+            "s2": [_make_item("bbc:1", stories[1].title, "bbc")],
+            "s3": [_make_item("nytimes:1", stories[2].title, "nytimes")],
+        }
+        merged = merge_cross_source_candidates(stories, items_by_story)
+        assert len(merged) == 1
+        assert len(merged[0].item_ids) == 3
+
+    def test_unrelated_opinion_pieces_do_not_merge(self):
+        """Разные opinion статьи не склеиваются."""
+        from reddit_compass.intelligence.models import Story
+
+        stories = [
+            Story(
+                story_id="o1",
+                canonical_key="ban rifles virginia warning",
+                title="Opinion | Ban AR-style rifles? Virginia is a warning.",
+                item_ids=["wapo:1"],
+            ),
+            Story(
+                story_id="o2",
+                canonical_key="path forward clean energy",
+                title="Opinion | The path forward for clean energy transition.",
+                item_ids=["wapo:2"],
+            ),
+        ]
+        items_by_story = {
+            "o1": [_make_item("wapo:1", stories[0].title, "washingtonpost")],
+            "o2": [_make_item("wapo:2", stories[1].title, "washingtonpost")],
+        }
+        merged = merge_cross_source_candidates(stories, items_by_story)
+        assert len(merged) == 2
+
+    def test_merge_preserves_story_metadata(self):
+        """Second pass не должен терять domain/theme/project metadata."""
+        from reddit_compass.intelligence.models import Story
+
+        stories = [
+            Story(
+                story_id="s1",
+                canonical_key="japan earthquake tsunami",
+                title="Japan hit by 7.1 earthquake, tsunami warning issued",
+                domain_ids=["world_geopolitics"],
+                theme_ids=["geopolitics"],
+                trend_id="trend_japan_quake",
+                lifecycle="growing",
+                project_scores={"book": 40, "rbc": 55},
+                first_seen="2026-07-27",
+                last_seen="2026-07-27",
+                item_ids=["reuters:1"],
+            ),
+            Story(
+                story_id="s2",
+                canonical_key="tsunami alert japan quake",
+                title="Tsunami alert after magnitude 7.1 quake strikes Japan",
+                domain_ids=["world_geopolitics", "science_health_education"],
+                theme_ids=["climate_infrastructure"],
+                trend_id="trend_other",
+                lifecycle="new",
+                project_scores={"book": 60, "rbc": 45},
+                first_seen="2026-07-28",
+                last_seen="2026-07-28",
+                item_ids=["bbc:1"],
+            ),
+        ]
+        items_by_story = {
+            "s1": [_make_item("reuters:1", stories[0].title, "reuters")],
+            "s2": [_make_item("bbc:1", stories[1].title, "bbc")],
+        }
+
+        merged = merge_cross_source_candidates(stories, items_by_story)
+
+        assert len(merged) == 1
+        story = merged[0]
+        assert story.domain_ids == ["world_geopolitics", "science_health_education"]
+        assert story.theme_ids == ["geopolitics", "climate_infrastructure"]
+        assert story.trend_id == "trend_japan_quake"
+        assert story.lifecycle == "growing"
+        assert story.project_scores == {"book": 60, "rbc": 55}
+        assert story.first_seen == "2026-07-27"
+        assert story.last_seen == "2026-07-28"
+        assert story.item_ids == ["reuters:1", "bbc:1"]
 
 
 class TestTokenJaccard:

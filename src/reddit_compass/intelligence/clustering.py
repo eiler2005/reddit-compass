@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import re
 import unicodedata
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from rapidfuzz import fuzz
 
@@ -710,3 +710,169 @@ def cluster_items_with_history(
     for item in items:
         clusterer.add_item(item)
     return clusterer.get_stories(), clusterer.ambiguity_count
+
+
+# ─── Cross-source second pass ──────────────────────────────────────────────
+
+# Publisher names that should NOT be used as entity anchors for merging.
+_PUBLISHER_ENTITIES = {
+    "reuters",
+    "bbc",
+    "guardian",
+    "nytimes",
+    "washingtonpost",
+    "wired",
+    "techcrunch",
+    "arstechnica",
+    "theverge",
+    "verge",
+    "ft",
+    "usatoday",
+    "foxbusiness",
+    "americanbanker",
+    "medium",
+    "time",
+    "vanityfair",
+    "newyorker",
+    "foxnews",
+    "cnn",
+    "ap",
+    "associated",
+    "press",
+}
+
+
+def _story_providers(items: list[ContentItem]) -> set[str]:
+    return {item.provider for item in items if item.provider}
+
+
+def _primary_provider(items: list[ContentItem]) -> str:
+    return items[0].provider if items else ""
+
+
+def _merged_unique(values: list[str]) -> list[str]:
+    seen = set()
+    result = []
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
+def _merge_project_scores(stories: list[Story]) -> dict[str, int]:
+    scores: dict[str, int] = {}
+    for story in stories:
+        for project_id, score in story.project_scores.items():
+            scores[project_id] = max(scores.get(project_id, 0), score)
+    return scores
+
+
+def merge_cross_source_candidates(
+    stories: list[Story],
+    items_by_story: dict[str, list[ContentItem]],
+) -> list[Story]:
+    """Second pass: merge stories from different providers describing same event.
+
+    Conservative rules:
+    - Different providers required
+    - Neither title generic/low-signal
+    - Title similarity >= 0.82 OR (>= 0.72 AND entity overlap >= 2)
+    - Entity overlap must exclude publisher names
+    """
+    if len(stories) < 2:
+        return stories
+
+    merged_into: dict[str, str] = {}  # story_id → merged_into story_id
+    merged_story_ids: dict[str, list[str]] = {}
+
+    story_list = list(stories)
+    for i, sa in enumerate(story_list):
+        if sa.story_id in merged_into:
+            continue
+        sa_items = items_by_story.get(sa.story_id, [])
+        sa_providers = _story_providers(sa_items)
+        sa_provider = _primary_provider(sa_items)
+        sa_normalized = normalize_title(sa.title, sa_provider)
+        if is_generic_title(sa_normalized) or is_low_signal_title(sa.title):
+            continue
+        sa_entities = extract_entities(sa.title) - _PUBLISHER_ENTITIES
+        sa_tokens = extract_tokens(sa_normalized)
+
+        for j in range(i + 1, len(story_list)):
+            sb = story_list[j]
+            if sb.story_id in merged_into:
+                continue
+            sb_items = items_by_story.get(sb.story_id, [])
+            sb_providers = _story_providers(sb_items)
+
+            # Must add at least one new provider; same-provider merges stay in first pass.
+            if not sa_providers or not sb_providers or sb_providers <= sa_providers:
+                continue
+
+            sb_provider = _primary_provider(sb_items)
+            sb_normalized = normalize_title(sb.title, sb_provider)
+            if is_generic_title(sb_normalized) or is_low_signal_title(sb.title):
+                continue
+
+            # Token overlap check (inverted index style)
+            sb_tokens = extract_tokens(sb_normalized)
+            if not (sa_tokens & sb_tokens):
+                continue
+
+            similarity = title_similarity(sa.title, sb.title, sa_provider, sb_provider)
+            sb_entities = extract_entities(sb.title) - _PUBLISHER_ENTITIES
+            entity_overlap = len(sa_entities & sb_entities)
+            shared_token_count = len(sa_tokens & sb_tokens)
+
+            # Strict merge: high similarity
+            # Softer merge: lower similarity + strong entity overlap
+            # Anchor merge: strong entity/numeric overlap catches paraphrased headlines.
+            should_merge = (
+                similarity >= 0.82
+                or (similarity >= 0.72 and entity_overlap >= 2)
+                or (similarity >= 0.60 and entity_overlap >= 1 and shared_token_count >= 3)
+                or (similarity >= 0.35 and entity_overlap >= 2 and shared_token_count >= 1)
+            )
+            if not should_merge:
+                continue
+
+            # Merge sb into sa
+            merged_into[sb.story_id] = sa.story_id
+            merged_story_ids.setdefault(sa.story_id, [sa.story_id]).append(sb.story_id)
+            sa_items.extend(sb_items)
+            items_by_story[sa.story_id] = sa_items
+            sa_providers.update(sb_providers)
+
+    # Rebuild story list with merged items
+    result = []
+    for s in story_list:
+        if s.story_id in merged_into:
+            continue
+        merged_items = items_by_story.get(s.story_id, [])
+        all_item_ids = _merged_unique([item.item_id for item in merged_items])
+        component_stories = [
+            story
+            for story in story_list
+            if story.story_id in merged_story_ids.get(s.story_id, [s.story_id])
+        ]
+        first_seen_values = [story.first_seen for story in component_stories if story.first_seen]
+        last_seen_values = [story.last_seen for story in component_stories if story.last_seen]
+        domain_ids = normalize_domain_ids(
+            [domain for story in component_stories for domain in story.domain_ids]
+        )
+        theme_ids = _merged_unique(
+            [theme_id for story in component_stories for theme_id in story.theme_ids]
+        )
+        result.append(
+            replace(
+                s,
+                domain_ids=domain_ids,
+                theme_ids=theme_ids,
+                project_scores=_merge_project_scores(component_stories),
+                first_seen=min(first_seen_values) if first_seen_values else s.first_seen,
+                last_seen=max(last_seen_values) if last_seen_values else s.last_seen,
+                item_ids=all_item_ids,
+            )
+        )
+    return result

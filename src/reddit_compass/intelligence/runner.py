@@ -16,7 +16,7 @@ from pathlib import Path
 
 from ..config import DEFAULT_PROFILE, MonitorConfig
 from ..intelligence.briefing import build_deterministic_briefing
-from ..intelligence.clustering import cluster_items_with_history
+from ..intelligence.clustering import cluster_items_with_history, merge_cross_source_candidates
 from ..intelligence.compat import load_legacy_jsonl
 from ..intelligence.migrations import migrate
 from ..intelligence.models import ContentItem, SourceHealth, Story
@@ -163,6 +163,14 @@ async def run_sources(
             )
             for story in stories
         ]
+        items_by_id = {item.item_id: item for item in all_items}
+        items_by_story = {
+            story.story_id: [
+                items_by_id[item_id] for item_id in story.item_ids if item_id in items_by_id
+            ]
+            for story in stories
+        }
+        stories = merge_cross_source_candidates(stories, items_by_story)
         percentiles = compute_percentiles(all_items)
 
         item_signal_scores: dict[str, dict[str, int]] = {}
@@ -179,11 +187,12 @@ async def run_sources(
             item_signal_scores = {sig.item_id: sig.goal_relevance for sig in signals}
             analyzed_count = len(signals)
 
-        items_by_story: dict[str, list[ContentItem]] = {}
-        for story in stories:
-            items_by_story[story.story_id] = [
-                item for item in all_items if item.item_id in story.item_ids
+        items_by_story = {
+            story.story_id: [
+                items_by_id[item_id] for item_id in story.item_ids if item_id in items_by_id
             ]
+            for story in stories
+        }
 
         metrics = []
         for story in stories:
