@@ -155,6 +155,7 @@ class RadarOut(BaseModel):
     date: str
     profile: str
     mode: str
+    channel: str = "broad"
     selected_domain: str | None = None
     run: dict[str, Any]
     domains: list[dict[str, Any]]
@@ -1104,6 +1105,7 @@ def _engine_radar(
         date=date,
         profile=profile,
         mode=mode,
+        channel=channel,
         selected_domain=domain,
         run={
             "run_id": collection_run_id,

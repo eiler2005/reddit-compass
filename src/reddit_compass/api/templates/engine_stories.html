@@ -5,11 +5,11 @@
 {% block content %}
 <div class="container">
     <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news">News</a>
-        <a href="/stories" class="active">Stories</a>
-        <a href="/trends">Trends</a>
-        <a href="/projects/rbc">Project Lens</a>
-        <a href="/radar">Radar</a>
+        <a href="/news?{{ analysis_query }}">News</a>
+        <a href="/stories?{{ analysis_query }}" class="active">Stories</a>
+        <a href="/trends?{{ analysis_query }}">Trends</a>
+        <a href="/projects/rbc?{{ analysis_query }}">Project Lens</a>
+        <a href="/radar?{{ analysis_query }}">Radar</a>
     </nav>
 
     <div class="page-header">
@@ -19,6 +19,8 @@
 
     <section class="section">
         <form class="filters" method="get" action="/stories">
+            <input type="hidden" name="channel" value="{{ channel }}">
+            {% if publication_id %}<input type="hidden" name="publication_id" value="{{ publication_id }}">{% endif %}
             <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по story">
             <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
             <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="book или rbc">
@@ -39,7 +41,7 @@
                     <span>{{ story.item_count }} materials</span>
                     <span>{{ story.first_seen }} → {{ story.last_seen }}</span>
                 </div>
-                <h2 class="story-title"><a href="/stories/{{ story.story_id }}">{{ story.title }}</a></h2>
+                <h2 class="story-title"><a href="/stories/{{ story.story_id }}?{{ analysis_query }}">{{ story.title }}</a></h2>
                 {% if story.summary_ru %}
                 <p>{{ story.summary_ru }}</p>
                 {% endif %}

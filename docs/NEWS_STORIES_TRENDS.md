@@ -30,6 +30,7 @@ News must not be described as a trend. It is an inbox and an evidence store.
 Public surfaces:
 
 - UI: `/news`
+- UI shadow/preview: `/news?channel=shadow`
 - API: `GET /api/v2/news`
 
 ### Stories
@@ -51,6 +52,7 @@ Public surfaces:
 
 - UI: `/stories`
 - UI detail: `/stories/{story_id}`
+- UI shadow/preview: `/stories?channel=shadow`
 - API: `GET /api/v2/engine/stories`
 - API detail: `GET /api/v2/engine/stories/{story_id}`
 
@@ -72,6 +74,7 @@ Public surfaces:
 
 - UI: `/trends`
 - UI detail: `/trends/{trend_id}`
+- UI shadow/preview: `/trends?channel=shadow`
 - API: `GET /api/v2/engine/trends`
 - API detail: `GET /api/v2/engine/trends/{trend_id}`
 
@@ -97,6 +100,7 @@ Project Lens does not create new facts. It ranks and groups published Stories an
 Public surfaces:
 
 - UI: `/projects/{project_id}`
+- UI shadow/preview: `/projects/{project_id}?channel=shadow`
 - API: `GET /api/v2/projects/{project_id}/lens`
 
 ## GUI contract
@@ -112,6 +116,35 @@ Each published analysis page includes the same layer navigation:
 `/radar` is the cockpit. It links to the four working layers and keeps source/version context.
 `/news`, `/stories`, `/trends` and `/projects/{project_id}` are the work pages.
 `/stories/{story_id}` and `/trends/{trend_id}` are drill-down pages with evidence links.
+
+## Publication channels
+
+Radar and all analysis layers read from a `RadarPublication`.
+Default user-facing channel is `broad`.
+Experimental runs should be published to `shadow` first:
+
+```bash
+reddit-compass engine publish \
+  --story-release STORY_RELEASE_ID \
+  --trend-release TREND_RELEASE_ID \
+  --channel shadow
+```
+
+Shadow UI URLs:
+
+- `/radar?channel=shadow`
+- `/news?channel=shadow`
+- `/stories?channel=shadow`
+- `/trends?channel=shadow`
+- `/projects/rbc?channel=shadow`
+
+All layer links preserve `channel`.
+If `publication_id` is provided explicitly, filters and drill-down links also preserve it so a review
+session stays pinned to the same immutable publication.
+
+Production `broad` must not be overwritten just to inspect a new clustering attempt.
+Promote to `broad` only after Golden Set / Qwen gates are satisfied, or use an explicit release
+manager override with audit trail.
 
 ## Development rule
 

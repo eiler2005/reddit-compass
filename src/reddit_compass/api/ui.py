@@ -22,6 +22,7 @@ from ..intelligence.engine import (
     DEFAULT_ENGINE_DB_PATH,
     get_current_publication,
     get_data_release,
+    get_publication,
     list_data_releases,
     list_publications,
     open_engine_readonly,
@@ -79,6 +80,13 @@ def _safe_url(url: str) -> str:
     if url.startswith(("http://", "https://")):
         return url
     return ""
+
+
+def _analysis_query(channel: str = "broad", publication_id: str | None = None) -> str:
+    params = {"channel": channel}
+    if publication_id:
+        params["publication_id"] = publication_id
+    return urlencode(params)
 
 
 @router.get("/today", response_class=HTMLResponse)
@@ -220,6 +228,8 @@ async def news_page(
     provider: str | None = None,
     source_cluster: str | None = None,
     q: str | None = None,
+    channel: str = "broad",
+    publication_id: str | None = None,
     page: int = 1,
 ) -> HTMLResponse:
     """News inbox: raw published items from immutable DataRelease."""
@@ -237,6 +247,8 @@ async def news_page(
     try:
         news = _engine_news(
             engine_conn,
+            channel=channel,
+            publication_id=publication_id,
             date=date,
             domain=domain,
             provider=provider,
@@ -266,6 +278,9 @@ async def news_page(
                 "source_cluster": source_cluster or "",
                 "q": q or "",
             },
+            "channel": channel,
+            "publication_id": publication_id or "",
+            "analysis_query": _analysis_query(channel, publication_id),
         },
     )
 
@@ -276,6 +291,8 @@ async def stories_page(
     domain: str | None = None,
     q: str | None = None,
     project_id: str | None = None,
+    channel: str = "broad",
+    publication_id: str | None = None,
     page: int = 1,
 ) -> HTMLResponse:
     """Published story workspace: concrete events, not raw news."""
@@ -293,6 +310,8 @@ async def stories_page(
     try:
         stories = _engine_stories(
             engine_conn,
+            channel=channel,
+            publication_id=publication_id,
             domain=domain,
             q=q,
             project_id=project_id,
@@ -314,6 +333,9 @@ async def stories_page(
         context={
             "stories": stories.model_dump(),
             "filters": {"domain": domain or "", "q": q or "", "project_id": project_id or ""},
+            "channel": channel,
+            "publication_id": publication_id or "",
+            "analysis_query": _analysis_query(channel, publication_id),
         },
     )
 
@@ -325,6 +347,8 @@ async def trends_page(
     lifecycle: str | None = None,
     review_status: str | None = None,
     project_id: str | None = None,
+    channel: str = "broad",
+    publication_id: str | None = None,
     page: int = 1,
 ) -> HTMLResponse:
     """Published trend workspace: recurring patterns over stories."""
@@ -342,6 +366,8 @@ async def trends_page(
     try:
         trends = _engine_trends(
             engine_conn,
+            channel=channel,
+            publication_id=publication_id,
             domain=domain,
             lifecycle=lifecycle,
             review_status=review_status,
@@ -369,6 +395,9 @@ async def trends_page(
                 "review_status": review_status or "",
                 "project_id": project_id or "",
             },
+            "channel": channel,
+            "publication_id": publication_id or "",
+            "analysis_query": _analysis_query(channel, publication_id),
         },
     )
 
@@ -411,19 +440,32 @@ async def trend_detail_page(
     return templates.TemplateResponse(
         request=request,
         name="engine_trend_detail.html",
-        context={"trend": trend.model_dump()},
+        context={
+            "trend": trend.model_dump(),
+            "channel": channel,
+            "publication_id": publication_id or "",
+            "analysis_query": _analysis_query(channel, publication_id),
+        },
     )
 
 
 @router.get("/projects", response_class=HTMLResponse)
-async def projects_redirect() -> RedirectResponse:
-    return RedirectResponse("/projects/rbc", status_code=302)
+async def projects_redirect(
+    channel: str = "broad",
+    publication_id: str | None = None,
+) -> RedirectResponse:
+    return RedirectResponse(
+        f"/projects/rbc?{_analysis_query(channel, publication_id)}",
+        status_code=302,
+    )
 
 
 @router.get("/projects/{project_id}", response_class=HTMLResponse)
 async def project_lens_page(
     request: Request,
     project_id: str,
+    channel: str = "broad",
+    publication_id: str | None = None,
 ) -> HTMLResponse:
     """Project lens over published stories and trends."""
     engine_path = _engine_path()
@@ -438,7 +480,12 @@ async def project_lens_page(
 
     engine_conn = open_engine_readonly(engine_path)
     try:
-        lens = _engine_project_lens(engine_conn, project_id=project_id)
+        lens = _engine_project_lens(
+            engine_conn,
+            project_id=project_id,
+            channel=channel,
+            publication_id=publication_id,
+        )
     except HTTPException as exc:
         return templates.TemplateResponse(
             request=request,
@@ -451,7 +498,12 @@ async def project_lens_page(
     return templates.TemplateResponse(
         request=request,
         name="project_lens.html",
-        context={"lens": lens.model_dump()},
+        context={
+            "lens": lens.model_dump(),
+            "channel": channel,
+            "publication_id": publication_id or "",
+            "analysis_query": _analysis_query(channel, publication_id),
+        },
     )
 
 
@@ -459,6 +511,8 @@ async def project_lens_page(
 async def story_page(
     request: Request,
     story_id: str,
+    channel: str = "broad",
+    publication_id: str | None = None,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Страница story: timeline, evidence, research state."""
@@ -468,7 +522,12 @@ async def story_page(
 
         engine_conn = open_engine_readonly(engine_path)
         try:
-            engine_story = _engine_story_detail(engine_conn, story_id=story_id)
+            engine_story = _engine_story_detail(
+                engine_conn,
+                story_id=story_id,
+                channel=channel,
+                publication_id=publication_id,
+            )
         except HTTPException as exc:
             engine_story = None
             if exc.status_code != 404:
@@ -484,7 +543,12 @@ async def story_page(
             return templates.TemplateResponse(
                 request=request,
                 name="engine_story_detail.html",
-                context={"story": engine_story.model_dump()},
+                context={
+                    "story": engine_story.model_dump(),
+                    "channel": channel,
+                    "publication_id": publication_id or "",
+                    "analysis_query": _analysis_query(channel, publication_id),
+                },
             )
 
     story_data = get_story(conn, story_id)
@@ -847,6 +911,8 @@ async def dashboard_redirect() -> RedirectResponse:
 
 @router.get("/radar", response_class=HTMLResponse)
 async def radar_redirect(
+    channel: str = "broad",
+    publication_id: str | None = None,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> RedirectResponse:
     """Redirect на последний доступный Radar."""
@@ -856,12 +922,19 @@ async def radar_redirect(
     if engine_path.exists():
         engine_conn = open_engine_readonly(engine_path)
         try:
-            publication = get_current_publication(engine_conn, "broad")
+            publication = (
+                get_publication(engine_conn, publication_id)
+                if publication_id
+                else get_current_publication(engine_conn, channel)
+            )
             if publication:
                 release = get_data_release(engine_conn, publication.data_release_id)
                 if release and release.dates:
                     return RedirectResponse(
-                        url=f"/runs/{max(release.dates)}/radar",
+                        url=(
+                            f"/runs/{max(release.dates)}/radar?"
+                            f"{_analysis_query(channel, publication_id)}"
+                        ),
                         status_code=302,
                     )
         finally:
@@ -870,7 +943,10 @@ async def radar_redirect(
     date = resolve_latest_run(conn)
     if date is None:
         return RedirectResponse(url="/today", status_code=302)
-    return RedirectResponse(url=f"/runs/{date}/radar", status_code=302)
+    return RedirectResponse(
+        url=f"/runs/{date}/radar?{_analysis_query(channel, publication_id)}",
+        status_code=302,
+    )
 
 
 @router.get("/runs/{date}/radar", response_class=HTMLResponse)
@@ -920,7 +996,10 @@ async def radar_page(
             return templates.TemplateResponse(
                 request=request,
                 name="engine_radar.html",
-                context={"radar": published_radar.model_dump()},
+                context={
+                    "radar": published_radar.model_dump(),
+                    "analysis_query": _analysis_query(channel, publication_id),
+                },
             )
 
     run_id = f"{date}:{profile}"

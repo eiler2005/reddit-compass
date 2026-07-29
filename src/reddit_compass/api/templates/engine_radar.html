@@ -5,11 +5,11 @@
 {% block content %}
 <div class="container">
     <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news">News</a>
-        <a href="/stories">Stories</a>
-        <a href="/trends">Trends</a>
-        <a href="/projects/rbc">Project Lens</a>
-        <a href="/radar" class="active">Radar</a>
+        <a href="/news?{{ analysis_query }}">News</a>
+        <a href="/stories?{{ analysis_query }}">Stories</a>
+        <a href="/trends?{{ analysis_query }}">Trends</a>
+        <a href="/projects/rbc?{{ analysis_query }}">Project Lens</a>
+        <a href="/radar?{{ analysis_query }}" class="active">Radar</a>
     </nav>
 
     <div class="date-switcher">
@@ -17,8 +17,8 @@
     </div>
 
     <div class="mode-switcher" aria-label="Radar mode">
-        <a href="/runs/{{ radar.date }}/radar?mode=broad" class="mode-link {% if radar.mode == 'broad' %}active{% endif %}">Broad Radar</a>
-        <a href="/runs/{{ radar.date }}/radar?mode=ai-native" class="mode-link {% if radar.mode == 'ai-native' %}active{% endif %}">AI-native Lens</a>
+        <a href="/runs/{{ radar.date }}/radar?{{ analysis_query }}&mode=broad" class="mode-link {% if radar.mode == 'broad' %}active{% endif %}">Broad Radar</a>
+        <a href="/runs/{{ radar.date }}/radar?{{ analysis_query }}&mode=ai-native" class="mode-link {% if radar.mode == 'ai-native' %}active{% endif %}">AI-native Lens</a>
     </div>
 
     <div class="freshness-bar">
@@ -39,22 +39,22 @@
     <section class="section">
         <h2>Trendwatching cockpit</h2>
         <div class="kpi-grid">
-            <a class="kpi-card" href="/news">
+            <a class="kpi-card" href="/news?{{ analysis_query }}">
                 <div class="kpi-label">News inbox</div>
                 <strong>{{ radar.run.item_count }}</strong>
                 <p class="section-note">Сырые материалы и источники</p>
             </a>
-            <a class="kpi-card" href="/stories">
+            <a class="kpi-card" href="/stories?{{ analysis_query }}">
                 <div class="kpi-label">Stories</div>
                 <strong>{{ radar.story_release_id }}</strong>
                 <p class="section-note">Склеенные события с evidence</p>
             </a>
-            <a class="kpi-card" href="/trends">
+            <a class="kpi-card" href="/trends?{{ analysis_query }}">
                 <div class="kpi-label">Trends</div>
                 <strong>{{ radar.history_status }}</strong>
                 <p class="section-note">Паттерны поверх stories</p>
             </a>
-            <a class="kpi-card" href="/projects/rbc">
+            <a class="kpi-card" href="/projects/rbc?{{ analysis_query }}">
                 <div class="kpi-label">Project Lens</div>
                 <strong>РБК</strong>
                 <p class="section-note">Колонковые углы и evidence</p>
@@ -76,9 +76,9 @@
     <section class="section">
         <h2>Рубрики trendwatching</h2>
         <div class="domain-tabs">
-            <a class="domain-tab {% if not radar.selected_domain %}active{% endif %}" href="/runs/{{ radar.date }}/radar?mode={{ radar.mode }}">Все</a>
+            <a class="domain-tab {% if not radar.selected_domain %}active{% endif %}" href="/runs/{{ radar.date }}/radar?{{ analysis_query }}&mode={{ radar.mode }}">Все</a>
             {% for domain in radar.domains %}
-            <a class="domain-tab {% if radar.selected_domain == domain.domain_id %}active{% endif %}" href="/runs/{{ radar.date }}/radar?mode={{ radar.mode }}&domain={{ domain.domain_id }}">
+            <a class="domain-tab {% if radar.selected_domain == domain.domain_id %}active{% endif %}" href="/runs/{{ radar.date }}/radar?{{ analysis_query }}&mode={{ radar.mode }}&domain={{ domain.domain_id }}">
                 <span>{{ domain.label_ru }}</span>
                 <small>{{ domain.story_count }} сюж. · {{ domain.item_count }} мат.</small>
             </a>
@@ -99,7 +99,7 @@
                     <span class="direction-badge">{{ trend.lifecycle }}</span>
                     <span>{{ "%.0f"|format(trend.confidence * 100) }}% confidence</span>
                 </div>
-                <h3><a href="/trends/{{ trend.trend_id }}">{{ trend.title }}</a></h3>
+                <h3><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h3>
                 <p>{{ trend.pattern }}</p>
                 <p class="section-note">
                     {{ trend.story_count }} независимых stories · {{ trend.source_count }} source clusters

@@ -5,11 +5,11 @@
 {% block content %}
 <div class="container">
     <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news">News</a>
-        <a href="/stories">Stories</a>
-        <a href="/trends">Trends</a>
-        <a href="/projects/{{ lens.project_id }}" class="active">Project Lens</a>
-        <a href="/radar">Radar</a>
+        <a href="/news?{{ analysis_query }}">News</a>
+        <a href="/stories?{{ analysis_query }}">Stories</a>
+        <a href="/trends?{{ analysis_query }}">Trends</a>
+        <a href="/projects/{{ lens.project_id }}?{{ analysis_query }}" class="active">Project Lens</a>
+        <a href="/radar?{{ analysis_query }}">Radar</a>
     </nav>
 
     <div class="page-header">
@@ -33,7 +33,7 @@
                     <span>score {{ trend.project_scores.get(lens.project_id, 0) }}</span>
                     <span>{{ trend.review_status }}</span>
                 </div>
-                <h3><a href="/trends/{{ trend.trend_id }}">{{ trend.title }}</a></h3>
+                <h3><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h3>
                 <p>{{ trend.pattern }}</p>
             </article>
             {% else %}
@@ -52,7 +52,7 @@
                     <span>score {{ story.project_scores.get(lens.project_id, 0) }}</span>
                     <span>{{ story.source_count }} sources</span>
                 </div>
-                <h3><a href="/stories/{{ story.story_id }}">{{ story.title }}</a></h3>
+                <h3><a href="/stories/{{ story.story_id }}?{{ analysis_query }}">{{ story.title }}</a></h3>
                 {% if story.evidence_items %}
                 <ul class="evidence-list">
                     {% for item in story.evidence_items %}

@@ -222,10 +222,34 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     )
     conn.execute(
         """
+        INSERT INTO radar_publications (
+            publication_id, channel, data_release_id, story_release_id,
+            trend_release_id, input_status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "publication_shadow",
+            "shadow",
+            "data_test",
+            "story_test",
+            "trend_test",
+            "complete",
+            created_at,
+        ),
+    )
+    conn.execute(
+        """
         INSERT INTO published_channels (channel, current_publication_id, updated_at)
         VALUES (?, ?, ?)
         """,
         ("broad", "publication_test", created_at),
+    )
+    conn.execute(
+        """
+        INSERT INTO published_channels (channel, current_publication_id, updated_at)
+        VALUES (?, ?, ?)
+        """,
+        ("shadow", "publication_shadow", created_at),
     )
     conn.commit()
     conn.close()
@@ -344,3 +368,18 @@ def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:
     assert "Evidence items" in story_detail.text
     assert trend_detail.status_code == 200
     assert "Stories inside trend" in trend_detail.text
+
+
+def test_published_layer_ui_preserves_shadow_channel(engine_client: TestClient) -> None:
+    radar_redirect = engine_client.get("/radar?channel=shadow", follow_redirects=False)
+    news = engine_client.get("/news?channel=shadow&publication_id=publication_shadow")
+    stories = engine_client.get("/stories?channel=shadow&publication_id=publication_shadow")
+
+    assert radar_redirect.status_code == 302
+    assert radar_redirect.headers["location"] == "/runs/2026-07-29/radar?channel=shadow"
+    assert news.status_code == 200
+    assert 'name="channel" value="shadow"' in news.text
+    assert 'name="publication_id" value="publication_shadow"' in news.text
+    assert "/stories/story_1?channel=shadow&amp;publication_id=publication_shadow" in news.text
+    assert stories.status_code == 200
+    assert "/radar?channel=shadow&amp;publication_id=publication_shadow" in stories.text

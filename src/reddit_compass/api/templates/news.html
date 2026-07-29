@@ -5,11 +5,11 @@
 {% block content %}
 <div class="container">
     <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news" class="active">News</a>
-        <a href="/stories">Stories</a>
-        <a href="/trends">Trends</a>
-        <a href="/projects/rbc">Project Lens</a>
-        <a href="/radar">Radar</a>
+        <a href="/news?{{ analysis_query }}" class="active">News</a>
+        <a href="/stories?{{ analysis_query }}">Stories</a>
+        <a href="/trends?{{ analysis_query }}">Trends</a>
+        <a href="/projects/rbc?{{ analysis_query }}">Project Lens</a>
+        <a href="/radar?{{ analysis_query }}">Radar</a>
     </nav>
 
     <div class="page-header">
@@ -19,6 +19,8 @@
 
     <section class="section">
         <form class="filters" method="get" action="/news">
+            <input type="hidden" name="channel" value="{{ channel }}">
+            {% if publication_id %}<input type="hidden" name="publication_id" value="{{ publication_id }}">{% endif %}
             <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по title, excerpt, source">
             <input type="date" name="date" value="{{ filters.date }}">
             <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
@@ -63,7 +65,7 @@
                     {% endfor %}
                 </div>
                 {% if item.story_id %}
-                <p class="section-note">Story: <a href="/stories/{{ item.story_id }}">{{ item.story_title or item.story_id }}</a> · {{ item.membership_reason }}</p>
+                <p class="section-note">Story: <a href="/stories/{{ item.story_id }}?{{ analysis_query }}">{{ item.story_title or item.story_id }}</a> · {{ item.membership_reason }}</p>
                 {% endif %}
             </article>
             {% else %}

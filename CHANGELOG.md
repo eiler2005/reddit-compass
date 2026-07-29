@@ -26,6 +26,9 @@
 - **GUI drill-down**: published Story detail (`/stories/{story_id}`,
   `/api/v2/engine/stories/{story_id}`), Trend detail (`/trends/{trend_id}`,
   `/api/v2/engine/trends/{trend_id}`) and Radar cockpit links across News/Stories/Trends/Projects.
+- **Shadow publication UI**: `/radar`, News, Stories, Trends and Project Lens preserve
+  `channel`/`publication_id`, so experimental Engine publications can be reviewed without
+  promoting them to the default `broad` channel.
 - **Strict Qwen adjudication**: pair/trend Pydantic schemas, evidence validation, prompt/model/input
   cache; невалидный ответ не влияет на clustering.
 - **Cluster Lab sandbox**: отдельный `cluster_lab.db` для immutable data releases,
