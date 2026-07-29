@@ -1,6 +1,9 @@
 <article class="story-card" {% if story.primary_evidence_url %}data-href="{{ story.primary_evidence_url }}"{% endif %}>
     <header class="story-header">
         <span class="direction-badge direction-{{ story.direction }}">{{ story.direction_label }}</span>
+        {% if story.source_count and story.source_count > 1 %}
+        <span class="cluster-badge" style="background:var(--accent);color:#fff" title="Cross-source verified">✓ cross</span>
+        {% endif %}
         <span class="trend-score" title="Story priority">{{ "%.0f"|format(story.trend_score) }}</span>
     </header>
     <h3 class="story-title">

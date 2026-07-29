@@ -1,200 +1,200 @@
 {
-  "schema_version": 2,
-  "goals": {
-    "book": {"label": "Книга", "weight": 1.0},
-    "rbc": {"label": "Колонки РБК", "weight": 1.0},
-    "business": {"label": "Бизнес-сигнал", "weight": 0.7}
-  },
-  "themes": [
-    {
-      "id": "ai_agents",
-      "label": "AI-агенты",
-      "keywords": ["agent", "агент", "autonomous", "copilot", "llm"]
+    "schema_version": 2,
+    "goals": {
+        "book": {"label": "Книга", "weight": 1.0},
+        "rbc": {"label": "Колонки РБК", "weight": 1.0},
+        "business": {"label": "Бизнес-сигнал", "weight": 0.7}
     },
-    {
-      "id": "labor",
-      "label": "Труд и карьера",
-      "keywords": ["layoff", "jobs", "career", "hiring", "union", "work"]
+    "themes": [
+        {
+            "id": "ai_agents",
+            "label": "AI-агенты",
+            "keywords": ["agent", "агент", "autonomous", "copilot", "llm"]
+        },
+        {
+            "id": "labor",
+            "label": "Труд и карьера",
+            "keywords": ["layoff", "jobs", "career", "hiring", "union", "work"]
+        },
+        {
+            "id": "business_models",
+            "label": "Бизнес-модели",
+            "keywords": ["pricing", "subscription", "revenue", "margin", "market"]
+        },
+        {
+            "id": "markets_capital",
+            "label": "Рынки и капитал",
+            "keywords": ["stock", "earnings", "funding", "investment", "inflation"]
+        },
+        {
+            "id": "regulation",
+            "label": "Регулирование",
+            "keywords": ["regulation", "law", "закон", "policy", "ban", "court"]
+        },
+        {
+            "id": "geopolitics",
+            "label": "Геополитика",
+            "keywords": ["war", "election", "trade", "tariff", "sanction", "border"]
+        },
+        {
+            "id": "surveillance",
+            "label": "Слежка и приватность",
+            "keywords": ["privacy", "camera", "surveillance", "tracking", "data"]
+        },
+        {
+            "id": "culture_media",
+            "label": "Культура и медиа",
+            "keywords": ["movie", "music", "gaming", "creator", "media", "viral"]
+        },
+        {
+            "id": "sports_business",
+            "label": "Спорт",
+            "keywords": ["nba", "nfl", "soccer", "tennis", "olympic", "league"]
+        },
+        {
+            "id": "science_health",
+            "label": "Наука, здоровье, образование",
+            "keywords": ["science", "health", "school", "education", "medicine", "research"]
+        },
+        {
+            "id": "climate_energy",
+            "label": "Климат, энергия, инфраструктура",
+            "keywords": ["climate", "energy", "grid", "infrastructure", "data center"]
+        },
+        {
+            "id": "security",
+            "label": "Безопасность",
+            "keywords": ["hack", "breach", "security", "malware", "cyber"]
+        }
+    ],
+    "subreddits": {
+        "ai_technology": [
+            "artificial",
+            "singularity",
+            "ChatGPT",
+            "ClaudeAI",
+            "AI_Agents",
+            "LocalLLaMA",
+            "MachineLearning",
+            "OpenAI",
+            "StableDiffusion",
+            "AutoGPT",
+            "LangChain",
+            "ollama",
+            "technology",
+            "programming",
+            "Futurology"
+        ],
+        "labor_career": [
+            "jobs",
+            "careers",
+            "careerguidance",
+            "cscareerquestions",
+            "recruitinghell",
+            "antiwork",
+            "overemployed",
+            "WorkReform",
+            "Teachers"
+        ],
+        "business_markets": [
+            "business",
+            "Entrepreneur",
+            "smallbusiness",
+            "startups",
+            "SaaS",
+            "Economics",
+            "economy",
+            "finance",
+            "investing",
+            "stocks",
+            "wallstreetbets"
+        ],
+        "society_politics": [
+            "news",
+            "politics",
+            "AskReddit",
+            "changemyview",
+            "law",
+            "socialmedia",
+            "urbanplanning"
+        ],
+        "world_geopolitics": [
+            "worldnews",
+            "geopolitics",
+            "europe",
+            "China",
+            "MiddleEast",
+            "UkrainianConflict"
+        ],
+        "culture_media": [
+            "popculturechat",
+            "movies",
+            "television",
+            "Music",
+            "books",
+            "gaming",
+            "OutOfTheLoop"
+        ],
+        "sports": ["sports", "nba", "nfl", "soccer", "tennis", "formula1"],
+        "science_health_education": [
+            "science",
+            "Futurology",
+            "Health",
+            "medicine",
+            "education",
+            "Professors",
+            "AskAcademia",
+            "dataisbeautiful"
+        ],
+        "finance_consumer": [
+            "personalfinance",
+            "Frugal",
+            "buyitforlife",
+            "CreditCards",
+            "povertyfinance"
+        ],
+        "climate_energy_infrastructure": [
+            "climate",
+            "energy",
+            "environment",
+            "infrastructure",
+            "DataCenter"
+        ],
+        "security_privacy": ["privacy", "netsec", "cybersecurity", "hacking", "selfhosted"]
     },
-    {
-      "id": "business_models",
-      "label": "Бизнес-модели",
-      "keywords": ["pricing", "subscription", "revenue", "margin", "market"]
-    },
-    {
-      "id": "markets_capital",
-      "label": "Рынки и капитал",
-      "keywords": ["stock", "earnings", "funding", "investment", "inflation"]
-    },
-    {
-      "id": "regulation",
-      "label": "Регулирование",
-      "keywords": ["regulation", "law", "закон", "policy", "ban", "court"]
-    },
-    {
-      "id": "geopolitics",
-      "label": "Геополитика",
-      "keywords": ["war", "election", "trade", "tariff", "sanction", "border"]
-    },
-    {
-      "id": "surveillance",
-      "label": "Слежка и приватность",
-      "keywords": ["privacy", "camera", "surveillance", "tracking", "data"]
-    },
-    {
-      "id": "culture_media",
-      "label": "Культура и медиа",
-      "keywords": ["movie", "music", "gaming", "creator", "media", "viral"]
-    },
-    {
-      "id": "sports_business",
-      "label": "Спорт",
-      "keywords": ["nba", "nfl", "soccer", "tennis", "olympic", "league"]
-    },
-    {
-      "id": "science_health",
-      "label": "Наука, здоровье, образование",
-      "keywords": ["science", "health", "school", "education", "medicine", "research"]
-    },
-    {
-      "id": "climate_energy",
-      "label": "Климат, энергия, инфраструктура",
-      "keywords": ["climate", "energy", "grid", "infrastructure", "data center"]
-    },
-    {
-      "id": "security",
-      "label": "Безопасность",
-      "keywords": ["hack", "breach", "security", "malware", "cyber"]
+    "keywords": [
+        "AI agents replacing jobs",
+        "AI layoffs",
+        "AI regulation",
+        "deepfake fraud",
+        "autonomous AI agent",
+        "open source AI ban",
+        "data center energy demand",
+        "surveillance cameras privacy",
+        "dynamic pricing consumer data",
+        "layoffs white collar automation",
+        "sports media rights streaming",
+        "creator economy platform shift",
+        "housing affordability",
+        "election misinformation AI",
+        "cybersecurity breach",
+        "climate infrastructure grid",
+        "consumer debt defaults",
+        "college enrollment jobs"
+    ],
+    "tracked_threads": [
+        "https://www.reddit.com/r/AskReddit/comments/1qeb533/people_who_got_laid_off_because_of_ai_what_was_your_job/",
+        "https://www.reddit.com/r/changemyview/comments/1k8b2hj/meta_unauthorized_experiment_on_cmv_involving/",
+        "https://www.reddit.com/r/changemyview/comments/1kgdraw/meta_cmv_ai_experiment_update_apology_received/"
+    ],
+    "settings": {
+        "posts_per_subreddit": 15,
+        "top_comments_per_post": 5,
+        "comments_for_top_n": 5,
+        "time_filter": "week",
+        "search_sort": "relevance",
+        "search_time_filter": "week",
+        "virality_score_threshold": 1000,
+        "virality_crosspost_min": 2
     }
-  ],
-  "subreddits": {
-    "ai_technology": [
-      "artificial",
-      "singularity",
-      "ChatGPT",
-      "AI_Agents",
-      "LocalLLaMA",
-      "MachineLearning",
-      "OpenAI",
-      "technology",
-      "programming"
-    ],
-    "labor_career": [
-      "jobs",
-      "careers",
-      "cscareerquestions",
-      "recruitinghell",
-      "antiwork",
-      "WorkReform"
-    ],
-    "business_markets": [
-      "business",
-      "Entrepreneur",
-      "smallbusiness",
-      "startups",
-      "SaaS",
-      "Economics",
-      "investing",
-      "wallstreetbets"
-    ],
-    "society_politics": [
-      "news",
-      "politics",
-      "AskReddit",
-      "changemyview",
-      "law",
-      "urbanplanning"
-    ],
-    "world_geopolitics": [
-      "worldnews",
-      "geopolitics",
-      "europe",
-      "China",
-      "MiddleEast",
-      "UkrainianConflict"
-    ],
-    "culture_media": [
-      "popculturechat",
-      "movies",
-      "television",
-      "Music",
-      "books",
-      "gaming",
-      "OutOfTheLoop"
-    ],
-    "sports": [
-      "sports",
-      "nba",
-      "nfl",
-      "soccer",
-      "tennis",
-      "formula1"
-    ],
-    "science_health_education": [
-      "science",
-      "Futurology",
-      "Health",
-      "medicine",
-      "education",
-      "Professors",
-      "AskAcademia",
-      "dataisbeautiful"
-    ],
-    "finance_consumer": [
-      "personalfinance",
-      "Frugal",
-      "buyitforlife",
-      "CreditCards",
-      "povertyfinance"
-    ],
-    "climate_energy_infrastructure": [
-      "climate",
-      "energy",
-      "environment",
-      "infrastructure",
-      "DataCenter"
-    ],
-    "security_privacy": [
-      "privacy",
-      "netsec",
-      "cybersecurity",
-      "hacking",
-      "selfhosted"
-    ]
-  },
-  "keywords": [
-    "AI agents replacing jobs",
-    "AI layoffs",
-    "AI regulation",
-    "deepfake fraud",
-    "autonomous AI agent",
-    "open source AI ban",
-    "data center energy demand",
-    "surveillance cameras privacy",
-    "dynamic pricing consumer data",
-    "layoffs white collar automation",
-    "sports media rights streaming",
-    "creator economy platform shift",
-    "housing affordability",
-    "election misinformation AI",
-    "cybersecurity breach",
-    "climate infrastructure grid",
-    "consumer debt defaults",
-    "college enrollment jobs"
-  ],
-  "tracked_threads": [
-    "https://www.reddit.com/r/AskReddit/comments/1qeb533/people_who_got_laid_off_because_of_ai_what_was_your_job/",
-    "https://www.reddit.com/r/changemyview/comments/1k8b2hj/meta_unauthorized_experiment_on_cmv_involving/",
-    "https://www.reddit.com/r/changemyview/comments/1kgdraw/meta_cmv_ai_experiment_update_apology_received/"
-  ],
-  "settings": {
-    "posts_per_subreddit": 15,
-    "top_comments_per_post": 5,
-    "comments_for_top_n": 5,
-    "time_filter": "week",
-    "search_sort": "relevance",
-    "search_time_filter": "week",
-    "virality_score_threshold": 1000,
-    "virality_crosspost_min": 2
-  }
 }

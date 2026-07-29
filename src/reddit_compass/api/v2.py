@@ -1742,3 +1742,255 @@ def get_research_state_endpoint(
         note=state.note,
         updated_at=state.updated_at,
     )
+
+
+# ---------------------------------------------------------------------------
+# Reddit Pulse endpoints
+# ---------------------------------------------------------------------------
+
+
+class PulseSignalOut(BaseModel):
+    signal_id: str
+    item_id: str
+    subreddit: str
+    signal_type: str
+    title: str
+    discussion_url: str = ""
+    target_url: str = ""
+    pulse_score: float = 0
+    subreddit_percentile: float = 0
+    comment_velocity: float = 0
+    discussion_depth: float = 0
+    cross_subreddit_repetition: float = 0
+    novelty: float = 0
+    domain_ids: list[str] = Field(default_factory=list)
+    theme_ids: list[str] = Field(default_factory=list)
+    pain_points: list[str] = Field(default_factory=list)
+
+
+class PulseListOut(BaseModel):
+    signal_release_id: str
+    total: int
+    items: list[PulseSignalOut]
+
+
+class PulseSummaryOut(BaseModel):
+    signal_release_id: str
+    total_signals: int
+    by_type: dict[str, int]
+    top_pulse: list[PulseSignalOut]
+    top_pain: list[PulseSignalOut]
+    top_ai: list[PulseSignalOut]
+    mainstream_gap: list[PulseSignalOut]
+
+
+def _engine_pulse_signals(
+    conn: sqlite3.Connection,
+    signal_release_id: str,
+    *,
+    signal_type: str | None = None,
+    subreddit: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict[str, Any]], int]:
+    where = "signal_release_id = ?"
+    params: list[Any] = [signal_release_id]
+    if signal_type:
+        where += " AND signal_type = ?"
+        params.append(signal_type)
+    if subreddit:
+        where += " AND LOWER(subreddit) = ?"
+        params.append(subreddit.lower())
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM community_signals WHERE {where}", params
+    ).fetchone()[0]
+    rows = conn.execute(
+        f"""SELECT signal_id, item_id, subreddit, signal_type, title,
+                   discussion_url, target_url, pulse_score,
+                   subreddit_percentile, comment_velocity,
+                   discussion_depth, cross_subreddit_repetition, novelty,
+                   domain_ids_json, theme_ids_json, pain_points_json
+            FROM community_signals
+            WHERE {where}
+            ORDER BY pulse_score DESC
+            LIMIT ? OFFSET ?""",
+        (*params, limit, offset),
+    ).fetchall()
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "signal_id": r["signal_id"],
+                "item_id": r["item_id"],
+                "subreddit": r["subreddit"],
+                "signal_type": r["signal_type"],
+                "title": r["title"],
+                "discussion_url": r["discussion_url"],
+                "target_url": r["target_url"],
+                "pulse_score": r["pulse_score"],
+                "subreddit_percentile": r["subreddit_percentile"],
+                "comment_velocity": r["comment_velocity"],
+                "discussion_depth": r["discussion_depth"],
+                "cross_subreddit_repetition": r["cross_subreddit_repetition"],
+                "novelty": r["novelty"],
+                "domain_ids": json.loads(r["domain_ids_json"] or "[]"),
+                "theme_ids": json.loads(r["theme_ids_json"] or "[]"),
+                "pain_points": json.loads(r["pain_points_json"] or "[]"),
+            }
+        )
+    return items, total
+
+
+def _latest_signal_release(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT signal_release_id FROM signal_releases ORDER BY created_at DESC LIMIT 1"
+    ).fetchone()
+    return str(row["signal_release_id"]) if row else None
+
+
+@router.get("/reddit-pulse", response_model=PulseListOut)
+def list_reddit_pulse(
+    signal_release: str | None = None,
+    signal_type: str | None = None,
+    subreddit: str | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=50, ge=10, le=200),
+    engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
+) -> PulseListOut:
+    """List Reddit Pulse signals with optional filters."""
+    conn = _require_engine(engine_conn)
+    sig_id = signal_release or _latest_signal_release(conn)
+    if not sig_id:
+        return PulseListOut(signal_release_id="", total=0, items=[])
+    offset = (page - 1) * page_size
+    items, total = _engine_pulse_signals(
+        conn,
+        sig_id,
+        signal_type=signal_type,
+        subreddit=subreddit,
+        limit=page_size,
+        offset=offset,
+    )
+    return PulseListOut(
+        signal_release_id=sig_id,
+        total=total,
+        items=[PulseSignalOut(**i) for i in items],
+    )
+
+
+@router.get("/reddit-pulse/summary", response_model=PulseSummaryOut)
+def reddit_pulse_summary(
+    signal_release: str | None = None,
+    engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
+) -> PulseSummaryOut:
+    """Reddit Pulse summary: top signals by category."""
+    conn = _require_engine(engine_conn)
+    sig_id = signal_release or _latest_signal_release(conn)
+    if not sig_id:
+        return PulseSummaryOut(
+            signal_release_id="",
+            total_signals=0,
+            by_type={},
+            top_pulse=[],
+            top_pain=[],
+            top_ai=[],
+            mainstream_gap=[],
+        )
+    total = conn.execute(
+        "SELECT COUNT(*) FROM community_signals WHERE signal_release_id = ?",
+        (sig_id,),
+    ).fetchone()[0]
+    type_rows = conn.execute(
+        "SELECT signal_type, COUNT(*) as cnt "
+        "FROM community_signals WHERE signal_release_id = ? "
+        "GROUP BY signal_type ORDER BY cnt DESC",
+        (sig_id,),
+    ).fetchall()
+    by_type = {r["signal_type"]: r["cnt"] for r in type_rows}
+
+    def _top(where_extra: str, lim: int = 10) -> list[PulseSignalOut]:
+        rows = conn.execute(
+            f"SELECT signal_id, item_id, subreddit, signal_type, "
+            f"title, discussion_url, target_url, pulse_score, "
+            f"subreddit_percentile, comment_velocity, "
+            f"discussion_depth, cross_subreddit_repetition, novelty, "
+            f"domain_ids_json, theme_ids_json, pain_points_json "
+            f"FROM community_signals "
+            f"WHERE signal_release_id = ? {where_extra} "
+            f"ORDER BY pulse_score DESC LIMIT ?",
+            (sig_id, lim),
+        ).fetchall()
+        return [
+            PulseSignalOut(
+                signal_id=r["signal_id"],
+                item_id=r["item_id"],
+                subreddit=r["subreddit"],
+                signal_type=r["signal_type"],
+                title=r["title"],
+                discussion_url=r["discussion_url"],
+                target_url=r["target_url"],
+                pulse_score=r["pulse_score"],
+                subreddit_percentile=r["subreddit_percentile"],
+                comment_velocity=r["comment_velocity"],
+                discussion_depth=r["discussion_depth"],
+                cross_subreddit_repetition=r["cross_subreddit_repetition"],
+                novelty=r["novelty"],
+                domain_ids=json.loads(r["domain_ids_json"] or "[]"),
+                theme_ids=json.loads(r["theme_ids_json"] or "[]"),
+                pain_points=json.loads(r["pain_points_json"] or "[]"),
+            )
+            for r in rows
+        ]
+
+    return PulseSummaryOut(
+        signal_release_id=sig_id,
+        total_signals=total,
+        by_type=by_type,
+        top_pulse=_top(""),
+        top_pain=_top("AND signal_type IN ('pain_point','complaint')"),
+        top_ai=_top("AND signal_type IN ('ai_capability','ai_risk','ai_tools')"),
+        mainstream_gap=_top("AND pulse_score >= 60 AND mainstream_coverage_count < 2"),
+    )
+
+
+@router.get("/reddit-pulse/{signal_id}", response_model=PulseSignalOut)
+def get_reddit_pulse_signal(
+    signal_id: str,
+    signal_release: str | None = None,
+    engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
+) -> PulseSignalOut:
+    """Get a single Reddit Pulse signal by ID."""
+    conn = _require_engine(engine_conn)
+    sig_id = signal_release or _latest_signal_release(conn)
+    if not sig_id:
+        raise HTTPException(404, "No signal release found")
+    row = conn.execute(
+        "SELECT signal_id, item_id, subreddit, signal_type, title, "
+        "discussion_url, target_url, pulse_score, "
+        "subreddit_percentile, comment_velocity, "
+        "discussion_depth, cross_subreddit_repetition, novelty, "
+        "domain_ids_json, theme_ids_json, pain_points_json "
+        "FROM community_signals "
+        "WHERE signal_release_id = ? AND signal_id = ?",
+        (sig_id, signal_id),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, f"Signal {signal_id} not found")
+    return PulseSignalOut(
+        signal_id=row["signal_id"],
+        item_id=row["item_id"],
+        subreddit=row["subreddit"],
+        signal_type=row["signal_type"],
+        title=row["title"],
+        discussion_url=row["discussion_url"],
+        target_url=row["target_url"],
+        pulse_score=row["pulse_score"],
+        subreddit_percentile=row["subreddit_percentile"],
+        comment_velocity=row["comment_velocity"],
+        discussion_depth=row["discussion_depth"],
+        cross_subreddit_repetition=row["cross_subreddit_repetition"],
+        novelty=row["novelty"],
+        domain_ids=json.loads(row["domain_ids_json"] or "[]"),
+        theme_ids=json.loads(row["theme_ids_json"] or "[]"),
+        pain_points=json.loads(row["pain_points_json"] or "[]"),
+    )

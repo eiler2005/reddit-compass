@@ -993,12 +993,70 @@ async def radar_page(
         finally:
             engine_conn.close()
         if published_radar is not None:
+            # Fetch Reddit Pulse summary for the Radar page
+            pulse_summary = None
+            try:
+                from .v2 import _engine_pulse_signals, _latest_signal_release
+
+                sig_id = _latest_signal_release(engine_conn)
+                if sig_id:
+                    top_pulse, _ = _engine_pulse_signals(engine_conn, sig_id, limit=8)
+                    top_pain, _ = _engine_pulse_signals(
+                        engine_conn,
+                        sig_id,
+                        signal_type="pain_point",
+                        limit=5,
+                    )
+                    top_ai, _ = _engine_pulse_signals(
+                        engine_conn,
+                        sig_id,
+                        signal_type="ai_capability",
+                        limit=5,
+                    )
+                    # Mainstream gap: high pulse, low coverage
+                    gap_rows = engine_conn.execute(
+                        "SELECT signal_id, item_id, subreddit, "
+                        "signal_type, title, discussion_url, "
+                        "target_url, pulse_score, subreddit_percentile, "
+                        "comment_velocity, discussion_depth, "
+                        "cross_subreddit_repetition, novelty, "
+                        "domain_ids_json, theme_ids_json, "
+                        "pain_points_json "
+                        "FROM community_signals "
+                        "WHERE signal_release_id = ? "
+                        "AND pulse_score >= 60 "
+                        "AND mainstream_coverage_count < 2 "
+                        "ORDER BY pulse_score DESC LIMIT 5",
+                        (sig_id,),
+                    ).fetchall()
+                    mainstream_gap = [
+                        {
+                            "signal_id": r["signal_id"],
+                            "item_id": r["item_id"],
+                            "subreddit": r["subreddit"],
+                            "signal_type": r["signal_type"],
+                            "title": r["title"],
+                            "discussion_url": r["discussion_url"],
+                            "pulse_score": r["pulse_score"],
+                        }
+                        for r in gap_rows
+                    ]
+                    pulse_summary = {
+                        "signal_release_id": sig_id,
+                        "top_pulse": top_pulse,
+                        "top_pain": top_pain,
+                        "top_ai": top_ai,
+                        "mainstream_gap": mainstream_gap,
+                    }
+            except Exception:
+                pass  # Pulse data is optional
             return templates.TemplateResponse(
                 request=request,
                 name="engine_radar.html",
                 context={
                     "radar": published_radar.model_dump(),
                     "analysis_query": _analysis_query(channel, publication_id),
+                    "pulse": pulse_summary,
                 },
             )
 
