@@ -1766,6 +1766,12 @@ class PulseSignalOut(BaseModel):
     domain_ids: list[str] = Field(default_factory=list)
     theme_ids: list[str] = Field(default_factory=list)
     pain_points: list[str] = Field(default_factory=list)
+    # Reddit-native raw engagement
+    reddit_score: float = 0
+    reddit_comments: float = 0
+    upvote_ratio: float = 0
+    is_self: bool = False
+    link_flair_text: str = ""
 
 
 class PulseListOut(BaseModel):
@@ -1790,32 +1796,77 @@ def _engine_pulse_signals(
     *,
     signal_type: str | None = None,
     subreddit: str | None = None,
+    sort: str = "pulse",
     limit: int = 50,
     offset: int = 0,
+    data_release_id: str | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
-    where = "signal_release_id = ?"
+    where = "cs.signal_release_id = ?"
     params: list[Any] = [signal_release_id]
     if signal_type:
-        where += " AND signal_type = ?"
+        where += " AND cs.signal_type = ?"
         params.append(signal_type)
     if subreddit:
-        where += " AND LOWER(subreddit) = ?"
+        where += " AND LOWER(cs.subreddit) = ?"
         params.append(subreddit.lower())
+
+    # Resolve data_release_id for JOIN with release_items
+    if not data_release_id:
+        dr_row = conn.execute(
+            "SELECT fr.data_release_id FROM signal_releases sr "
+            "JOIN story_releases str ON str.story_release_id = sr.story_release_id "
+            "JOIN facet_releases fr ON fr.facet_release_id = str.facet_release_id "
+            "WHERE sr.signal_release_id = ? LIMIT 1",
+            (signal_release_id,),
+        ).fetchone()
+        if not dr_row:
+            # Fallback: try without story_release join
+            dr_row = conn.execute(
+                "SELECT data_release_id FROM data_releases ORDER BY created_at DESC LIMIT 1"
+            ).fetchone()
+        data_release_id = str(dr_row[0]) if dr_row else ""
+
+    join_clause = ""
+    if data_release_id:
+        join_clause = " LEFT JOIN release_items ri ON ri.item_id = cs.item_id AND ri.release_id = ?"
+        # Insert data_release_id as first param after signal_release_id
+        params = [params[0], data_release_id, *params[1:]]
+
     total = conn.execute(
-        f"SELECT COUNT(*) FROM community_signals WHERE {where}", params
+        f"SELECT COUNT(*) FROM community_signals cs WHERE {where}",
+        [signal_release_id]
+        + ([signal_type] if signal_type else [])
+        + ([subreddit.lower()] if subreddit else []),
     ).fetchone()[0]
+
+    sort_map = {
+        "pulse": "cs.pulse_score DESC",
+        "score": "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) DESC",
+        "comments": "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) DESC",
+        "velocity": "cs.comment_velocity DESC",
+        "ratio": "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) DESC",
+    }
+    order_by = sort_map.get(sort, "cs.pulse_score DESC")
+
+    select_cols = (
+        "cs.signal_id, cs.item_id, cs.subreddit, cs.signal_type, cs.title, "
+        "cs.discussion_url, cs.target_url, cs.pulse_score, "
+        "cs.subreddit_percentile, cs.comment_velocity, "
+        "cs.discussion_depth, cs.cross_subreddit_repetition, cs.novelty, "
+        "cs.domain_ids_json, cs.theme_ids_json, cs.pain_points_json, "
+        "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) as reddit_score, "
+        "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) as reddit_comments, "
+        "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) as upvote_ratio, "
+        "COALESCE(json_extract(ri.metadata, '$.is_self'), 0) as is_self, "
+        "COALESCE(json_extract(ri.metadata, '$.link_flair_text'), '') as link_flair_text"
+    )
+
     rows = conn.execute(
-        f"""SELECT signal_id, item_id, subreddit, signal_type, title,
-                   discussion_url, target_url, pulse_score,
-                   subreddit_percentile, comment_velocity,
-                   discussion_depth, cross_subreddit_repetition, novelty,
-                   domain_ids_json, theme_ids_json, pain_points_json
-            FROM community_signals
-            WHERE {where}
-            ORDER BY pulse_score DESC
-            LIMIT ? OFFSET ?""",
+        f"SELECT {select_cols} FROM community_signals cs{join_clause} "
+        f"WHERE {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
         (*params, limit, offset),
     ).fetchall()
+
     items = []
     for r in rows:
         items.append(
@@ -1836,6 +1887,11 @@ def _engine_pulse_signals(
                 "domain_ids": json.loads(r["domain_ids_json"] or "[]"),
                 "theme_ids": json.loads(r["theme_ids_json"] or "[]"),
                 "pain_points": json.loads(r["pain_points_json"] or "[]"),
+                "reddit_score": r["reddit_score"],
+                "reddit_comments": r["reddit_comments"],
+                "upvote_ratio": r["upvote_ratio"],
+                "is_self": bool(r["is_self"]),
+                "link_flair_text": r["link_flair_text"],
             }
         )
     return items, total
@@ -1853,11 +1909,12 @@ def list_reddit_pulse(
     signal_release: str | None = None,
     signal_type: str | None = None,
     subreddit: str | None = None,
+    sort: str = Query(default="pulse", pattern="^(pulse|score|comments|velocity|ratio)$"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=10, le=200),
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
 ) -> PulseListOut:
-    """List Reddit Pulse signals with optional filters."""
+    """List Reddit Pulse signals with optional filters and sort."""
     conn = _require_engine(engine_conn)
     sig_id = signal_release or _latest_signal_release(conn)
     if not sig_id:
@@ -1868,6 +1925,7 @@ def list_reddit_pulse(
         sig_id,
         signal_type=signal_type,
         subreddit=subreddit,
+        sort=sort,
         limit=page_size,
         offset=offset,
     )

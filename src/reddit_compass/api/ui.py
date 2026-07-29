@@ -402,6 +402,150 @@ async def trends_page(
     )
 
 
+@router.get("/pulse", response_class=HTMLResponse)
+async def pulse_page(
+    request: Request,
+    sort: str = "pulse",
+    signal_type: str | None = None,
+    subreddit: str | None = None,
+    page: int = 1,
+) -> HTMLResponse:
+    """Reddit Pulse: Reddit-native community signals with raw engagement."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine DB не найдена."},
+            status_code=404,
+        )
+    from .v2 import (
+        _engine_pulse_signals,
+        _latest_signal_release,
+    )
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        sig_id = _latest_signal_release(engine_conn)
+        if not sig_id:
+            return templates.TemplateResponse(
+                request=request,
+                name="empty.html",
+                context={"message": "Нет Reddit Pulse данных."},
+                status_code=404,
+            )
+        page_size = 30
+        offset = (max(page, 1) - 1) * page_size
+        signals, total = _engine_pulse_signals(
+            engine_conn,
+            sig_id,
+            signal_type=signal_type,
+            subreddit=subreddit,
+            sort=sort,
+            limit=page_size,
+            offset=offset,
+        )
+        # Summary for KPI + categorized shelves (only on page 1, no filters)
+        pulse_summary = None
+        if page == 1 and not signal_type and not subreddit:
+            top_pulse, _ = _engine_pulse_signals(engine_conn, sig_id, limit=8)
+            top_pain, _ = _engine_pulse_signals(
+                engine_conn, sig_id, signal_type="pain_point", limit=5
+            )
+            top_ai, _ = _engine_pulse_signals(
+                engine_conn, sig_id, signal_type="ai_capability", limit=5
+            )
+            gap_rows = engine_conn.execute(
+                "SELECT cs.signal_id, cs.item_id, cs.subreddit, "
+                "cs.signal_type, cs.title, cs.discussion_url, "
+                "cs.pulse_score, "
+                "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) "
+                "as reddit_score, "
+                "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) "
+                "as reddit_comments, "
+                "COALESCE(json_extract(ri.raw_engagement, "
+                "'$.upvote_ratio'), 0) as upvote_ratio "
+                "FROM community_signals cs "
+                "LEFT JOIN release_items ri "
+                "ON ri.item_id = cs.item_id "
+                "AND ri.release_id = (SELECT data_release_id "
+                "FROM data_releases ORDER BY created_at DESC LIMIT 1) "
+                "WHERE cs.signal_release_id = ? "
+                "AND cs.pulse_score >= 60 "
+                "AND cs.mainstream_coverage_count < 2 "
+                "ORDER BY cs.pulse_score DESC LIMIT 5",
+                (sig_id,),
+            ).fetchall()
+            mainstream_gap = [
+                {
+                    "signal_id": r["signal_id"],
+                    "item_id": r["item_id"],
+                    "subreddit": r["subreddit"],
+                    "signal_type": r["signal_type"],
+                    "title": r["title"],
+                    "discussion_url": r["discussion_url"],
+                    "pulse_score": r["pulse_score"],
+                    "reddit_score": r["reddit_score"],
+                    "reddit_comments": r["reddit_comments"],
+                    "upvote_ratio": r["upvote_ratio"],
+                }
+                for r in gap_rows
+            ]
+            # By-type counts
+            type_rows = engine_conn.execute(
+                "SELECT signal_type, COUNT(*) as cnt "
+                "FROM community_signals WHERE signal_release_id = ? "
+                "GROUP BY signal_type ORDER BY cnt DESC",
+                (sig_id,),
+            ).fetchall()
+            by_type = {r["signal_type"]: r["cnt"] for r in type_rows}
+            pulse_summary = {
+                "signal_release_id": sig_id,
+                "total_signals": total,
+                "by_type": by_type,
+                "top_pulse": top_pulse,
+                "top_pain": top_pain,
+                "top_ai": top_ai,
+                "mainstream_gap": mainstream_gap,
+            }
+        # Available signal types for dropdown
+        type_rows = engine_conn.execute(
+            "SELECT DISTINCT signal_type FROM community_signals "
+            "WHERE signal_release_id = ? ORDER BY signal_type",
+            (sig_id,),
+        ).fetchall()
+        signal_types = [r["signal_type"] for r in type_rows]
+    finally:
+        engine_conn.close()
+
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    return templates.TemplateResponse(
+        request=request,
+        name="engine_pulse.html",
+        context={
+            "signals": signals,
+            "total": total,
+            "page": max(page, 1),
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "pulse_summary": pulse_summary,
+            "filters": {
+                "sort": sort,
+                "signal_type": signal_type or "",
+                "subreddit": subreddit or "",
+            },
+            "signal_types": signal_types,
+            "sort_options": [
+                ("pulse", "Pulse score"),
+                ("score", "Reddit score"),
+                ("comments", "Comments"),
+                ("velocity", "Velocity"),
+                ("ratio", "Upvote ratio"),
+            ],
+        },
+    )
+
+
 @router.get("/trends/{trend_id}", response_class=HTMLResponse)
 async def trend_detail_page(
     request: Request,

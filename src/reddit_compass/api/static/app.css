@@ -1283,3 +1283,187 @@ a.kpi-card {
     .nav { flex-wrap: wrap; }
     .nav-brand { margin-right: auto; }
 }
+
+/* ─── Reddit Pulse ──────────────────────────────────────────────────────── */
+
+.pulse-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
+    transition: all var(--duration) var(--ease-out);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.pulse-card::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: var(--gradient-brand);
+    opacity: 0.6;
+    transition: opacity var(--duration) var(--ease-out);
+}
+
+.pulse-card:hover {
+    transform: translateY(-3px);
+    border-color: var(--border-accent);
+    box-shadow: var(--shadow-glow);
+}
+
+.pulse-card:hover::before { opacity: 1; }
+
+.pulse-card-gap { border-color: var(--warning); }
+.pulse-card-gap::before { background: linear-gradient(90deg, var(--warning), var(--accent-3)); }
+
+.pulse-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.signal-type-badge {
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0.2rem 0.5rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    color: var(--text-secondary);
+}
+
+.signal-type-pain_point,
+.signal-type-complaint { color: var(--error); background: var(--error-dim); }
+.signal-type-ai_capability { color: var(--accent-2-bright); background: var(--accent-2-dim); }
+.signal-type-ai_risk { color: var(--warning); background: var(--warning-dim); }
+.signal-type-ai_tools { color: var(--accent-bright); background: var(--accent-dim); }
+.signal-type-question { color: var(--accent-3); background: var(--accent-3-dim); }
+.signal-type-career_labor { color: var(--success); background: var(--success-dim); }
+.signal-type-market_investing { color: var(--warning); background: var(--warning-dim); }
+.signal-type-gap { color: var(--warning); background: var(--warning-dim); }
+
+.pulse-subreddit {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.pulse-self,
+.pulse-flair {
+    font-size: 0.65rem;
+    padding: 0.15rem 0.4rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-3);
+    color: var(--text-muted);
+}
+
+.pulse-title {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 0;
+}
+
+.pulse-title a {
+    color: var(--text);
+    text-decoration: none;
+    transition: color var(--duration) var(--ease-out);
+}
+
+.pulse-title a:hover { color: var(--accent-bright); }
+
+.pulse-metrics-row {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+    flex-wrap: wrap;
+}
+
+.reddit-raw {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    flex-shrink: 0;
+}
+
+.reddit-score {
+    font-weight: 700;
+    color: var(--text);
+}
+
+.reddit-comments { color: var(--text-secondary); }
+
+.reddit-ratio { font-weight: 600; }
+.ratio-high { color: var(--success); }
+.ratio-mid { color: var(--warning); }
+.ratio-low { color: var(--error); }
+
+.pulse-score-compact {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex: 1;
+    min-width: 120px;
+}
+
+.pulse-score-bar {
+    flex: 1;
+    height: 6px;
+    background: var(--surface-3);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.pulse-score-bar .fill {
+    height: 100%;
+    background: var(--gradient-brand);
+    border-radius: 3px;
+    transition: width 0.6s var(--ease-out);
+}
+
+.pulse-score-num {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--accent-bright);
+    min-width: 2.5rem;
+    text-align: right;
+}
+
+.pulse-metrics-detail {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    flex: 1;
+    min-width: 140px;
+}
+
+.pulse-sub-metrics {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 1rem;
+    margin-top: 1.5rem;
+    padding: 1rem 0;
+}
