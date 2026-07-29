@@ -383,6 +383,7 @@ _LOW_SIGNAL_PATTERNS = [
     r"^live\s+updates?$",
     r"^latest\s+news$",
     r"^top\s+stories$",
+    r"^top\b.*\bnews\b.*\btrends\b",
     r"^breaking\s+news?$",
 ]
 _LOW_SIGNAL_RE = re.compile("|".join(_LOW_SIGNAL_PATTERNS), re.IGNORECASE)

@@ -7,6 +7,34 @@
 
 ### Added
 
+- **Versioned Story/Trend Engine**: новая `trend_engine.db` с frozen Data Releases,
+  независимыми Facet/Story/Trend attempts, checksum verification и SQLite immutability triggers.
+- **Hybrid Story Engine**: bounded top-K retrieval по URL/title/entities/optional E5,
+  event conflicts, stable-landing URL guard, RFC/ISO date normalization, constrained
+  agglomeration, stable story IDs и merge/split provenance.
+- **Trend Engine**: pattern graph только поверх разных stories, минимум три события/два дня,
+  specific-pattern guard (pain/theme alone cannot form a trend), source scope, mandatory Qwen
+  confirmation gate, history status и lifecycle без искусственной динамики.
+- **Golden Set и release gates**: stratified export/import, precision/recall/overmerge,
+  cross-source recall, evidence coverage и Qwen-budget перед production publish.
+- **Engine control plane**: `engine release/facets/embeddings/stories/trends/golden/publish/rollback`,
+  `/engine`, `/api/v2/engine/*`, publication-backed Radar и короткий Today.
+- **Published analysis layers**: separate News inbox (`/news`, `/api/v2/news`), Stories workspace
+  (`/stories`, `/api/v2/engine/stories`), Trends workspace (`/trends`, `/api/v2/engine/trends`)
+  and Project Lens (`/projects/{project_id}`, `/api/v2/projects/{project_id}/lens`) over the same
+  immutable RadarPublication.
+- **GUI drill-down**: published Story detail (`/stories/{story_id}`,
+  `/api/v2/engine/stories/{story_id}`), Trend detail (`/trends/{trend_id}`,
+  `/api/v2/engine/trends/{trend_id}`) and Radar cockpit links across News/Stories/Trends/Projects.
+- **Strict Qwen adjudication**: pair/trend Pydantic schemas, evidence validation, prompt/model/input
+  cache; невалидный ответ не влияет на clustering.
+- **Cluster Lab sandbox**: отдельный `cluster_lab.db` для immutable data releases,
+  experiments, story proposals и trend proposals без mutation production `stories`.
+  CLI: `lab release create/list`, `lab experiment create`, `lab propose`, `lab compare/eval`.
+- **Cluster Lab trend fallback**: trend proposals строятся не только из `item_signals`,
+  но и из entity/title-topic buckets, чтобы sandbox работал на неполных/legacy DB.
+- **Story/trend clustering research notes**: documented story identification vs topic modeling,
+  entity-aware sparse+dense representation stack, eval metrics и roadmap.
 - **Честные метрики clustering** (RADAR_CLUSTERING_IMPROVEMENT_TASK):
   `candidate_story_count`, `single_item_story_count`, `multi_item_story_count`,
   `cross_source_story_count`, `radar_ready_story_count`, `analyzed_coverage_ratio`,
@@ -78,6 +106,12 @@
 
 ### Changed
 
+- `collect` теперь является collection-only runtime и не импортирует clustering, ranking,
+  briefing или LLM; `run` временно остаётся compatibility alias.
+- Radar и Today читают только текущий immutable publication pointer. Если новая версия не
+  опубликована, UI сохраняет предыдущую проверенную публикацию и показывает предупреждение.
+- `cluster_lab.db` и `lab` CLI deprecated на один переходный релиз; безопасный импорт разрешён
+  только при точном совпадении checksum исходного корпуса.
 - `reddit-compass run --analyze` теперь создаёт `item_signals` для каждого item
   через deterministic facets layer; Radar больше не показывает фальшивый блок анализа,
   если разметок `0`.

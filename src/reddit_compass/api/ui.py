@@ -9,14 +9,23 @@ import os
 import secrets
 import sqlite3
 from collections.abc import Generator
+from dataclasses import asdict
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, Request, Response
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from ..config import DEFAULT_PROFILE
+from ..intelligence.engine import (
+    DEFAULT_ENGINE_DB_PATH,
+    get_current_publication,
+    get_data_release,
+    list_data_releases,
+    list_publications,
+    open_engine_readonly,
+)
 from ..intelligence.repository import (
     get_briefing,
     get_research_state,
@@ -51,6 +60,10 @@ def _get_db() -> Generator[sqlite3.Connection, None, None]:
         conn.close()
 
 
+def _engine_path() -> Path:
+    return Path(os.environ.get("RC_ENGINE_DB_PATH", str(DEFAULT_ENGINE_DB_PATH)))
+
+
 def _generate_csrf_token() -> str:
     return secrets.token_hex(32)
 
@@ -76,6 +89,56 @@ async def today_page(
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
+    engine_path = _engine_path()
+    if engine_path.exists():
+        from .v2 import _engine_radar
+
+        engine_conn = open_engine_readonly(engine_path)
+        try:
+            publication = get_current_publication(engine_conn, "broad")
+            release = (
+                get_data_release(engine_conn, publication.data_release_id) if publication else None
+            )
+            engine_date = date or (max(release.dates) if release and release.dates else None)
+            published_radar = (
+                _engine_radar(
+                    engine_conn,
+                    date=engine_date,
+                    profile=profile,
+                    mode="broad",
+                    domain=None,
+                    channel="broad",
+                    publication_id=None,
+                )
+                if engine_date
+                else None
+            )
+        finally:
+            engine_conn.close()
+
+        if published_radar is not None:
+            lifecycle_order = (
+                "growing",
+                "new",
+                "resurfacing",
+                "stable",
+                "insufficient_history",
+                "fading",
+            )
+            changes = [
+                trend
+                for lifecycle in lifecycle_order
+                for trend in published_radar.shelves.get(lifecycle, [])
+            ][:10]
+            return templates.TemplateResponse(
+                request=request,
+                name="engine_today.html",
+                context={
+                    "radar": published_radar.model_dump(),
+                    "changes": changes,
+                },
+            )
+
     from .query_service import (
         build_freshness_line,
         build_run_summary,
@@ -149,6 +212,249 @@ async def today_page(
     )
 
 
+@router.get("/news", response_class=HTMLResponse)
+async def news_page(
+    request: Request,
+    date: str | None = None,
+    domain: str | None = None,
+    provider: str | None = None,
+    source_cluster: str | None = None,
+    q: str | None = None,
+    page: int = 1,
+) -> HTMLResponse:
+    """News inbox: raw published items from immutable DataRelease."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine publication не найдена."},
+            status_code=404,
+        )
+    from .v2 import _engine_news
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        news = _engine_news(
+            engine_conn,
+            date=date,
+            domain=domain,
+            provider=provider,
+            source_cluster=source_cluster,
+            q=q,
+            page=max(page, 1),
+            page_size=50,
+        )
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": str(exc.detail)},
+            status_code=exc.status_code,
+        )
+    finally:
+        engine_conn.close()
+    return templates.TemplateResponse(
+        request=request,
+        name="news.html",
+        context={
+            "news": news.model_dump(),
+            "filters": {
+                "date": date or "",
+                "domain": domain or "",
+                "provider": provider or "",
+                "source_cluster": source_cluster or "",
+                "q": q or "",
+            },
+        },
+    )
+
+
+@router.get("/stories", response_class=HTMLResponse)
+async def stories_page(
+    request: Request,
+    domain: str | None = None,
+    q: str | None = None,
+    project_id: str | None = None,
+    page: int = 1,
+) -> HTMLResponse:
+    """Published story workspace: concrete events, not raw news."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine publication не найдена."},
+            status_code=404,
+        )
+    from .v2 import _engine_stories
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        stories = _engine_stories(
+            engine_conn,
+            domain=domain,
+            q=q,
+            project_id=project_id,
+            page=max(page, 1),
+            page_size=50,
+        )
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": str(exc.detail)},
+            status_code=exc.status_code,
+        )
+    finally:
+        engine_conn.close()
+    return templates.TemplateResponse(
+        request=request,
+        name="engine_stories.html",
+        context={
+            "stories": stories.model_dump(),
+            "filters": {"domain": domain or "", "q": q or "", "project_id": project_id or ""},
+        },
+    )
+
+
+@router.get("/trends", response_class=HTMLResponse)
+async def trends_page(
+    request: Request,
+    domain: str | None = None,
+    lifecycle: str | None = None,
+    review_status: str | None = None,
+    project_id: str | None = None,
+    page: int = 1,
+) -> HTMLResponse:
+    """Published trend workspace: recurring patterns over stories."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine publication не найдена."},
+            status_code=404,
+        )
+    from .v2 import _engine_trends
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        trends = _engine_trends(
+            engine_conn,
+            domain=domain,
+            lifecycle=lifecycle,
+            review_status=review_status,
+            project_id=project_id,
+            page=max(page, 1),
+            page_size=50,
+        )
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": str(exc.detail)},
+            status_code=exc.status_code,
+        )
+    finally:
+        engine_conn.close()
+    return templates.TemplateResponse(
+        request=request,
+        name="engine_trends.html",
+        context={
+            "trends": trends.model_dump(),
+            "filters": {
+                "domain": domain or "",
+                "lifecycle": lifecycle or "",
+                "review_status": review_status or "",
+                "project_id": project_id or "",
+            },
+        },
+    )
+
+
+@router.get("/trends/{trend_id}", response_class=HTMLResponse)
+async def trend_detail_page(
+    request: Request,
+    trend_id: str,
+    channel: str = "broad",
+    publication_id: str | None = None,
+) -> HTMLResponse:
+    """Published trend detail: pattern, member stories and evidence."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine publication не найдена."},
+            status_code=404,
+        )
+    from .v2 import _engine_trend_detail
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        trend = _engine_trend_detail(
+            engine_conn,
+            trend_id=trend_id,
+            channel=channel,
+            publication_id=publication_id,
+        )
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": str(exc.detail)},
+            status_code=exc.status_code,
+        )
+    finally:
+        engine_conn.close()
+    return templates.TemplateResponse(
+        request=request,
+        name="engine_trend_detail.html",
+        context={"trend": trend.model_dump()},
+    )
+
+
+@router.get("/projects", response_class=HTMLResponse)
+async def projects_redirect() -> RedirectResponse:
+    return RedirectResponse("/projects/rbc", status_code=302)
+
+
+@router.get("/projects/{project_id}", response_class=HTMLResponse)
+async def project_lens_page(
+    request: Request,
+    project_id: str,
+) -> HTMLResponse:
+    """Project lens over published stories and trends."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine publication не найдена."},
+            status_code=404,
+        )
+    from .v2 import _engine_project_lens
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        lens = _engine_project_lens(engine_conn, project_id=project_id)
+    except HTTPException as exc:
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": str(exc.detail)},
+            status_code=exc.status_code,
+        )
+    finally:
+        engine_conn.close()
+    return templates.TemplateResponse(
+        request=request,
+        name="project_lens.html",
+        context={"lens": lens.model_dump()},
+    )
+
+
 @router.get("/stories/{story_id}", response_class=HTMLResponse)
 async def story_page(
     request: Request,
@@ -156,6 +462,31 @@ async def story_page(
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Страница story: timeline, evidence, research state."""
+    engine_path = _engine_path()
+    if engine_path.exists():
+        from .v2 import _engine_story_detail
+
+        engine_conn = open_engine_readonly(engine_path)
+        try:
+            engine_story = _engine_story_detail(engine_conn, story_id=story_id)
+        except HTTPException as exc:
+            engine_story = None
+            if exc.status_code != 404:
+                return templates.TemplateResponse(
+                    request=request,
+                    name="empty.html",
+                    context={"message": str(exc.detail)},
+                    status_code=exc.status_code,
+                )
+        finally:
+            engine_conn.close()
+        if engine_story is not None:
+            return templates.TemplateResponse(
+                request=request,
+                name="engine_story_detail.html",
+                context={"story": engine_story.model_dump()},
+            )
+
     story_data = get_story(conn, story_id)
     if story_data is None:
         return templates.TemplateResponse(
@@ -167,7 +498,7 @@ async def story_page(
 
     from ..intelligence.models import Story
 
-    story = Story(
+    legacy_story = Story(
         story_id=story_data["story_id"],
         canonical_key=story_data["canonical_key"],
         title=story_data["title"],
@@ -179,7 +510,7 @@ async def story_page(
     )
 
     evidence = []
-    for item_id in story.item_ids:
+    for item_id in legacy_story.item_ids:
         row = conn.execute("SELECT * FROM items WHERE item_id = ?", (item_id,)).fetchone()
         if row:
             evidence.append(
@@ -197,7 +528,7 @@ async def story_page(
     research_state = get_research_state(conn, story_id)
 
     view = story_to_detail_view(
-        story=story,
+        story=legacy_story,
         metrics=story_data.get("metrics", []),
         evidence=evidence,
         research_state=research_state,
@@ -457,6 +788,57 @@ async def update_research_state_endpoint(
     return RedirectResponse(url=return_to, status_code=303)
 
 
+@router.get("/engine", response_class=HTMLResponse)
+async def engine_page(request: Request) -> HTMLResponse:
+    """Read-only control plane for immutable engine releases."""
+    path = _engine_path()
+    if not path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="engine.html",
+            context={
+                "available": False,
+                "data_releases": [],
+                "story_releases": [],
+                "trend_releases": [],
+                "publications": [],
+                "current_publication": None,
+            },
+        )
+
+    conn = open_engine_readonly(path)
+    try:
+        story_releases = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM story_releases ORDER BY created_at DESC"
+            ).fetchall()
+        ]
+        trend_releases = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM trend_releases ORDER BY created_at DESC"
+            ).fetchall()
+        ]
+        current = get_current_publication(conn, "broad")
+        context = {
+            "available": True,
+            "data_releases": [asdict(release) for release in list_data_releases(conn)],
+            "story_releases": story_releases,
+            "trend_releases": trend_releases,
+            "publications": [asdict(publication) for publication in list_publications(conn)],
+            "current_publication": asdict(current) if current else None,
+        }
+    finally:
+        conn.close()
+
+    return templates.TemplateResponse(
+        request=request,
+        name="engine.html",
+        context=context,
+    )
+
+
 @router.get("/dashboard", include_in_schema=False)
 async def dashboard_redirect() -> RedirectResponse:
     """Legacy redirect: /dashboard → /today."""
@@ -469,6 +851,21 @@ async def radar_redirect(
 ) -> RedirectResponse:
     """Redirect на последний доступный Radar."""
     from .query_service import resolve_latest_run
+
+    engine_path = _engine_path()
+    if engine_path.exists():
+        engine_conn = open_engine_readonly(engine_path)
+        try:
+            publication = get_current_publication(engine_conn, "broad")
+            if publication:
+                release = get_data_release(engine_conn, publication.data_release_id)
+                if release and release.dates:
+                    return RedirectResponse(
+                        url=f"/runs/{max(release.dates)}/radar",
+                        status_code=302,
+                    )
+        finally:
+            engine_conn.close()
 
     date = resolve_latest_run(conn)
     if date is None:
@@ -483,6 +880,8 @@ async def radar_page(
     profile: str = DEFAULT_PROFILE,
     mode: str = "broad",
     domain: str | None = None,
+    channel: str = "broad",
+    publication_id: str | None = None,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Полный аналитический Radar."""
@@ -499,6 +898,30 @@ async def radar_page(
         build_trend_strength,
     )
     from .view_models import RadarPageView, domain_label
+
+    engine_path = _engine_path()
+    if engine_path.exists():
+        from .v2 import _engine_radar
+
+        engine_conn = open_engine_readonly(engine_path)
+        try:
+            published_radar = _engine_radar(
+                engine_conn,
+                date=date,
+                profile=profile,
+                mode=mode,
+                domain=domain,
+                channel=channel,
+                publication_id=publication_id,
+            )
+        finally:
+            engine_conn.close()
+        if published_radar is not None:
+            return templates.TemplateResponse(
+                request=request,
+                name="engine_radar.html",
+                context={"radar": published_radar.model_dump()},
+            )
 
     run_id = f"{date}:{profile}"
     run_summary = build_run_summary(conn, date, profile)

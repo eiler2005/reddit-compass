@@ -11,7 +11,7 @@ import random
 from dataclasses import dataclass
 
 from .models import ContentItem, ItemSignal
-from .taxonomy import compute_project_scores, normalize_domain_ids
+from .taxonomy import classify_domains, compute_project_scores, normalize_domain_ids
 
 logger = logging.getLogger("reddit_compass")
 
@@ -206,6 +206,13 @@ def build_deterministic_item_signals(
         ][:5]
         pain_points = _extract_rule_based_pain_points(text)
         domain_ids = normalize_domain_ids(item.domain_ids)
+        if domain_ids == ["other"]:
+            domain_ids = classify_domains(
+                item.title,
+                item.excerpt,
+                provider=item.provider,
+                source_section=item.source_section,
+            )
         project_scores = compute_project_scores(domain_ids, item.title, item.excerpt)
 
         signals.append(

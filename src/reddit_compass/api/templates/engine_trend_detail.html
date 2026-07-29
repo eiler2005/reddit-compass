@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}Trend {{ trend.trend_id }} · reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav class="layer-nav" aria-label="Analysis layers">
+        <a href="/news">News</a>
+        <a href="/stories">Stories</a>
+        <a href="/trends" class="active">Trends</a>
+        <a href="/projects/rbc">Project Lens</a>
+        <a href="/radar">Radar</a>
+    </nav>
+
+    <div class="page-header">
+        <p class="eyebrow">Trend · {{ trend.lifecycle }} · {{ trend.review_status }}</p>
+        <h1>{{ trend.title }}</h1>
+        <p class="section-note">
+            {{ trend.story_count }} stories · {{ trend.source_count }} source clusters ·
+            {{ "%.0f"|format(trend.confidence * 100) }}% confidence
+        </p>
+    </div>
+
+    <section class="section">
+        <div class="detail-grid">
+            <div>
+                <h2>Pattern</h2>
+                <p>{{ trend.pattern }}</p>
+            </div>
+            <div>
+                <h2>Project scores</h2>
+                <div class="chip-cloud">
+                    {% for project_id, score in trend.project_scores.items() %}
+                    <a class="chip" href="/projects/{{ project_id }}">{{ project_id }} {{ score }}</a>
+                    {% else %}
+                    <span class="chip">no project score</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {% if trend.counterpoints %}
+    <section class="section">
+        <h2>Counterpoints</h2>
+        <ul class="evidence-list">
+            {% for counterpoint in trend.counterpoints %}
+            <li>{{ counterpoint }}</li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
+    <section class="section">
+        <h2>Stories inside trend</h2>
+        <div class="shelf-grid">
+            {% for story in trend.stories %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ story.confidence }}</span>
+                    <span>{{ story.source_count }} source clusters</span>
+                    <span>{{ story.item_count }} materials</span>
+                    <span>{{ story.first_seen }} → {{ story.last_seen }}</span>
+                </div>
+                <h3><a href="/stories/{{ story.story_id }}">{{ story.title }}</a></h3>
+                {% if story.evidence_items %}
+                <ul class="evidence-list">
+                    {% for item in story.evidence_items %}
+                    <li>
+                        <span>{{ item.provider }}</span>
+                        {% if item.canonical_url %}
+                        <a href="{{ item.canonical_url }}" rel="noopener noreferrer">{{ item.title }}</a>
+                        {% else %}
+                        {{ item.title }}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </article>
+            {% else %}
+            <p class="section-note">Stories не найдены.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

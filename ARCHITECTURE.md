@@ -16,24 +16,26 @@ broad taxonomy и показывает, **куда смотреть**.
          │                   │                    │                     │
          ▼                   ▼                    ▼                     ▼
     ┌─────────────────────────────────────────────────────────────────────────┐
-    │                     reddit-compass (единый конвейер)                     │
+    │                   два независимых runtime внутри репозитория             │
     │                                                                         │
-    │   collect → store → analyze → report → notify → serve                   │
+    │   Collector → compass.db ──snapshot──► Engine → publication → UI         │
     └─────────────────────────────────────────────────────────────────────────┘
          │                   │                    │                     │
          ▼                   ▼                    ▼                     ▼
-    JSONL snapshots     compass.db          item_signals         REST API
-    (обмен)             (SQLite v3)         (facets/evidence)    (FastAPI :8900)
+    JSONL snapshots     compass.db          trend_engine.db      REST API
+    (обмен)             (raw facts)         (versions/pointers)  (FastAPI :8900)
 ```
 
 **Главный инвариант:** сервис собирает данные и генерирует артефакты. Потребители
 (книга, колонки, дайджест, практикум) читают артефакты, но не зависят от рантайма.
+Collector не импортирует анализ, а Engine не запускает source adapters и не изменяет
+`compass.db`. Radar и Today читают только опубликованную immutable-комбинацию.
 
 ---
 
 ## 2. Источники, кластеры и broad taxonomy
 
-Данные идут через пять source clusters:
+Данные идут через шесть source clusters:
 
 - `voices`: Reddit, Medium.
 - `developers`: Hacker News.
@@ -104,7 +106,11 @@ Default collection profile: `config/profiles/broad.json`.
 
 ---
 
-## 4. Поток данных (nightly)
+## 4. Поток данных
+
+Collection и analysis являются независимыми jobs. Текущий nightly остаётся переходным
+оркестратором; целевой cron сначала завершает `collect`, затем создаёт Data Release и запускает
+Engine в shadow-канале. Отсутствие LLM не меняет collection status.
 
 ```
   03:17 (Mac, launchd)                    04:00 (VPS, host-cron)
@@ -137,7 +143,10 @@ Default collection profile: `config/profiles/broad.json`.
   │  ├── trends-report.md     (тренды по кластерам)                  │
   │  └── signals-report.md    (LLM-синтез: темы, идеи для колонок)   │
   │                                                                  │
-  │  compass.db               (SQLite: вся история)                  │
+    │  compass.db               (raw collection facts)                 │
+    │  trend_engine.db          (immutable analysis versions)          │
+    │    └── published read models: News, Stories, Trends, Project Lens│
+    │  cluster_lab.db           (deprecated compatibility DB)          │
   │  notifications/           (заготовки для Telegram/email)          │
   └─────────────────────────────────────────────────────────────────┘
            │
@@ -182,6 +191,18 @@ Default collection profile: `config/profiles/broad.json`.
 - `/explore` and `/api/v2/stories` resolve `theme`, `candidate_theme` and `pain` through
   `story_items → item_signals`, so the UI returns deduplicated stories, not raw item duplicates.
 
+### Story/Trend Engine contract
+
+- `trend_engine.db` содержит frozen Data Releases и отдельные Facet/Story/Trend attempts.
+- Engine открывает `compass.db` только `mode=ro`; finalized release защищён SQLite triggers.
+- Повторный запуск создаёт новую версию и не удаляет предыдущие результаты.
+- Story и Trend можно пересчитывать независимо; full rebuild не входит в workflow.
+- `broad`/`ai-native` публикуются только после Golden Set gates и ручного решения.
+- Publish/rollback атомарно переключают immutable pointer.
+- Старый `cluster_lab.db` и `lab` CLI — compatibility alias на один релиз.
+
+Полный контракт: [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md).
+
 ---
 
 ## 5. Деплой
@@ -210,7 +231,7 @@ Default collection profile: `config/profiles/broad.json`.
 │  ├── Dockerfile.api              ← Slim (API, без Chromium)         │
 │  ├── Caddyfile                   ← :80 → api:8900                   │
 │  ├── .env                        ← секреты (gitignored)             │
-│  └── data/                       ← volume (snapshots + compass.db)  │
+│  └── data/                       ← snapshots + обе SQLite DB       │
 │                                                                     │
 │  Security: read_only, no-new-privileges, cap_drop ALL, pids_limit   │
 │  Network: loopback only (127.0.0.1:8900), без публичных портов      │
@@ -316,6 +337,13 @@ reddit-compass hn                              Hacker News (Algolia)
 reddit-compass rss                             RSS (BBC, Guardian, Reuters, TC, Verge, Ars)
 reddit-compass ladder                          Ladder (NYT, WaPo, FT, Wired, Medium...)
 reddit-compass ph                              ProductHunt (GraphQL)
+reddit-compass collect --profile broad         Только сбор в compass.db
+reddit-compass engine release create --run ID  Frozen Data Release
+reddit-compass engine facets --release ID      FacetRelease
+reddit-compass engine stories propose ...      Новый StoryRelease attempt
+reddit-compass engine trends propose ...       Новый TrendRelease attempt
+reddit-compass engine publish ...              Ручной pointer switch
+reddit-compass engine rollback ...             Возврат pointer
 reddit-compass db init|stats                   SQLite
 reddit-compass serve                           REST API (FastAPI :8900)
 ```

@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Project Lens {{ lens.project_id }} · reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav class="layer-nav" aria-label="Analysis layers">
+        <a href="/news">News</a>
+        <a href="/stories">Stories</a>
+        <a href="/trends">Trends</a>
+        <a href="/projects/{{ lens.project_id }}" class="active">Project Lens</a>
+        <a href="/radar">Radar</a>
+    </nav>
+
+    <div class="page-header">
+        <h1>Project Lens · {{ lens.project_id }}</h1>
+        <p class="section-note">Рабочий слой для книги, РБК и других проектов поверх опубликованных stories/trends.</p>
+    </div>
+
+    <section class="section">
+        <p class="section-note">
+            publication {{ lens.publication_id }} · story {{ lens.story_release_id }} · trend {{ lens.trend_release_id }}
+        </p>
+    </section>
+
+    <section class="section">
+        <h2>Trends for project</h2>
+        <div class="shelf-grid">
+            {% for trend in lens.trends %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ trend.lifecycle }}</span>
+                    <span>score {{ trend.project_scores.get(lens.project_id, 0) }}</span>
+                    <span>{{ trend.review_status }}</span>
+                </div>
+                <h3><a href="/trends/{{ trend.trend_id }}">{{ trend.title }}</a></h3>
+                <p>{{ trend.pattern }}</p>
+            </article>
+            {% else %}
+            <p class="section-note">Project trends не найдены.</p>
+            {% endfor %}
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>Stories for project</h2>
+        <div class="shelf-grid">
+            {% for story in lens.stories %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ story.confidence }}</span>
+                    <span>score {{ story.project_scores.get(lens.project_id, 0) }}</span>
+                    <span>{{ story.source_count }} sources</span>
+                </div>
+                <h3><a href="/stories/{{ story.story_id }}">{{ story.title }}</a></h3>
+                {% if story.evidence_items %}
+                <ul class="evidence-list">
+                    {% for item in story.evidence_items %}
+                    <li>{{ item.provider }} · {{ item.title }}</li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </article>
+            {% else %}
+            <p class="section-note">Project stories не найдены.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

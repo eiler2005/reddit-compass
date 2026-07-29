@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Trend Engine — reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Trend Engine</h1>
+    <p class="section-note">
+        Read-only контроль версий: immutable Data Release → Facets → Stories → Trends → Publication.
+    </p>
+
+    {% if not available %}
+    <section class="section">
+        <h2>Engine ещё не инициализирован</h2>
+        <p class="section-note">
+            Создайте frozen release командой
+            <code>reddit-compass engine release create --run RUN_ID</code>.
+        </p>
+    </section>
+    {% else %}
+    <section class="section">
+        <h2>Опубликованный Broad Radar</h2>
+        {% if current_publication %}
+        <div class="freshness-bar">
+            <span class="status-badge status-complete">published</span>
+            <span class="freshness-text">
+                {{ current_publication.publication_id }} ·
+                stories {{ current_publication.story_release_id }} ·
+                trends {{ current_publication.trend_release_id }}
+            </span>
+        </div>
+        {% else %}
+        <p class="section-note">Публикации пока нет: production Radar продолжает использовать legacy projection.</p>
+        {% endif %}
+    </section>
+
+    <section class="section">
+        <h2>Data Releases</h2>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>ID</th><th>Даты</th><th>Вход</th><th>Материалы</th><th>Checksum</th></tr></thead>
+                <tbody>
+                {% for release in data_releases %}
+                <tr>
+                    <td><code>{{ release.release_id }}</code></td>
+                    <td>{{ release.dates|join(", ") }}</td>
+                    <td>{{ release.input_status }}</td>
+                    <td>{{ release.item_count }}</td>
+                    <td><code>{{ release.input_checksum[:12] }}</code></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>Story Releases</h2>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>ID</th><th>Facet parent</th><th>Метод</th><th>Статус</th><th>Inspect</th></tr></thead>
+                <tbody>
+                {% for release in story_releases %}
+                <tr>
+                    <td><code>{{ release.story_release_id }}</code></td>
+                    <td><code>{{ release.facet_release_id }}</code></td>
+                    <td>{{ release.method }}</td>
+                    <td>{{ release.status }}</td>
+                    <td><a href="/api/v2/engine/story-releases/{{ release.story_release_id }}">JSON</a></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>Trend Releases</h2>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>ID</th><th>Story parent</th><th>Окно</th><th>История</th><th>Inspect</th></tr></thead>
+                <tbody>
+                {% for release in trend_releases %}
+                <tr>
+                    <td><code>{{ release.trend_release_id }}</code></td>
+                    <td><code>{{ release.story_release_id }}</code></td>
+                    <td>{{ release.window }}</td>
+                    <td>{{ release.history_status }}</td>
+                    <td><a href="/api/v2/engine/trend-releases/{{ release.trend_release_id }}">JSON</a></td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <section class="section">
+        <h2>Publication history</h2>
+        <div class="table-wrap">
+            <table class="table">
+                <thead><tr><th>ID</th><th>Канал</th><th>Data</th><th>Stories</th><th>Trends</th><th>Создано</th></tr></thead>
+                <tbody>
+                {% for publication in publications %}
+                <tr>
+                    <td><code>{{ publication.publication_id }}</code></td>
+                    <td>{{ publication.channel }}</td>
+                    <td><code>{{ publication.data_release_id }}</code></td>
+                    <td><code>{{ publication.story_release_id }}</code></td>
+                    <td><code>{{ publication.trend_release_id }}</code></td>
+                    <td>{{ publication.created_at }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}

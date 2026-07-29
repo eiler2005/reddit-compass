@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Stories · reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav class="layer-nav" aria-label="Analysis layers">
+        <a href="/news">News</a>
+        <a href="/stories" class="active">Stories</a>
+        <a href="/trends">Trends</a>
+        <a href="/projects/rbc">Project Lens</a>
+        <a href="/radar">Radar</a>
+    </nav>
+
+    <div class="page-header">
+        <h1>Stories</h1>
+        <p class="section-note">Конкретные события, собранные из нескольких материалов. Это слой дедупликации и evidence matrix.</p>
+    </div>
+
+    <section class="section">
+        <form class="filters" method="get" action="/stories">
+            <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по story">
+            <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
+            <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="book или rbc">
+            <button class="btn-primary" type="submit">Фильтр</button>
+        </form>
+        <p class="section-note">
+            {{ stories.total }} stories · publication {{ stories.publication_id }} · story release {{ stories.story_release_id }}
+        </p>
+    </section>
+
+    <section class="section">
+        <div class="shelf-grid">
+            {% for story in stories["items"] %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ story.confidence }}</span>
+                    <span>{{ story.source_count }} source clusters</span>
+                    <span>{{ story.item_count }} materials</span>
+                    <span>{{ story.first_seen }} → {{ story.last_seen }}</span>
+                </div>
+                <h2 class="story-title"><a href="/stories/{{ story.story_id }}">{{ story.title }}</a></h2>
+                {% if story.summary_ru %}
+                <p>{{ story.summary_ru }}</p>
+                {% endif %}
+                <div class="chip-cloud">
+                    {% for domain_id in story.domain_ids %}
+                    <span class="chip">{{ domain_id }}</span>
+                    {% endfor %}
+                    {% for project_id, score in story.project_scores.items() %}
+                    <span class="chip">{{ project_id }} {{ score }}</span>
+                    {% endfor %}
+                </div>
+                {% if story.evidence_items %}
+                <h3>Evidence</h3>
+                <ul class="evidence-list">
+                    {% for item in story.evidence_items %}
+                    <li>
+                        <span>{{ item.provider }}</span>
+                        {% if item.canonical_url %}
+                        <a href="{{ item.canonical_url }}" rel="noopener noreferrer">{{ item.title }}</a>
+                        {% else %}
+                        {{ item.title }}
+                        {% endif %}
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </article>
+            {% else %}
+            <p class="section-note">Stories не найдены.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

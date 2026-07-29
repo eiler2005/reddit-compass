@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}News · reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav class="layer-nav" aria-label="Analysis layers">
+        <a href="/news" class="active">News</a>
+        <a href="/stories">Stories</a>
+        <a href="/trends">Trends</a>
+        <a href="/projects/rbc">Project Lens</a>
+        <a href="/radar">Radar</a>
+    </nav>
+
+    <div class="page-header">
+        <h1>News</h1>
+        <p class="section-note">Сырой входящий корпус из опубликованного Data Release. Это inbox, а не сюжеты и не тренды.</p>
+    </div>
+
+    <section class="section">
+        <form class="filters" method="get" action="/news">
+            <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по title, excerpt, source">
+            <input type="date" name="date" value="{{ filters.date }}">
+            <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
+            <input type="text" name="provider" value="{{ filters.provider }}" placeholder="provider">
+            <input type="text" name="source_cluster" value="{{ filters.source_cluster }}" placeholder="source cluster">
+            <button class="btn-primary" type="submit">Фильтр</button>
+        </form>
+        <p class="section-note">
+            {{ news.total }} материалов · publication {{ news.publication_id }} · data {{ news.data_release_id }}
+        </p>
+    </section>
+
+    <section class="section">
+        <div class="story-list">
+            {% for item in news["items"] %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ item.provider }}</span>
+                    <span>{{ item.source_cluster }}</span>
+                    <span>{{ item.source_section }}</span>
+                    <span>{{ item.content_scope }}</span>
+                    <span>{{ item.snapshot_date }}</span>
+                </div>
+                <h2 class="story-title">
+                    {% if item.canonical_url %}
+                    <a href="{{ item.canonical_url }}" rel="noopener noreferrer">{{ item.title }}</a>
+                    {% else %}
+                    {{ item.title }}
+                    {% endif %}
+                </h2>
+                {% if item.summary_ru %}
+                <p>{{ item.summary_ru }}</p>
+                {% elif item.excerpt %}
+                <p>{{ item.excerpt }}</p>
+                {% endif %}
+                <div class="chip-cloud">
+                    {% for domain_id in item.domain_ids %}
+                    <span class="chip">{{ domain_id }}</span>
+                    {% endfor %}
+                    {% for pain in item.pain_points %}
+                    <span class="chip chip-pain">{{ pain }}</span>
+                    {% endfor %}
+                </div>
+                {% if item.story_id %}
+                <p class="section-note">Story: <a href="/stories/{{ item.story_id }}">{{ item.story_title or item.story_id }}</a> · {{ item.membership_reason }}</p>
+                {% endif %}
+            </article>
+            {% else %}
+            <p class="section-note">Материалы не найдены.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

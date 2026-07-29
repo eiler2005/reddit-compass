@@ -46,6 +46,17 @@ def test_unknown_domain_falls_back_to_other() -> None:
     assert classify_domains("A quiet miscellaneous local note") == ["other"]
 
 
+def test_keyword_substrings_do_not_create_false_sports_domain() -> None:
+    domains = classify_domains(
+        "Oil prices fall as government support changes",
+        excerpt="Officials support a temporary pause.",
+        provider="guardian",
+        source_section="business",
+    )
+
+    assert "sports" not in domains
+
+
 def test_project_scores_are_domain_sensitive() -> None:
     book = compute_project_scores(["ai_technology", "labor_career"], "AI layoffs")
     rbc = compute_project_scores(["business_markets"], "Earnings and market pricing")

@@ -67,7 +67,19 @@ def create_app() -> FastAPI:
         response: Response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
-        if request.url.path.startswith(("/today", "/stories", "/explore", "/runs")):
+        if request.url.path.startswith(
+            (
+                "/today",
+                "/news",
+                "/stories",
+                "/trends",
+                "/projects",
+                "/explore",
+                "/runs",
+                "/radar",
+                "/engine",
+            )
+        ):
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self'; img-src 'self' data:; "
                 "style-src 'self'; script-src 'self'; frame-ancestors 'none'"

@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Trends · reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav class="layer-nav" aria-label="Analysis layers">
+        <a href="/news">News</a>
+        <a href="/stories">Stories</a>
+        <a href="/trends" class="active">Trends</a>
+        <a href="/projects/rbc">Project Lens</a>
+        <a href="/radar">Radar</a>
+    </nav>
+
+    <div class="page-header">
+        <h1>Trends</h1>
+        <p class="section-note">Повторяющиеся паттерны поверх разных stories. Копии одной новости сюда не должны попадать.</p>
+    </div>
+
+    <section class="section">
+        <form class="filters" method="get" action="/trends">
+            <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
+            <input type="text" name="lifecycle" value="{{ filters.lifecycle }}" placeholder="new, growing, fading">
+            <input type="text" name="review_status" value="{{ filters.review_status }}" placeholder="pending или confirmed">
+            <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="book или rbc">
+            <button class="btn-primary" type="submit">Фильтр</button>
+        </form>
+        <p class="section-note">
+            {{ trends.total }} trends · history {{ trends.history_status }} · trend release {{ trends.trend_release_id }}
+        </p>
+    </section>
+
+    <section class="section">
+        <div class="shelf-grid">
+            {% for trend in trends["items"] %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ trend.lifecycle }}</span>
+                    <span>{{ trend.review_status }}</span>
+                    <span>{{ "%.0f"|format(trend.confidence * 100) }}% confidence</span>
+                    <span>{{ trend.story_count }} stories</span>
+                    <span>{{ trend.source_count }} sources</span>
+                </div>
+                <h2 class="story-title"><a href="/trends/{{ trend.trend_id }}">{{ trend.title }}</a></h2>
+                <p>{{ trend.pattern }}</p>
+                <div class="chip-cloud">
+                    {% for domain_id in trend.domain_ids %}
+                    <span class="chip">{{ domain_id }}</span>
+                    {% endfor %}
+                    {% for project_id, score in trend.project_scores.items() %}
+                    <span class="chip">{{ project_id }} {{ score }}</span>
+                    {% endfor %}
+                </div>
+                {% if trend.stories %}
+                <h3>Stories inside trend</h3>
+                <ul class="evidence-list">
+                    {% for story in trend.stories %}
+                    <li><a href="/stories/{{ story.story_id }}">{{ story.title }}</a> <span class="section-note">{{ story.source_count }} sources</span></li>
+                    {% endfor %}
+                </ul>
+                {% endif %}
+            </article>
+            {% else %}
+            <p class="section-note">Trends не найдены.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}

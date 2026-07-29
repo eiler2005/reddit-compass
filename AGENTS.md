@@ -32,6 +32,13 @@
   из юнит-тестов — покрывать чистую логику фикстурами.
 - Значимые изменения отражать в `README.md`, релевантных доках и `CHANGELOG.md`.
 - Секреты (`.env`, токены, ключи) не читать, не печатать, не коммитить.
+- Clustering/trendwatching-алгоритмы развивать через `trend_engine.db` и полные immutable
+  Data Releases: сначала 50/100/300 локальных items, затем Golden Set и tests, затем full/shadow.
+  `compass.db` для Engine всегда read-only. Не запускать full production rebuild для обычной
+  итерации и не мутировать legacy `stories/story_metrics` из Engine-команд.
+- Radar читает только `RadarPublication`. Production-каналы `broad`/`ai-native` публиковать
+  вручную после quality gates; rollback только переключает immutable pointer.
+- Канонический workflow и контракты: `docs/TREND_ENGINE.md`.
 
 ## Защита секретов (обязательно)
 

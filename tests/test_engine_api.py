@@ -1,0 +1,346 @@
+"""API contracts for immutable Trend Engine publications."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from reddit_compass.api.app import create_app
+from reddit_compass.db import get_db
+from reddit_compass.intelligence.engine import engine_db
+from reddit_compass.intelligence.migrations import migrate
+
+
+@pytest.fixture
+def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    corpus_path = tmp_path / "compass.db"
+    corpus_conn = get_db(corpus_path)
+    migrate(corpus_conn)
+    corpus_conn.close()
+
+    engine_path = tmp_path / "trend_engine.db"
+    conn = engine_db(engine_path)
+    created_at = "2026-07-29T10:00:00Z"
+    conn.execute(
+        """
+        INSERT INTO data_releases (
+            release_id, profile, dates_json, run_ids_json, source_db_path,
+            source_db_checksum, input_checksum, input_status, source_coverage_json,
+            item_count, observation_count, status, created_at, finalized_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "data_test",
+            "broad",
+            '["2026-07-29"]',
+            '["run_test"]',
+            str(corpus_path),
+            "source-checksum",
+            "input-checksum",
+            "complete",
+            '{"rss:world": 1}',
+            1,
+            1,
+            "building",
+            created_at,
+            "",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO release_items (
+            release_id, item_id, provider, source_cluster, external_id,
+            canonical_url, title, snapshot_date, source_section, domain_ids,
+            row_checksum
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "data_test",
+            "rss:1",
+            "reuters",
+            "mainstream",
+            "1",
+            "https://example.com/story",
+            "A verified story",
+            "2026-07-29",
+            "world",
+            '["world_geopolitics"]',
+            "row-checksum",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO facet_releases (
+            facet_release_id, data_release_id, method, params_hash,
+            status, metrics_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "facet_test",
+            "data_test",
+            "test",
+            "params",
+            "evaluated",
+            "{}",
+            created_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO item_facets (
+            facet_release_id, item_id, domain_ids, theme_ids
+        ) VALUES (?, ?, ?, ?)
+        """,
+        ("facet_test", "rss:1", '["world_geopolitics"]', '["geopolitics"]'),
+    )
+    conn.execute(
+        """
+        INSERT INTO story_releases (
+            story_release_id, facet_release_id, method, params_hash,
+            status, metrics_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "story_test",
+            "facet_test",
+            "hybrid_test",
+            "params",
+            "published",
+            '{"story_count": 1}',
+            created_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO engine_stories (
+            story_release_id, story_id, canonical_key, title, domain_ids,
+            project_scores, first_seen, last_seen, confidence, source_count, item_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "story_test",
+            "story_1",
+            "verified-story",
+            "A verified story",
+            '["world_geopolitics"]',
+            '{"rbc": 88, "book": 67}',
+            "2026-07-27",
+            "2026-07-29",
+            "high",
+            2,
+            3,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO engine_story_items (
+            story_release_id, story_id, item_id, membership_score, membership_reason
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        ("story_test", "story_1", "rss:1", 1.0, "exact_url"),
+    )
+    conn.execute(
+        """
+        INSERT INTO trend_releases (
+            trend_release_id, story_release_id, window, method, params_hash,
+            status, history_status, metrics_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "trend_test",
+            "story_test",
+            "30d",
+            "story_graph_test",
+            "params",
+            "published",
+            "ready",
+            '{"trend_count": 1}',
+            created_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO engine_trends (
+            trend_release_id, trend_id, name_ru, pattern, domain_ids,
+            confidence, lifecycle, source_scope, first_seen, last_seen,
+            story_count, source_count, project_scores, evidence_story_ids,
+            review_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "trend_test",
+            "trend_1",
+            "Проверяемый тренд",
+            "Три независимых события",
+            '["world_geopolitics"]',
+            0.91,
+            "growing",
+            "cross_source",
+            "2026-07-20",
+            "2026-07-29",
+            3,
+            4,
+            '{"rbc": 92, "book": 71}',
+            '["story_1"]',
+            "confirmed",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO engine_trend_stories (
+            trend_release_id, trend_id, story_id, membership_score, reason
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        ("trend_test", "trend_1", "story_1", 0.97, "shared_pattern"),
+    )
+    conn.execute(
+        """
+        UPDATE data_releases
+        SET status = 'finalized', finalized_at = ?
+        WHERE release_id = 'data_test'
+        """,
+        (created_at,),
+    )
+    conn.execute(
+        """
+        INSERT INTO radar_publications (
+            publication_id, channel, data_release_id, story_release_id,
+            trend_release_id, input_status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "publication_test",
+            "broad",
+            "data_test",
+            "story_test",
+            "trend_test",
+            "complete",
+            created_at,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO published_channels (channel, current_publication_id, updated_at)
+        VALUES (?, ?, ?)
+        """,
+        ("broad", "publication_test", created_at),
+    )
+    conn.commit()
+    conn.close()
+
+    monkeypatch.setenv("RC_DB_PATH", str(corpus_path))
+    monkeypatch.setenv("RC_ENGINE_DB_PATH", str(engine_path))
+    with TestClient(create_app()) as client:
+        yield client
+
+
+def test_radar_reads_only_current_publication(engine_client: TestClient) -> None:
+    response = engine_client.get("/api/v2/radar/2026-07-29?channel=broad")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["publication_id"] == "publication_test"
+    assert payload["data_release_id"] == "data_test"
+    assert payload["story_release_id"] == "story_test"
+    assert payload["trend_release_id"] == "trend_test"
+    assert payload["history_status"] == "ready"
+    assert payload["shelves"]["growing"][0]["trend_id"] == "trend_1"
+
+
+def test_radar_keeps_previous_publication_for_new_date(
+    engine_client: TestClient,
+) -> None:
+    response = engine_client.get("/api/v2/radar/2026-07-30?channel=broad")
+
+    assert response.status_code == 200
+    assert response.json()["serving_previous_publication"] is True
+
+
+def test_engine_inspection_endpoints(engine_client: TestClient) -> None:
+    releases = engine_client.get("/api/v2/engine/releases")
+    publications = engine_client.get("/api/v2/engine/publications")
+    story = engine_client.get("/api/v2/engine/story-releases/story_test")
+    trend = engine_client.get("/api/v2/engine/trend-releases/trend_test")
+
+    assert releases.status_code == 200
+    assert releases.json()["data_releases"][0]["release_id"] == "data_test"
+    assert publications.json()[0]["publication_id"] == "publication_test"
+    assert story.status_code == 200
+    assert trend.status_code == 200
+
+
+def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
+    engine_page = engine_client.get("/engine")
+    radar_page = engine_client.get("/runs/2026-07-29/radar")
+    today_page = engine_client.get("/today")
+
+    assert engine_page.status_code == 200
+    assert "publication_test" in engine_page.text
+    assert radar_page.status_code == 200
+    assert "Проверяемый тренд" in radar_page.text
+    assert "trend_test" in radar_page.text
+    assert "Trendwatching cockpit" in radar_page.text
+    assert today_page.status_code == 200
+    assert "Проверяемый тренд" in today_page.text
+    assert "publication_test" in today_page.text
+
+
+def test_published_news_stories_trends_and_project_lens_are_separate(
+    engine_client: TestClient,
+) -> None:
+    news = engine_client.get("/api/v2/news?page_size=10")
+    stories = engine_client.get("/api/v2/engine/stories?page_size=10")
+    trends = engine_client.get("/api/v2/engine/trends?page_size=10")
+    lens = engine_client.get("/api/v2/projects/rbc/lens?limit=10")
+
+    assert news.status_code == 200
+    assert stories.status_code == 200
+    assert trends.status_code == 200
+    assert lens.status_code == 200
+    assert news.json()["items"][0]["item_id"] == "rss:1"
+    assert news.json()["items"][0]["story_id"] == "story_1"
+    assert stories.json()["items"][0]["story_id"] == "story_1"
+    assert stories.json()["items"][0]["evidence_items"][0]["provider"] == "reuters"
+    assert trends.json()["items"][0]["trend_id"] == "trend_1"
+    assert trends.json()["items"][0]["stories"][0]["story_id"] == "story_1"
+    assert lens.json()["trends"][0]["project_scores"]["rbc"] == 92
+    assert lens.json()["stories"][0]["project_scores"]["rbc"] == 88
+
+
+def test_published_story_and_trend_detail_endpoints(engine_client: TestClient) -> None:
+    story = engine_client.get("/api/v2/engine/stories/story_1")
+    trend = engine_client.get("/api/v2/engine/trends/trend_1")
+
+    assert story.status_code == 200
+    assert trend.status_code == 200
+    assert story.json()["story_id"] == "story_1"
+    assert story.json()["evidence_items"][0]["item_id"] == "rss:1"
+    assert story.json()["trends"][0]["trend_id"] == "trend_1"
+    assert trend.json()["trend_id"] == "trend_1"
+    assert trend.json()["stories"][0]["story_id"] == "story_1"
+    assert trend.json()["stories"][0]["evidence_items"][0]["provider"] == "reuters"
+
+
+def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:
+    news = engine_client.get("/news")
+    stories = engine_client.get("/stories")
+    trends = engine_client.get("/trends")
+    project = engine_client.get("/projects/rbc")
+    story_detail = engine_client.get("/stories/story_1")
+    trend_detail = engine_client.get("/trends/trend_1")
+
+    assert news.status_code == 200
+    assert "Сырой входящий корпус" in news.text
+    assert "A verified story" in news.text
+    assert stories.status_code == 200
+    assert "Конкретные события" in stories.text
+    assert trends.status_code == 200
+    assert "Проверяемый тренд" in trends.text
+    assert project.status_code == 200
+    assert "Project Lens" in project.text
+    assert story_detail.status_code == 200
+    assert "Evidence items" in story_detail.text
+    assert trend_detail.status_code == 200
+    assert "Stories inside trend" in trend_detail.text

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Сегодня · {{ radar.date }} — reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="date-switcher">
+        <h1 class="date-title">Сегодня · {{ radar.date }}</h1>
+    </div>
+
+    <div class="freshness-bar">
+        <span class="status-badge status-{{ radar.input_status }}">{{ radar.input_status }}</span>
+        <span class="freshness-text">
+            publication {{ radar.publication_id }} · опубликовано {{ radar.published_at }}
+        </span>
+    </div>
+
+    {% if radar.serving_previous_publication %}
+    <p class="warning">
+        Для выбранной даты новой публикации нет. Показана последняя проверенная версия.
+    </p>
+    {% endif %}
+
+    <section class="section">
+        <h2>Что изменилось</h2>
+        {% if changes %}
+        <div class="story-grid">
+            {% for trend in changes[:5] %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="status-badge">{{ trend.lifecycle }}</span>
+                    <span>{{ trend.source_count }} источников · {{ trend.story_count }} событий</span>
+                </div>
+                <h3>{{ trend.title }}</h3>
+                {% if trend.pattern %}<p>{{ trend.pattern }}</p>{% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p>В опубликованной версии пока нет подтверждённых трендов.</p>
+        {% endif %}
+    </section>
+
+    <div class="radar-cta">
+        <a href="/runs/{{ radar.date }}/radar?channel=broad" class="btn btn-primary">
+            Открыть полный Trend Radar →
+        </a>
+        <span class="radar-teaser">
+            Data {{ radar.data_release_id }} · Stories {{ radar.story_release_id }} ·
+            Trends {{ radar.trend_release_id }}
+        </span>
+    </div>
+</div>
+{% endblock %}

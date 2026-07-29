@@ -19,6 +19,13 @@ dependencies = [
   "python-multipart>=0.0.9",
 ]
 
+[project.optional-dependencies]
+engine = [
+  "numpy>=2,<3",
+  "sentence-transformers>=4,<6",
+  "spacy>=3.8,<4",
+]
+
 [project.scripts]
 reddit-compass = "reddit_compass.cli:main"
 

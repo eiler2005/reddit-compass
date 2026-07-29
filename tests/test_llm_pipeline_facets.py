@@ -26,6 +26,16 @@ def test_deterministic_item_signals_cover_every_item() -> None:
             title="Football streaming rights reshape sports media",
             domain_ids=["sports", "culture_media"],
         ),
+        ContentItem(
+            item_id="legacy:1",
+            provider="reuters",
+            source_cluster="business",
+            external_id="1",
+            canonical_url="https://reuters.example/markets/1",
+            title="Investors reassess the stock market after earnings",
+            source_section="markets",
+            domain_ids=["other"],
+        ),
     ]
 
     signals = build_deterministic_item_signals(
@@ -34,8 +44,10 @@ def test_deterministic_item_signals_cover_every_item() -> None:
         analyzed_at="2026-07-28T10:00:00Z",
     )
 
-    assert [signal.item_id for signal in signals] == ["reddit:1", "bbc:1"]
+    assert [signal.item_id for signal in signals] == ["reddit:1", "bbc:1", "legacy:1"]
     assert signals[0].domain_ids == ["ai_technology", "labor_career"]
     assert "labor" in signals[0].theme_ids
     assert signals[0].goal_relevance["book"] > signals[1].goal_relevance["book"]
+    assert signals[2].domain_ids != ["other"]
+    assert "business_markets" in signals[2].domain_ids
     assert signals[0].model == "deterministic-facets-v1"

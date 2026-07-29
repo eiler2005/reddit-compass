@@ -33,8 +33,8 @@ analysis uses the cheaper off-peak rate.
 | 14:10 / 17:10 | 197 stories from Hacker News (Algolia API, last 7 days) | What developers are building and arguing about |
 | 14:20 / 17:20 | 183 articles from NYT, WaPo, FT, Wired, Medium + 7 more (Ladder paywall proxy) | The *real* analysis behind the paywall |
 | 14:30 / 17:30 | 30 products from ProductHunt (GraphQL) | What's launching right now |
-| 15:00 / 18:00 | Qwen LLM reads all posts → pain points, relevance (1–10), deep themes | Not just data — *intelligence* |
-| 15:30 / 18:30 | Cross-source synthesis + report with links | **Strong signal** = topic in 3+ sources |
+| independent | Collector finalizes raw facts in `compass.db` | Collection status does not depend on LLM |
+| manual/shadow | Versioned Engine runs facets → stories → trends | Repeat analysis without re-collecting |
 
 > Reddit (737 posts, 18 subreddits) is collected manually from a residential IP
 > (Reddit blocks datacenter IPs) and synced to the VPS.
@@ -55,8 +55,11 @@ You wake up to a report that says:
 ### When you ask it
 
 ```bash
-reddit-compass run --sources reddit,hn,rss,ladder,ph --analyze  # Broad run + facets
-reddit-compass run --sources reddit,hn --allow-partial  # Частичный run
+reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
+reddit-compass engine release create --run RUN_ID
+reddit-compass engine facets --release RELEASE_ID --profile broad
+reddit-compass engine stories propose --facet-release FACET_ID --limit 50
+reddit-compass engine trends propose --story-release STORY_ID --window 30d
 reddit-compass fetch --stealth     # Reddit: 40 subreddits, stealth mode
 reddit-compass hn                  # Hacker News: AI stories
 reddit-compass rss                 # RSS: 6 free sources
@@ -64,7 +67,7 @@ reddit-compass ladder              # Paywall: 12 sources via Ladder
 reddit-compass ph                  # ProductHunt: top products
 reddit-compass signals             # LLM analysis (Qwen API, all sources)
 reddit-compass serve               # REST API + UI on :8900
-reddit-compass db rebuild          # Rebuild SQLite projection из snapshots
+reddit-compass db rebuild          # Только legacy recovery, не Engine workflow
 reddit-compass db stats            # SQLite history
 reddit-compass fetch --dry-run     # Preview without network
 ```
@@ -91,17 +94,22 @@ Written into [`AGENTS.md`](AGENTS.md). The service refuses, by architecture:
          │                      │                   │                   │                   │
          ▼                      ▼                   ▼                   ▼                   ▼
     ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
-    │                          reddit-compass (unified pipeline)                                   │
+    │                    two independent runtimes in one repository                                │
     │                                                                                             │
-    │    collect ──► normalize ──► classify ──► cluster ──► rank ──► serve Radar/Today           │
+    │    Collector → compass.db ──read-only snapshot──► Trend Engine → publication → Radar/Today │
     └─────────────────────────────────────────────────────────────────────────────────────────────┘
          │                      │                        │                      │
          ▼                      ▼                        ▼                      ▼
-    JSONL snapshots        compass.db              item_signals           REST API :8900
-    (exchange format)      (SQLite projection)     (facets/evidence)      (FastAPI + OAuth2)
+    JSONL snapshots        compass.db              trend_engine.db        REST API :8900
+    (exchange format)      (raw facts)             (immutable versions)   (FastAPI + OAuth2)
 ```
 
 **Sources → 5 source clusters → 12 broad domains → stories/trends → Today + Radar**
+
+Collection and analysis are separate runtimes. `collect` writes raw facts to `compass.db`;
+the versioned Engine freezes them into `trend_engine.db`. Radar reads only a manually published
+Story/Trend combination, so a collection failure or experimental attempt cannot erase the last
+verified dashboard.
 
 Full architecture with deployment diagrams: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
@@ -277,13 +285,41 @@ Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
 
 | View | URL | Purpose |
 |---|---|---|
-| **⚡ Today** | `/today` | Утренний бриф: 3–5 изменений, что прочитать, что в работе |
-| **🤖 Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: KPI, мега-сюжеты, кликабельные pain/theme clouds, сила трендов, relevance Книга/РБК |
-| **🔍 Explore** | `/explore` | Поиск, фильтры и drill-down списки сюжетов по date/profile/theme/candidate_theme/domain/pain/source |
-| **📋 Story** | `/stories/{id}` | Исследование сюжета: timeline, evidence, research state |
-| **📁 Runs** | `/runs` | История запусков с реальными counts |
+| **Today** | `/today` | Утренний бриф: 3–5 изменений, что прочитать, что в работе |
+| **News** | `/news` | Сырой inbox опубликованного Data Release: материалы, источники, sections, связанный story |
+| **Stories** | `/stories` | Конкретные события с evidence items; не raw news и не тренды |
+| **Trends** | `/trends` | Повторяющиеся паттерны поверх нескольких stories |
+| **Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: landscape, shelves, coverage, project panels |
+| **Project Lens** | `/projects/rbc`, `/projects/book` | Книга/РБК/business поверх опубликованных stories/trends |
+| **Explore** | `/explore` | Legacy/compat search по старой projection |
+| **Story detail** | `/stories/{id}` | Published Engine story evidence; falls back to legacy detail if needed |
+| **Trend detail** | `/trends/{id}` | Published trend pattern, member stories and evidence |
+| **Runs** | `/runs` | История запусков с реальными counts |
 
 Legacy (один переходный релиз): `/legacy/dashboard`, `/legacy/runs/{date}/radar`
+
+### Versioned Story/Trend Engine
+
+Для итераций без full rebuild используется `trend_engine.db`: полные frozen Data Releases,
+независимые Facet/Story/Trend attempts, Golden Set, Qwen-review только серой зоны и атомарные
+publication pointers.
+
+Published analysis is explicitly split into `News → Stories → Trends → Project Lens`.
+See [`docs/NEWS_STORIES_TRENDS.md`](docs/NEWS_STORIES_TRENDS.md).
+Published Radar includes a cockpit section that links these layers.
+
+```bash
+reddit-compass engine release create --run 2026-07-29:broad
+reddit-compass engine facets --release RELEASE_ID --profile broad
+reddit-compass engine stories propose --facet-release FACET_ID --limit 50
+reddit-compass engine stories inspect --story-release STORY_ID
+reddit-compass engine trends propose --story-release STORY_ID
+reddit-compass engine publish --story-release STORY_ID --trend-release TREND_ID --channel shadow
+```
+
+`compass.db` открывается read-only; Radar читает только опубликованную версию. Старый `lab`
+остаётся compatibility alias на один релиз. Полный контракт:
+[`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md).
 
 ### Дизайн
 
@@ -332,6 +368,9 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full system architecture with diagrams |
 | [`ROADMAP.md`](ROADMAP.md) | Phases 2–6, status |
 | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | 21 sources, 5 clusters |
+| [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) | Canonical immutable Engine workflow, gates and rollback |
+| [`docs/CLUSTER_LAB.md`](docs/CLUSTER_LAB.md) | Deprecated Cluster Lab compatibility guide |
+| [`docs/STORY_TREND_CLUSTERING_RESEARCH.md`](docs/STORY_TREND_CLUSTERING_RESEARCH.md) | Research-backed story/trend clustering roadmap |
 | [`docs/COMPETITIVE_ANALYSIS.md`](docs/COMPETITIVE_ANALYSIS.md) | GitHub landscape, Ladder |
 | [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) | Ranked improvement plan |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog |

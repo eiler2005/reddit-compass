@@ -386,7 +386,15 @@ def classify_domains(
     """Assign broad Radar domains from source hints and text keywords."""
     source_text = " ".join([provider, source_section, keyword, link_flair]).lower()
     body_text = " ".join([title, excerpt]).lower()
-    token_text = " ".join(_TOKEN_RE.findall(f"{source_text} {body_text}"))
+    source_tokens = set(_TOKEN_RE.findall(source_text))
+    all_tokens = _TOKEN_RE.findall(f"{source_text} {body_text}")
+    token_set = set(all_tokens)
+    token_set.update(
+        token[:-1]
+        for token in all_tokens
+        if token.endswith("s") and len(token) > 4 and not token.endswith(("ss", "us", "is", "news"))
+    )
+    token_text = " ".join(all_tokens)
     scores: dict[str, int] = {}
 
     for domain_id, domain in BROAD_DOMAINS.items():
@@ -394,10 +402,20 @@ def classify_domains(
             continue
         score = 0
         for hint in domain.source_hints:
-            if hint and hint.lower() in source_text:
+            normalized_hint = hint.lower()
+            if normalized_hint and (
+                normalized_hint in source_tokens
+                if " " not in normalized_hint
+                else normalized_hint in source_text
+            ):
                 score += 5
         for kw in domain.keywords:
-            if kw and kw.lower() in token_text:
+            normalized_kw = kw.lower()
+            if normalized_kw and (
+                normalized_kw in token_set
+                if " " not in normalized_kw
+                else normalized_kw in token_text
+            ):
                 score += 2 if " " in kw else 1
         if domain_id == "sports" and any(
             term in token_text

@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Story {{ story.story_id }} · reddit-compass{% endblock %}
+
+{% block content %}
+<div class="container">
+    <nav class="layer-nav" aria-label="Analysis layers">
+        <a href="/news">News</a>
+        <a href="/stories" class="active">Stories</a>
+        <a href="/trends">Trends</a>
+        <a href="/projects/rbc">Project Lens</a>
+        <a href="/radar">Radar</a>
+    </nav>
+
+    <div class="page-header">
+        <p class="eyebrow">Story · {{ story.confidence }} confidence</p>
+        <h1>{{ story.title }}</h1>
+        <p class="section-note">
+            {{ story.item_count }} материалов · {{ story.source_count }} source clusters ·
+            {{ story.first_seen }} → {{ story.last_seen }}
+        </p>
+    </div>
+
+    <section class="section">
+        <div class="detail-grid">
+            <div>
+                <h2>Why it matters</h2>
+                {% if story.summary_ru %}
+                <p>{{ story.summary_ru }}</p>
+                {% else %}
+                <p class="section-note">Summary появится после LLM/editorial pass.</p>
+                {% endif %}
+            </div>
+            <div>
+                <h2>Project scores</h2>
+                <div class="chip-cloud">
+                    {% for project_id, score in story.project_scores.items() %}
+                    <a class="chip" href="/projects/{{ project_id }}">{{ project_id }} {{ score }}</a>
+                    {% else %}
+                    <span class="chip">no project score</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </section>
+
+    {% if story.trends %}
+    <section class="section">
+        <h2>Included in trends</h2>
+        <div class="shelf-grid">
+            {% for trend in story.trends %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ trend.lifecycle }}</span>
+                    <span>{{ trend.review_status }}</span>
+                    <span>{{ trend.story_count }} stories</span>
+                </div>
+                <h3><a href="/trends/{{ trend.trend_id }}">{{ trend.title }}</a></h3>
+                <p>{{ trend.pattern }}</p>
+            </article>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    <section class="section">
+        <h2>Evidence items</h2>
+        <div class="story-list">
+            {% for item in story.evidence_items %}
+            <article class="story-card">
+                <div class="story-meta">
+                    <span class="direction-badge">{{ item.provider }}</span>
+                    <span>{{ item.source_cluster }}</span>
+                    <span>{{ item.source_section }}</span>
+                    <span>{{ item.content_scope }}</span>
+                    <span>{{ item.membership_reason }}</span>
+                </div>
+                <h3>
+                    {% if item.canonical_url %}
+                    <a href="{{ item.canonical_url }}" rel="noopener noreferrer">{{ item.title }}</a>
+                    {% else %}
+                    {{ item.title }}
+                    {% endif %}
+                </h3>
+                {% if item.excerpt %}
+                <p>{{ item.excerpt }}</p>
+                {% endif %}
+            </article>
+            {% else %}
+            <p class="section-note">Evidence не найден.</p>
+            {% endfor %}
+        </div>
+    </section>
+</div>
+{% endblock %}
