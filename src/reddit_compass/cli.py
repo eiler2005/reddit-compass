@@ -833,6 +833,8 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         "trend_max_feature_df": args.max_feature_df,
                         "trend_max_candidate_pairs": args.max_candidate_pairs,
                     },
+                    verified_only=args.verified_only,
+                    signal_release_id=args.signal_release,
                 )
                 print(json.dumps(asdict(trend_release_output), ensure_ascii=False, indent=2))
                 return
@@ -1537,6 +1539,17 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose.add_argument("--medoid-threshold", type=float, default=0.4)
     engine_trends_propose.add_argument("--max-feature-df", type=int, default=0)
     engine_trends_propose.add_argument("--max-candidate-pairs", type=int, default=150_000)
+    engine_trends_propose.add_argument(
+        "--verified-only",
+        action="store_true",
+        default=False,
+        help="Only use verified stories for trend discovery",
+    )
+    engine_trends_propose.add_argument(
+        "--signal-release",
+        default=None,
+        help="Signal release ID for community_only verification",
+    )
     engine_trends_inspect = engine_trends_sub.add_parser("inspect")
     engine_trends_inspect.add_argument("--trend-release", required=True)
     engine_trends_inspect.add_argument("--limit", type=int, default=20)

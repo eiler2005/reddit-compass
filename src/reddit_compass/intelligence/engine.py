@@ -2806,6 +2806,8 @@ def create_trend_release(
     window: str = "30d",
     method: str = DEFAULT_TREND_METHOD,
     params: dict[str, Any] | None = None,
+    verified_only: bool = False,
+    signal_release_id: str | None = None,
 ) -> TrendRelease:
     """Discover recurring patterns over distinct stories, never raw duplicates."""
     story_release = get_story_release(conn, story_release_id)
@@ -2821,6 +2823,7 @@ def create_trend_release(
         "min_dates": 2,
         "review_model": "qwen-max",
         "review_prompt_version": TREND_REVIEW_PROMPT_VERSION,
+        "verified_only": verified_only,
         **(params or {}),
     }
     params_hash = _hash_json(params)
@@ -2829,6 +2832,14 @@ def create_trend_release(
         "trends", story_release_id, window, method, params_hash, created_at
     )
     stories = _load_engine_stories(conn, story_release_id)
+    # Verified-only: filter stories to provenance-verified set
+    if verified_only:
+        from .verified_stories import get_verified_story_ids
+
+        verified_ids = get_verified_story_ids(
+            conn, story_release_id, signal_release_id=signal_release_id
+        )
+        stories = [s for s in stories if s["story_id"] in verified_ids]
     story_items = _load_story_item_ids(conn, story_release_id)
     facets = _load_item_facets(conn, facet_release.facet_release_id)
     frozen_items = {
