@@ -1813,17 +1813,9 @@ def _engine_pulse_signals(
     # Resolve data_release_id for JOIN with release_items
     if not data_release_id:
         dr_row = conn.execute(
-            "SELECT fr.data_release_id FROM signal_releases sr "
-            "JOIN story_releases str ON str.story_release_id = sr.story_release_id "
-            "JOIN facet_releases fr ON fr.facet_release_id = str.facet_release_id "
-            "WHERE sr.signal_release_id = ? LIMIT 1",
+            "SELECT data_release_id FROM signal_releases WHERE signal_release_id = ?",
             (signal_release_id,),
         ).fetchone()
-        if not dr_row:
-            # Fallback: try without story_release join
-            dr_row = conn.execute(
-                "SELECT data_release_id FROM data_releases ORDER BY created_at DESC LIMIT 1"
-            ).fetchone()
         data_release_id = str(dr_row[0]) if dr_row else ""
 
     join_clause = ""
