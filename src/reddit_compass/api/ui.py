@@ -469,12 +469,12 @@ async def pulse_page(
                 "LEFT JOIN release_items ri "
                 "ON ri.item_id = cs.item_id "
                 "AND ri.release_id = (SELECT data_release_id "
-                "FROM data_releases ORDER BY created_at DESC LIMIT 1) "
+                "FROM signal_releases WHERE signal_release_id = ?) "
                 "WHERE cs.signal_release_id = ? "
                 "AND cs.pulse_score >= 60 "
                 "AND cs.mainstream_coverage_count < 2 "
                 "ORDER BY cs.pulse_score DESC LIMIT 5",
-                (sig_id,),
+                (sig_id, sig_id),
             ).fetchall()
             mainstream_gap = [
                 {
