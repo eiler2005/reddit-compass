@@ -774,6 +774,39 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
                 return
+            if args.engine_action == "verified":
+                from .intelligence.verified_stories import get_verified_stories
+
+                verified = get_verified_stories(
+                    engine_conn,
+                    args.story_release,
+                    signal_release_id=args.signal_release,
+                )
+                output = [
+                    {
+                        "story_id": v.story_id,
+                        "title": v.title[:100],
+                        "reasons": v.verification_reasons,
+                        "source_count": v.source_count,
+                        "item_count": v.item_count,
+                        "cross_source": v.is_cross_source,
+                        "providers": v.providers,
+                    }
+                    for v in verified[: args.limit]
+                ]
+                print(
+                    json.dumps(
+                        {
+                            "story_release_id": args.story_release,
+                            "total_verified": len(verified),
+                            "shown": len(output),
+                            "stories": output,
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return
             if args.engine_action == "eval":
                 result = evaluate_story_release(engine_conn, args.story_release)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -1516,6 +1549,12 @@ def build_parser() -> argparse.ArgumentParser:
     engine_stories_inspect = engine_stories_sub.add_parser("inspect")
     engine_stories_inspect.add_argument("--story-release", required=True)
     engine_stories_inspect.add_argument("--limit", type=int, default=20)
+    engine_stories_verified = engine_stories_sub.add_parser(
+        "verified", help="List verified stories by provenance"
+    )
+    engine_stories_verified.add_argument("--story-release", required=True)
+    engine_stories_verified.add_argument("--signal-release", default=None)
+    engine_stories_verified.add_argument("--limit", type=int, default=50)
     engine_stories_eval = engine_stories_sub.add_parser("eval")
     engine_stories_eval.add_argument("--story-release", required=True)
     engine_stories_review = engine_stories_sub.add_parser(

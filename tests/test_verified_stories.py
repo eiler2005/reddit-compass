@@ -379,3 +379,56 @@ class TestGroupSizeGuards:
 
         warnings = check_group_size_guards(conn, "sr1")
         assert len(warnings) == 0
+
+
+class TestBroadThemeGuard:
+    """Broad themes like 'ai', 'open source', 'startup' cannot verify stories."""
+
+    def test_generic_anchors_excluded(self):
+        from reddit_compass.intelligence.verified_stories import GENERIC_ANCHORS
+
+        for anchor in ["ai", "agent", "open source", "startup", "llm", "model"]:
+            assert anchor in GENERIC_ANCHORS
+
+    def test_non_generic_not_excluded(self):
+        from reddit_compass.intelligence.verified_stories import is_generic_anchor
+
+        assert not is_generic_anchor("OpenAI")
+        assert not is_generic_anchor("GPT-5")
+        assert not is_generic_anchor("Tesla")
+        assert not is_generic_anchor("EU regulation")
+
+
+class TestNewsLinkClassification:
+    """Reddit news_link with target_url links to external article."""
+
+    def test_reddit_post_with_external_url_is_news_link(self):
+        from reddit_compass.intelligence.models import ContentItem
+        from reddit_compass.intelligence.reddit_pulse import classify_signal_type
+
+        item = ContentItem(
+            item_id="r1",
+            provider="reddit",
+            source_cluster="voices",
+            external_id="r1",
+            canonical_url="https://example.com/article",
+            title="Breaking: major event",
+            source_section="technology",
+        )
+        assert classify_signal_type(item) == "news_link"
+
+    def test_reddit_self_post_is_not_news_link(self):
+        from reddit_compass.intelligence.models import ContentItem
+        from reddit_compass.intelligence.reddit_pulse import classify_signal_type
+
+        item = ContentItem(
+            item_id="r1",
+            provider="reddit",
+            source_cluster="voices",
+            external_id="r1",
+            canonical_url="https://www.reddit.com/r/technology/comments/r1",
+            title="Discussion about technology",
+            source_section="technology",
+        )
+        # No patterns match, canonical_url is reddit → "other"
+        assert classify_signal_type(item) == "other"
