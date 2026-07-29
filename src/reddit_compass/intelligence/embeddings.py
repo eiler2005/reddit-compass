@@ -7,12 +7,18 @@ retrieval keeps only top-K neighbours per item; it never materializes every pair
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import math
+import re
 from collections.abc import Sequence
+from itertools import pairwise
 from typing import Any
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+LEXICAL_HASH_EMBEDDING_MODEL = "lexical-hash-v1"
+_LEXICAL_DIMENSIONS = 384
+_TOKEN_PATTERN = re.compile(r"[\w$€£%.-]+", re.UNICODE)
 
 
 def encode_passages(
@@ -22,6 +28,9 @@ def encode_passages(
     batch_size: int = 32,
 ) -> list[list[float]]:
     """Encode passages locally, failing clearly when the optional extra is absent."""
+    if model_name == LEXICAL_HASH_EMBEDDING_MODEL:
+        return [_lexical_hash_vector(text) for text in texts]
+
     try:
         module = importlib.import_module("sentence_transformers")
     except ImportError as exc:
@@ -39,6 +48,35 @@ def encode_passages(
         show_progress_bar=False,
     )
     return [[float(value) for value in vector] for vector in vectors]
+
+
+def _lexical_hash_vector(text: str, dimensions: int = _LEXICAL_DIMENSIONS) -> list[float]:
+    """Dependency-free hashed lexical vector for production-safe candidate retrieval.
+
+    This is not a replacement for multilingual semantic embeddings. It is a cheap
+    always-available retrieval layer that gives the Story Engine dense-like top-K
+    candidates when the heavy ``sentence-transformers`` extra is unavailable.
+    """
+    vector = [0.0] * dimensions
+    normalized = " ".join(text.lower().split())
+    tokens = [token.strip(".,:;!?()[]{}'\"") for token in _TOKEN_PATTERN.findall(normalized)]
+    tokens = [token for token in tokens if len(token) >= 2]
+    features: list[tuple[str, float]] = []
+    features.extend((f"tok:{token}", 1.0) for token in tokens)
+    features.extend(
+        (f"bi:{left}_{right}", 1.25) for left, right in pairwise(tokens) if left != right
+    )
+    features.extend(
+        (f"tri:{normalized[index : index + 3]}", 0.35)
+        for index in range(max(len(normalized) - 2, 0))
+        if " " not in normalized[index : index + 3]
+    )
+    for feature, weight in features:
+        digest = hashlib.blake2b(feature.encode("utf-8"), digest_size=8).digest()
+        bucket = int.from_bytes(digest[:4], "big") % dimensions
+        sign = 1.0 if digest[4] & 1 else -1.0
+        vector[bucket] += sign * weight
+    return _normalize(vector)
 
 
 def top_k_cosine_pairs(

@@ -114,6 +114,8 @@ class TestGenericAndLowSignal:
         assert is_low_signal_title("Top Lifestyle News & Trends: Entertainment") is True
         assert is_low_signal_title("Tech Life") is True
         assert is_low_signal_title("Morning Briefing") is True
+        assert is_low_signal_title("Moronic Monday - June 15, 2026 - Your Weekly Questions Thread")
+        assert is_low_signal_title("Who's Hiring? July 2026")
         assert is_low_signal_title("AI agents escape sandbox") is False
 
     def test_generic_title_blocks_merge(self):

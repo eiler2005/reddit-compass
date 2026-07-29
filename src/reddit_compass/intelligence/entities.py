@@ -31,6 +31,43 @@ _NUMBER_PATTERN = re.compile(
     r"(?:[$€£]\s?)?\d[\d,.]*(?:\s?(?:%|percent|million|billion|trillion|m|bn|tn))?",
     re.IGNORECASE,
 )
+_ACTION_HINTS = (
+    ("layoff", ("lay off", "lays off", "laid off", "cuts", "cut", "slashes", "fires")),
+    ("ban", ("bans", "ban", "blocks", "blocked", "prohibits")),
+    ("sue", ("sues", "sue", "lawsuit", "legal action")),
+    ("investigate", ("investigates", "probe", "probes", "investigation")),
+    ("launch", ("launches", "launch", "unveils", "debuts", "releases")),
+    ("raise", ("raises", "raise", "hikes", "increase", "increases")),
+    ("fall", ("falls", "slumps", "drops", "declines", "plunges")),
+    ("rise", ("rises", "jumps", "surges", "gains", "soars")),
+    ("approve", ("approves", "approved", "greenlights", "allows")),
+    ("reject", ("rejects", "rejected", "halts", "pauses", "scraps")),
+    ("charge", ("charges", "charged", "indicts", "prosecutes")),
+    ("acquire", ("acquires", "buys", "merges")),
+    ("warn", ("warns", "warning", "warned")),
+)
+_GEO_ALIASES = {
+    "america": "united states",
+    "american": "united states",
+    "britain": "united kingdom",
+    "british": "united kingdom",
+    "california": "california",
+    "china": "china",
+    "chinese": "china",
+    "europe": "europe",
+    "european": "europe",
+    "france": "france",
+    "germany": "germany",
+    "iran": "iran",
+    "israel": "israel",
+    "japan": "japan",
+    "russia": "russia",
+    "russian": "russia",
+    "saudi": "saudi arabia",
+    "u.s.": "united states",
+    "us": "united states",
+    "ukraine": "ukraine",
+}
 
 
 def extract_structured_event_frame(
@@ -46,14 +83,16 @@ def extract_structured_event_frame(
     pipeline = _get_spacy_pipeline() if use_spacy else None
     if pipeline is None:
         entities = _normalize_entities(fallback_entities)
+        action = _extract_action_hint(text)
+        geography_hints = _extract_geography_hints(text)
         return (
             {
                 "actors": entities[:8],
                 "people": [],
                 "organizations": entities[:8],
-                "action": "",
-                "object": "",
-                "geography": [],
+                "action": action,
+                "object": _extract_object_hint(title, action),
+                "geography": geography_hints,
                 "event_date": event_date,
                 "dates": [event_date] if event_date else [],
                 "numbers": _extract_numbers(title),
@@ -144,3 +183,29 @@ def _extract_numbers(text: str) -> list[str]:
             if match.group(0).strip()
         }
     )[:12]
+
+
+def _extract_action_hint(text: str) -> str:
+    normalized = f" {text.lower()} "
+    for action, phrases in _ACTION_HINTS:
+        if any(f" {phrase} " in normalized for phrase in phrases):
+            return action
+    return ""
+
+
+def _extract_geography_hints(text: str) -> list[str]:
+    normalized = text.lower()
+    return sorted(
+        {
+            canonical
+            for hint, canonical in _GEO_ALIASES.items()
+            if re.search(rf"\b{re.escape(hint)}\b", normalized)
+        }
+    )[:8]
+
+
+def _extract_object_hint(title: str, action: str) -> str:
+    if not action:
+        return ""
+    normalized = " ".join(title.split())
+    return normalized[:240]

@@ -31,6 +31,13 @@
   promoting them to the default `broad` channel.
 - **Strict Qwen adjudication**: pair/trend Pydantic schemas, evidence validation, prompt/model/input
   cache; невалидный ответ не влияет на clustering.
+- **Engine lab retrieval v2.1**: dependency-light `lexical-hash-v1` embeddings for local top-K
+  candidate retrieval, CLI tuning flags for story/trend graph thresholds, bounded trend feature
+  pair generation, ordered trend topic phrases, recurring-thread guards and HuggingFace model
+  release URL merge rule.
+- **Story Engine A/B experiments**: `engine experiments compare` runs baseline, MinHash/SimHash
+  near-duplicate, guarded semantic-dedup and combined variants on the same frozen FacetRelease,
+  returning release IDs, metric deltas, merge reasons and cross-source samples without publishing.
 - **Cluster Lab sandbox**: отдельный `cluster_lab.db` для immutable data releases,
   experiments, story proposals и trend proposals без mutation production `stories`.
   CLI: `lab release create/list`, `lab experiment create`, `lab propose`, `lab compare/eval`.

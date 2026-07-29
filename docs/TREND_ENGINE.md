@@ -162,9 +162,14 @@ Run deterministic facets:
 reddit-compass engine facets --release RELEASE_ID --profile broad
 ```
 
-Optionally cache local E5 vectors once:
+Cache retrieval vectors before full Story attempts. Use `lexical-hash-v1` for fast local
+experiments without the optional engine stack, and E5 when `sentence-transformers` is installed:
 
 ```bash
+reddit-compass engine embeddings \
+  --release RELEASE_ID \
+  --model lexical-hash-v1
+
 reddit-compass engine embeddings \
   --release RELEASE_ID \
   --model intfloat/multilingual-e5-small
@@ -175,7 +180,10 @@ Run a small, reproducible Story attempt:
 ```bash
 reddit-compass engine stories propose \
   --facet-release FACET_ID \
-  --limit 50
+  --limit 50 \
+  --embedding-model lexical-hash-v1 \
+  --dense-threshold 0.55 \
+  --dense-top-k 24
 
 reddit-compass engine stories inspect --story-release STORY_ID --limit 20
 ```
@@ -200,7 +208,8 @@ clustering. Create another immutable attempt to consume valid cached reviews:
 reddit-compass engine stories propose --facet-release FACET_ID --limit 50
 ```
 
-Build and review trends:
+Build and review trends. Trend graph generation is bounded; extremely broad features are skipped
+instead of materializing an all-pairs graph:
 
 ```bash
 reddit-compass engine trends propose --story-release STORY_ID --window 30d
@@ -211,6 +220,27 @@ reddit-compass engine trends propose --story-release STORY_ID --window 30d
 
 Qwen names/interprets a trend only after deterministic graph acceptance. It never clusters the
 whole corpus directly.
+
+Run A/B Story Engine variants on one frozen release:
+
+```bash
+reddit-compass engine experiments compare \
+  --facet-release FACET_ID \
+  --limit 300 \
+  --embedding-model lexical-hash-v1 \
+  --dense-top-k 24 \
+  --dense-threshold 0.55
+```
+
+The command creates unpublished StoryRelease attempts for:
+
+- `baseline_sparse_dense`;
+- `minhash_simhash_near_duplicates`;
+- `semantic_dedup`;
+- `combined_near_and_semantic`.
+
+It returns release IDs, metrics, deltas versus baseline, membership reason counts and
+cross-source samples. Use this command before changing defaults or publishing a shadow attempt.
 
 ## 4. Golden Set and gates
 
@@ -378,3 +408,109 @@ embeddings.
 Chunked NumPy cosine top-K is sufficient for current corpora. Add an ANN index only after profiling
 a frozen release above 20,000 items. The retrieval layer is replaceable because embeddings are
 cached by model hash plus normalized input hash and Story Releases record their parameters.
+
+## 10. Prod snapshot eval checkpoint (2026-07-29)
+
+This checkpoint used a copied VPS `compass.db` snapshot only. It did not run network collection,
+did not mutate production DB and did not publish Radar.
+
+Previously observed one-day broad baseline for `2026-07-29`:
+
+```text
+983 items
+958 stories
+25 multi-item stories
+3 cross-source stories
+97.46% compression ratio
+18 pending trend candidates
+0 confirmed trends
+```
+
+Engine lab v2.1 one-day attempt on the same corpus:
+
+```text
+983 items
+959 stories
+24 multi-item stories
+3 cross-source stories
+97.56% compression ratio
+100% embedding coverage with lexical-hash-v1
+7 pending trend candidates
+0 confirmed trends
+```
+
+Decision: not publish-ready. `lexical-hash-v1` improved candidate coverage and reduced noisy trend
+output, but it did not materially improve one-day Story clustering.
+
+Root causes:
+
+- `2026-07-29:broad` in the snapshot contained no Reddit items, so Reddit↔article evidence could
+  not be recovered for that date;
+- ambiguous pairs still require cached Qwen/manual review before they affect clustering;
+- deterministic fallback has no spaCy entities and no true semantic E5 vectors.
+
+Seven-day broad release `2026-07-23..2026-07-29`:
+
+```text
+4,957 items
+4,723 stories
+203 multi-item stories
+54 cross-source stories
+95.28% compression ratio
+100% embedding coverage with lexical-hash-v1
+6 pending trend candidates
+0 confirmed trends
+```
+
+Positive regression fixed in this checkpoint: one exact HuggingFace model URL for Kimi-K3 now
+merges four Reddit posts plus one Hacker News item into one Story. The rule is intentionally
+narrow: exact HuggingFace model URL, shared model token and close dates. GitHub repository roots
+remain conservative because the same repo can host different weekly reports or releases.
+
+The MinHash/SimHash-style near-duplicate pass was tested on the same frozen prod snapshot:
+
+```text
+300 mixed items:
+  without near-duplicate pass: 286 stories, 14 multi-item, 2 cross-source
+  with near-duplicate pass:    286 stories, 14 multi-item, 2 cross-source
+
+300 ai_technology items:
+  without near-duplicate pass: 283 stories, 17 multi-item, 2 cross-source
+  with near-duplicate pass:    282 stories, 18 multi-item, 3 cross-source
+
+full 7-day release:
+  before near-duplicate pass: 4,742 stories, 188 multi-item, 48 cross-source
+  after near-duplicate pass:  4,723 stories, 203 multi-item, 54 cross-source
+```
+
+Manual sample of new near-duplicate merges was mostly correct: Paramount/WB merger, prediction
+markets ban, Meta social-media lawsuit, Claude chats in search, Kimi-K3/HF, oil at $100 and Zidane
+France coach were useful joins. One Iran/Reuters cluster remained suspicious, but inspection showed
+the root cause was an existing shared canonical/target URL edge, not the near-duplicate rule itself.
+Decision: keep this pass for `shadow`/lab attempts, but it is incremental, not enough for
+production publication without Qwen/manual gates.
+
+Additional SemHash-style guarded semantic-dedup experiment on the same full release used
+`lexical-hash-v1`, not true E5 embeddings:
+
+```text
+baseline_sparse_dense:
+  4,742 stories, 188 multi-item, 48 cross-source, 95.66% compression
+minhash_simhash_near_duplicates:
+  4,723 stories, 203 multi-item, 54 cross-source, 95.28% compression
+semantic_dedup:
+  4,740 stories, 190 multi-item, 48 cross-source, 95.62% compression
+combined_near_and_semantic:
+  4,722 stories, 204 multi-item, 54 cross-source, 95.26% compression
+```
+
+Decision: on lexical vectors, `semantic_dedup` adds almost no value. The winner for the current
+dependency-light stack is `combined_near_and_semantic`, but almost all measurable improvement comes
+from the MinHash/SimHash near-duplicate pass. A semantic-dedup decision requires a separate E5 run.
+
+Production gate remains closed until:
+
+- Qwen story review runs on grey-zone pairs and a new StoryRelease consumes cached decisions;
+- the 120-pair / 30-group Golden Set confirms precision, recall and overmerge limits;
+- TrendRelease contains confirmed useful trends rather than only deterministic `pending` candidates;
+- seven daily finalized Data Releases exist for lifecycle/status history.

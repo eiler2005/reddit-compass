@@ -311,14 +311,22 @@ Published Radar includes a cockpit section that links these layers.
 ```bash
 reddit-compass engine release create --run 2026-07-29:broad
 reddit-compass engine facets --release RELEASE_ID --profile broad
-reddit-compass engine stories propose --facet-release FACET_ID --limit 50
+reddit-compass engine embeddings --release RELEASE_ID --model lexical-hash-v1
+reddit-compass engine stories propose \
+  --facet-release FACET_ID \
+  --limit 50 \
+  --embedding-model lexical-hash-v1 \
+  --dense-top-k 24 \
+  --dense-threshold 0.55
 reddit-compass engine stories inspect --story-release STORY_ID
+reddit-compass engine experiments compare --facet-release FACET_ID --limit 300
 reddit-compass engine trends propose --story-release STORY_ID
 reddit-compass engine publish --story-release STORY_ID --trend-release TREND_ID --channel shadow
 ```
 
-`compass.db` открывается read-only; Radar читает только опубликованную версию. Старый `lab`
-остаётся compatibility alias на один релиз. Полный контракт:
+`broad` publication закрыт gate-ами качества; экспериментальные версии публикуются только в
+`shadow`. `compass.db` открывается read-only; Radar читает только опубликованную версию. Старый
+`lab` остаётся compatibility alias на один релиз. Полный контракт:
 [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md).
 
 ### Дизайн

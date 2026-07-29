@@ -25,6 +25,7 @@ from .config import DEFAULT_HARVESTS_DIR, DEFAULT_PROFILE, DEFAULT_SNAPSHOTS_DIR
 from .detect_virality import detect_virality
 from .export import render_trends_report, write_snapshot, write_trends_report
 from .fetch_subreddits import fetch_all_subreddits
+from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
 from .models import PostCard, TrackedThreadState, ViralitySignal
 from .search_keywords import search_all_keywords
 from .track_threads import track_all_threads
@@ -588,6 +589,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         DEFAULT_ENGINE_DB_PATH,
         cache_release_embeddings,
         compare_engine_versions,
+        compare_story_engine_variants,
         create_data_release,
         create_facet_release,
         create_story_release,
@@ -715,13 +717,52 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             )
             print(json.dumps(asdict(facet_release_output), ensure_ascii=False, indent=2))
             return
+        if args.engine_group == "experiments" and args.engine_action == "compare":
+            result = compare_story_engine_variants(
+                engine_conn,
+                facet_release_id=args.facet_release,
+                base_params={
+                    "embedding_model": args.embedding_model,
+                    "embedding_revision": args.embedding_revision,
+                    "dense_top_k": args.dense_top_k,
+                    "dense_candidate_threshold": args.dense_threshold,
+                    "auto_merge_threshold": args.auto_merge_threshold,
+                    "review_threshold": args.review_threshold,
+                    "semantic_dedup_threshold": args.semantic_dedup_threshold,
+                    "semantic_dedup_max_days": args.semantic_dedup_max_days,
+                    "near_duplicate_max_bucket_size": args.near_duplicate_max_bucket_size,
+                    "near_duplicate_simhash_distance": args.near_duplicate_simhash_distance,
+                    "near_duplicate_shingle_jaccard": args.near_duplicate_shingle_jaccard,
+                },
+                limit=args.limit,
+                domain=args.domain,
+                sample_limit=args.sample_limit,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
         if args.engine_group == "stories":
             if args.engine_action == "propose":
+                story_params = {
+                    "embedding_model": args.embedding_model,
+                    "embedding_revision": args.embedding_revision,
+                    "dense_top_k": args.dense_top_k,
+                    "dense_candidate_threshold": args.dense_threshold,
+                    "auto_merge_threshold": args.auto_merge_threshold,
+                    "review_threshold": args.review_threshold,
+                    "near_duplicate_enabled": not args.no_near_duplicates,
+                    "near_duplicate_max_bucket_size": args.near_duplicate_max_bucket_size,
+                    "near_duplicate_simhash_distance": args.near_duplicate_simhash_distance,
+                    "near_duplicate_shingle_jaccard": args.near_duplicate_shingle_jaccard,
+                    "semantic_dedup_enabled": args.semantic_dedup,
+                    "semantic_dedup_threshold": args.semantic_dedup_threshold,
+                    "semantic_dedup_max_days": args.semantic_dedup_max_days,
+                }
                 story_release_output = create_story_release(
                     engine_conn,
                     facet_release_id=args.facet_release,
                     limit=args.limit,
                     domain=args.domain,
+                    params=story_params,
                 )
                 print(json.dumps(asdict(story_release_output), ensure_ascii=False, indent=2))
                 return
@@ -785,6 +826,13 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     engine_conn,
                     story_release_id=args.story_release,
                     window=args.window,
+                    params={
+                        "trend_top_k": args.top_k,
+                        "trend_edge_threshold": args.edge_threshold,
+                        "trend_medoid_threshold": args.medoid_threshold,
+                        "trend_max_feature_df": args.max_feature_df,
+                        "trend_max_candidate_pairs": args.max_candidate_pairs,
+                    },
                 )
                 print(json.dumps(asdict(trend_release_output), ensure_ascii=False, indent=2))
                 return
@@ -1214,6 +1262,46 @@ def build_parser() -> argparse.ArgumentParser:
     engine_facets.add_argument("--release", required=True)
     engine_facets.add_argument("--profile", default=DEFAULT_PROFILE)
 
+    engine_experiments = engine_sub.add_parser(
+        "experiments",
+        help="Run unpublished A/B experiments over frozen Engine releases",
+    )
+    engine_experiments_sub = engine_experiments.add_subparsers(
+        dest="engine_action",
+        required=True,
+    )
+    engine_experiments_compare = engine_experiments_sub.add_parser("compare")
+    engine_experiments_compare.add_argument("--facet-release", required=True)
+    engine_experiments_compare.add_argument("--limit", type=int, default=300)
+    engine_experiments_compare.add_argument("--domain", default=None)
+    engine_experiments_compare.add_argument("--sample-limit", type=int, default=5)
+    engine_experiments_compare.add_argument(
+        "--embedding-model",
+        default=LEXICAL_HASH_EMBEDDING_MODEL,
+    )
+    engine_experiments_compare.add_argument("--embedding-revision", default="default")
+    engine_experiments_compare.add_argument("--dense-top-k", type=int, default=24)
+    engine_experiments_compare.add_argument("--dense-threshold", type=float, default=0.55)
+    engine_experiments_compare.add_argument("--auto-merge-threshold", type=float, default=0.82)
+    engine_experiments_compare.add_argument("--review-threshold", type=float, default=0.55)
+    engine_experiments_compare.add_argument("--semantic-dedup-threshold", type=float, default=0.88)
+    engine_experiments_compare.add_argument("--semantic-dedup-max-days", type=int, default=7)
+    engine_experiments_compare.add_argument(
+        "--near-duplicate-max-bucket-size",
+        type=int,
+        default=40,
+    )
+    engine_experiments_compare.add_argument(
+        "--near-duplicate-simhash-distance",
+        type=int,
+        default=18,
+    )
+    engine_experiments_compare.add_argument(
+        "--near-duplicate-shingle-jaccard",
+        type=float,
+        default=0.34,
+    )
+
     engine_stories = engine_sub.add_parser("stories", help="Story release operations")
     engine_stories_sub = engine_stories.add_subparsers(
         dest="engine_action",
@@ -1223,6 +1311,38 @@ def build_parser() -> argparse.ArgumentParser:
     engine_stories_propose.add_argument("--facet-release", required=True)
     engine_stories_propose.add_argument("--limit", type=int, default=0)
     engine_stories_propose.add_argument("--domain", default=None)
+    engine_stories_propose.add_argument(
+        "--embedding-model",
+        default="intfloat/multilingual-e5-small",
+        help=(
+            "Embedding model hash to read for dense retrieval. Use "
+            f"{LEXICAL_HASH_EMBEDDING_MODEL} for dependency-free VPS runs."
+        ),
+    )
+    engine_stories_propose.add_argument("--embedding-revision", default="default")
+    engine_stories_propose.add_argument("--dense-top-k", type=int, default=16)
+    engine_stories_propose.add_argument("--dense-threshold", type=float, default=0.62)
+    engine_stories_propose.add_argument("--auto-merge-threshold", type=float, default=0.82)
+    engine_stories_propose.add_argument("--review-threshold", type=float, default=0.58)
+    engine_stories_propose.add_argument(
+        "--no-near-duplicates",
+        action="store_true",
+        help="Disable SimHash/MinHash-style near-duplicate candidate generation.",
+    )
+    engine_stories_propose.add_argument("--near-duplicate-max-bucket-size", type=int, default=40)
+    engine_stories_propose.add_argument("--near-duplicate-simhash-distance", type=int, default=18)
+    engine_stories_propose.add_argument(
+        "--near-duplicate-shingle-jaccard",
+        type=float,
+        default=0.34,
+    )
+    engine_stories_propose.add_argument(
+        "--semantic-dedup",
+        action="store_true",
+        help="Enable guarded semantic embedding auto-merge for dense candidates.",
+    )
+    engine_stories_propose.add_argument("--semantic-dedup-threshold", type=float, default=0.88)
+    engine_stories_propose.add_argument("--semantic-dedup-max-days", type=int, default=7)
     engine_stories_inspect = engine_stories_sub.add_parser("inspect")
     engine_stories_inspect.add_argument("--story-release", required=True)
     engine_stories_inspect.add_argument("--limit", type=int, default=20)
@@ -1244,6 +1364,11 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose = engine_trends_sub.add_parser("propose")
     engine_trends_propose.add_argument("--story-release", required=True)
     engine_trends_propose.add_argument("--window", default="30d")
+    engine_trends_propose.add_argument("--top-k", type=int, default=12)
+    engine_trends_propose.add_argument("--edge-threshold", type=float, default=0.45)
+    engine_trends_propose.add_argument("--medoid-threshold", type=float, default=0.4)
+    engine_trends_propose.add_argument("--max-feature-df", type=int, default=0)
+    engine_trends_propose.add_argument("--max-candidate-pairs", type=int, default=150_000)
     engine_trends_inspect = engine_trends_sub.add_parser("inspect")
     engine_trends_inspect.add_argument("--trend-release", required=True)
     engine_trends_inspect.add_argument("--limit", type=int, default=20)

@@ -11,6 +11,9 @@ import pytest
 
 from reddit_compass.intelligence.engine import (
     FrozenItem,
+    _discover_trends_graph,
+    _story_topic_keys,
+    compare_story_engine_variants,
     create_data_release,
     create_facet_release,
     create_story_release,
@@ -144,6 +147,182 @@ def test_stable_repository_url_can_merge_matching_event_titles() -> None:
     assert len(candidates) == 1
     assert candidates[0].decision == "auto_merge"
     assert candidates[0].features["stable_landing_url_match"] is True
+
+
+def test_huggingface_model_release_url_can_merge_launch_wave() -> None:
+    model_url = "https://huggingface.co/moonshotai/Kimi-K3"
+    items = [
+        _frozen_item(
+            "reddit:kimi",
+            model_url,
+            "KIMI K3’s WEIGHTS ARE OUT!",
+            "2026-07-28T08:00:00Z",
+        ),
+        _frozen_item(
+            "hn:kimi",
+            model_url,
+            "Kimi-K3 on HuggingFace",
+            "2026-07-29T08:00:00Z",
+        ),
+    ]
+
+    candidates = generate_story_candidates(items, {})
+
+    assert len(candidates) == 1
+    assert candidates[0].decision == "auto_merge"
+    assert candidates[0].reason == "shared HuggingFace model release URL"
+
+
+def test_near_duplicate_title_fingerprint_merges_syndicated_headlines() -> None:
+    items = [
+        _frozen_item(
+            "wired:claude",
+            "https://wired.example/claude-chats-search",
+            "Private Claude chats exposed in Google and Bing search results",
+            "2026-07-29T08:00:00Z",
+        ),
+        _frozen_item(
+            "reddit:claude",
+            "https://reddit.example/discussion",
+            "Private Claude chats exposed through Google and Bing searches",
+            "2026-07-29T09:00:00Z",
+        ),
+    ]
+
+    candidates = generate_story_candidates(
+        items,
+        {},
+        params={"near_duplicate_enabled": True},
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].decision == "auto_merge"
+    assert candidates[0].reason == "near-duplicate title fingerprint"
+    assert "near_duplicate" in candidates[0].features["generated_by"]
+    assert candidates[0].features["near_duplicate_simhash_distance"] <= 18
+
+
+def test_semantic_dedup_embedding_merges_guarded_paraphrase() -> None:
+    items = [
+        _frozen_item(
+            "guardian:openai",
+            "https://guardian.example/openai-model-delay",
+            "OpenAI delays model launch after safety tests",
+            "2026-07-29T08:00:00Z",
+        ),
+        _frozen_item(
+            "hn:openai",
+            "https://news.ycombinator.com/item?id=1",
+            "Safety testing forces OpenAI to postpone model launch",
+            "2026-07-29T09:00:00Z",
+        ),
+    ]
+
+    candidates = generate_story_candidates(
+        items,
+        {
+            "guardian:openai": {"entities": json.dumps(["openai"])},
+            "hn:openai": {"entities": json.dumps(["openai"])},
+        },
+        params={
+            "semantic_dedup_enabled": True,
+            "semantic_dedup_threshold": 0.9,
+            "dense_candidate_threshold": 0.9,
+            "dense_top_k": 4,
+        },
+        embeddings={
+            "guardian:openai": [1.0, 0.0, 0.0],
+            "hn:openai": [0.99, 0.01, 0.0],
+        },
+    )
+
+    assert len(candidates) == 1
+    assert candidates[0].decision == "auto_merge"
+    assert candidates[0].reason == "semantic embedding dedup"
+    assert candidates[0].features["dense_similarity"] >= 0.9
+
+
+def test_story_engine_ab_compare_runs_all_variants(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=data_release.release_id)
+
+    comparison = compare_story_engine_variants(
+        engine,
+        facet_release_id=facets.facet_release_id,
+        base_params={
+            "embedding_model": "missing-model",
+            "dense_candidate_threshold": 0.55,
+        },
+        limit=6,
+        sample_limit=2,
+    )
+
+    variants = comparison["variants"]
+    assert [variant["variant"] for variant in variants] == [
+        "baseline_sparse_dense",
+        "minhash_simhash_near_duplicates",
+        "semantic_dedup",
+        "combined_near_and_semantic",
+    ]
+    assert all(variant["story_release_id"].startswith("stories_") for variant in variants)
+    assert variants[0]["delta_vs_baseline"]["story_count"] == 0
+
+
+def test_generic_topic_phrase_does_not_become_trend_pattern() -> None:
+    assert "open source" not in _story_topic_keys(
+        {"title": "Open source AI tools reshape developer workflows"}
+    )
+    assert "security review" in _story_topic_keys(
+        {"title": "OpenAI starts security review after model breach"}
+    )
+
+
+def test_theme_alone_does_not_create_trend() -> None:
+    stories = [
+        {
+            "story_id": f"story_{index}",
+            "title": title,
+            "domain_ids": json.dumps(["business_markets"]),
+            "first_seen": f"2026-07-{27 + index}",
+            "last_seen": f"2026-07-{27 + index}",
+            "project_scores": "{}",
+        }
+        for index, title in enumerate(
+            [
+                "Oracle quarterly revenue beats expectations",
+                "Startup founder discusses hiring plan",
+                "Retail chain changes loyalty program",
+            ]
+        )
+    ]
+    story_items = {f"story_{index}": [f"item_{index}"] for index in range(3)}
+    facets = {
+        f"item_{index}": {
+            "candidate_themes": json.dumps(["business"]),
+            "theme_ids": "[]",
+            "pain_points": "[]",
+            "event_frame_json": "{}",
+        }
+        for index in range(3)
+    }
+
+    trends, _ = _discover_trends_graph(
+        stories,
+        story_items,
+        facets,
+        {},
+        params={"min_stories": 3, "min_dates": 2},
+    )
+
+    assert trends == []
 
 
 def test_golden_set_export_and_import_are_release_scoped(tmp_path: Path) -> None:

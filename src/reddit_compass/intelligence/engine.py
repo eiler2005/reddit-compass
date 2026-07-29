@@ -25,6 +25,7 @@ from rapidfuzz import fuzz
 from ..config import DEFAULT_DATA_DIR, PROJECT_ROOT
 from .clustering import (
     extract_entities,
+    extract_ordered_tokens,
     extract_tokens,
     is_generic_title,
     is_low_signal_title,
@@ -1817,6 +1818,93 @@ def get_story_release(conn: sqlite3.Connection, story_release_id: str) -> StoryR
     )
 
 
+def compare_story_engine_variants(
+    conn: sqlite3.Connection,
+    *,
+    facet_release_id: str,
+    base_params: dict[str, Any] | None = None,
+    limit: int = 300,
+    domain: str | None = None,
+    sample_limit: int = 5,
+) -> dict[str, Any]:
+    """Run reproducible Story Engine A/B attempts on one frozen FacetRelease."""
+    base_params = dict(base_params or {})
+    variants: list[tuple[str, dict[str, Any]]] = [
+        (
+            "baseline_sparse_dense",
+            {
+                "near_duplicate_enabled": False,
+                "semantic_dedup_enabled": False,
+            },
+        ),
+        (
+            "minhash_simhash_near_duplicates",
+            {
+                "near_duplicate_enabled": True,
+                "semantic_dedup_enabled": False,
+            },
+        ),
+        (
+            "semantic_dedup",
+            {
+                "near_duplicate_enabled": False,
+                "semantic_dedup_enabled": True,
+            },
+        ),
+        (
+            "combined_near_and_semantic",
+            {
+                "near_duplicate_enabled": True,
+                "semantic_dedup_enabled": True,
+            },
+        ),
+    ]
+    results: list[dict[str, Any]] = []
+    baseline_metrics: dict[str, Any] | None = None
+    for variant_name, variant_params in variants:
+        story_release = create_story_release(
+            conn,
+            facet_release_id=facet_release_id,
+            params={
+                **base_params,
+                **variant_params,
+                "experiment_variant": variant_name,
+            },
+            limit=limit,
+            domain=domain,
+        )
+        metrics = dict(story_release.metrics)
+        if baseline_metrics is None:
+            baseline_metrics = metrics
+        results.append(
+            {
+                "variant": variant_name,
+                "story_release_id": story_release.story_release_id,
+                "params": {
+                    **base_params,
+                    **variant_params,
+                },
+                "metrics": metrics,
+                "delta_vs_baseline": _metric_delta(metrics, baseline_metrics),
+                "reason_counts": _story_release_reason_counts(
+                    conn,
+                    story_release.story_release_id,
+                ),
+                "cross_source_samples": _story_release_cross_source_samples(
+                    conn,
+                    story_release.story_release_id,
+                    limit=sample_limit,
+                ),
+            }
+        )
+    return {
+        "facet_release_id": facet_release_id,
+        "limit": limit,
+        "domain": domain or "",
+        "variants": results,
+    }
+
+
 def generate_story_candidates(
     items: list[FrozenItem],
     facets: dict[str, dict[str, Any]],
@@ -1831,6 +1919,8 @@ def generate_story_candidates(
     url_index: dict[str, list[str]] = defaultdict(list)
     token_index: dict[str, list[str]] = defaultdict(list)
     entity_index: dict[str, list[str]] = defaultdict(list)
+    near_duplicate_index: dict[str, list[str]] = defaultdict(list)
+    near_duplicate_enabled = bool(params.get("near_duplicate_enabled", True))
     for item in items:
         for url in _item_urls(item):
             url_index[url].append(item.item_id)
@@ -1839,6 +1929,9 @@ def generate_story_candidates(
             continue
         for token in extract_tokens(normalized):
             token_index[token].append(item.item_id)
+        if near_duplicate_enabled:
+            for bucket_key in _near_duplicate_bucket_keys(normalized):
+                near_duplicate_index[bucket_key].append(item.item_id)
         entities = _facet_entities(facets.get(item.item_id, {})) or _meaningful_entities(item.title)
         for entity in entities:
             entity_index[entity].append(item.item_id)
@@ -1852,6 +1945,11 @@ def generate_story_candidates(
     for ids in entity_index.values():
         if 1 < len(ids) <= max_df:
             _add_index_pairs(pair_reasons, ids, "entity")
+    near_duplicate_max_bucket_size = int(params.get("near_duplicate_max_bucket_size", 40))
+    if near_duplicate_enabled:
+        for ids in near_duplicate_index.values():
+            if 1 < len(ids) <= near_duplicate_max_bucket_size:
+                _add_index_pairs(pair_reasons, ids, "near_duplicate")
     dense_scores = top_k_cosine_pairs(
         embeddings or {},
         top_k=int(params.get("dense_top_k", 12)),
@@ -2102,6 +2200,39 @@ def _score_story_pair(
             reason="shared canonical/target URL",
             features=features,
         )
+    huggingface_model_urls = sorted(url for url in shared_urls if _is_huggingface_model_url(url))
+    if huggingface_model_urls:
+        left_tokens_preview = extract_tokens(left_norm)
+        right_tokens_preview = extract_tokens(right_norm)
+        shared_tokens_preview = left_tokens_preview & right_tokens_preview
+        token_jaccard_preview = len(shared_tokens_preview) / max(
+            len(left_tokens_preview | right_tokens_preview),
+            1,
+        )
+        date_distance_preview = _date_distance_days(left, right)
+        if (
+            len(shared_tokens_preview) >= 1
+            and token_jaccard_preview >= 0.25
+            and date_distance_preview <= 7
+        ):
+            item_id_a, item_id_b = _pair_key(left.item_id, right.item_id)
+            return PairCandidate(
+                item_id_a=item_id_a,
+                item_id_b=item_id_b,
+                score=0.86,
+                decision="auto_merge",
+                reason="shared HuggingFace model release URL",
+                features={
+                    "url_match": True,
+                    "shared_urls": huggingface_model_urls,
+                    "token_jaccard": round(token_jaccard_preview, 4),
+                    "shared_tokens": sorted(shared_tokens_preview),
+                    "date_distance_days": date_distance_preview,
+                    "source_independent": left.provider != right.provider,
+                    "generated_by": sorted(generated_by),
+                    "stable_landing_url_match": True,
+                },
+            )
     if (
         is_generic_title(left_norm)
         or is_generic_title(right_norm)
@@ -2139,6 +2270,11 @@ def _score_story_pair(
     right_action = str(right_frame.get("action") or "")
     action_match = bool(left_action and right_action and left_action == right_action)
     date_distance = _date_distance_days(left, right)
+    near_duplicate_features = (
+        _near_duplicate_similarity_features(left_norm, right_norm)
+        if "near_duplicate" in generated_by
+        else {}
+    )
     time_score = 1.0 if date_distance <= 2 else 0.7 if date_distance <= 7 else 0.3
     source_independent = left.provider != right.provider
     shared_themes = set(_json_list(left_facets.get("candidate_themes"))) & set(
@@ -2174,47 +2310,122 @@ def _score_story_pair(
     score = round(max(0.0, min(score, 0.99)), 4)
     auto_threshold = float(params.get("auto_merge_threshold", 0.82))
     review_threshold = float(params.get("review_threshold", 0.62))
+    dense_auto_threshold = float(params.get("dense_auto_threshold", 0.88))
+    dense_review_threshold = float(params.get("dense_review_threshold", 0.72))
     hard_conflict = (
         (number_conflict and len(shared_entities) < 2 and title_score < 0.9)
         or location_conflict
         or person_conflict
     )
+    huggingface_model_url_match = bool(
+        any(_is_huggingface_model_url(url) for url in shared_urls)
+        and len(shared_tokens) >= 1
+        and token_jaccard >= 0.25
+        and date_distance <= 7
+    )
+    near_duplicate_title_match = bool(
+        near_duplicate_features
+        and date_distance <= 7
+        and near_duplicate_features["near_duplicate_simhash_distance"]
+        <= int(params.get("near_duplicate_simhash_distance", 18))
+        and (
+            near_duplicate_features["near_duplicate_shingle_jaccard"]
+            >= float(params.get("near_duplicate_shingle_jaccard", 0.34))
+            or token_jaccard >= 0.45
+            or title_score >= 0.86
+        )
+    )
+    semantic_dedup_match = bool(
+        params.get("semantic_dedup_enabled", False)
+        and dense_similarity is not None
+        and dense_similarity >= float(params.get("semantic_dedup_threshold", 0.88))
+        and date_distance <= int(params.get("semantic_dedup_max_days", 7))
+        and (
+            shared_entities
+            or token_jaccard >= 0.34
+            or title_score >= 0.78
+            or bool(left_numbers & right_numbers)
+        )
+    )
+    dense_event_match = bool(
+        dense_similarity is not None
+        and dense_similarity >= dense_auto_threshold
+        and (title_score >= 0.68 or token_jaccard >= 0.32 or bool(left_numbers & right_numbers))
+        and (shared_entities or title_score >= 0.82)
+    )
+    dense_review_match = bool(
+        dense_similarity is not None
+        and dense_similarity >= dense_review_threshold
+        and (
+            title_score >= 0.5
+            or token_jaccard >= 0.2
+            or bool(shared_entities)
+            or bool(left_numbers & right_numbers)
+        )
+    )
+    exact_title_event_match = bool(
+        title_score >= 0.98
+        and token_jaccard >= 0.72
+        and date_distance <= 3
+        and (
+            source_independent
+            or left.source_section != right.source_section
+            or left.canonical_url != right.canonical_url
+        )
+    )
     if hard_conflict:
         decision = "reject"
         reason = "number/date event conflict"
+    elif huggingface_model_url_match:
+        decision = "auto_merge"
+        reason = "shared HuggingFace model release URL"
+    elif near_duplicate_title_match:
+        decision = "auto_merge"
+        reason = "near-duplicate title fingerprint"
+        score = max(score, 0.86)
+    elif semantic_dedup_match:
+        decision = "auto_merge"
+        reason = "semantic embedding dedup"
+        score = max(score, float(params.get("semantic_dedup_score", 0.84)))
+    elif exact_title_event_match:
+        decision = "auto_merge"
+        reason = "exact event title match without hard conflict"
+    elif dense_event_match:
+        decision = "auto_merge"
+        reason = "high dense event similarity without hard conflict"
     elif score >= auto_threshold and (shared_entities or title_score >= 0.9):
         decision = "auto_merge"
         reason = "high event similarity without hard conflict"
-    elif score >= review_threshold:
+    elif score >= review_threshold or dense_review_match:
         decision = "review"
         reason = "ambiguous event similarity; LLM/manual review required"
     else:
         return None
     item_id_a, item_id_b = _pair_key(left.item_id, right.item_id)
+    candidate_features: dict[str, Any] = {
+        "title_score": round(title_score, 4),
+        "token_jaccard": round(token_jaccard, 4),
+        "entity_score": round(entity_score, 4),
+        "dense_similarity": round(dense_similarity, 4) if dense_similarity is not None else None,
+        "shared_entities": sorted(shared_entities),
+        "shared_tokens": sorted(shared_tokens)[:20],
+        "date_distance_days": date_distance,
+        "number_conflict": number_conflict,
+        "location_conflict": location_conflict,
+        "person_conflict": person_conflict,
+        "action_match": action_match,
+        "source_independent": source_independent,
+        "generated_by": sorted(generated_by),
+        "stable_landing_url_match": bool(shared_urls),
+    }
+    candidate_features.update(near_duplicate_features)
     return PairCandidate(
         item_id_a=item_id_a,
         item_id_b=item_id_b,
         score=score,
         decision=decision,
         reason=reason,
-        features={
-            "title_score": round(title_score, 4),
-            "token_jaccard": round(token_jaccard, 4),
-            "entity_score": round(entity_score, 4),
-            "dense_similarity": round(dense_similarity, 4)
-            if dense_similarity is not None
-            else None,
-            "shared_entities": sorted(shared_entities),
-            "shared_tokens": sorted(shared_tokens)[:20],
-            "date_distance_days": date_distance,
-            "number_conflict": number_conflict,
-            "location_conflict": location_conflict,
-            "person_conflict": person_conflict,
-            "action_match": action_match,
-            "source_independent": source_independent,
-            "generated_by": sorted(generated_by),
-            "stable_landing_url_match": bool(shared_urls),
-        },
+        features=candidate_features,
     )
 
 
@@ -2449,6 +2660,7 @@ def _reconcile_story_identity(
                 memberships,
             )
         )
+    reconciled = _deduplicate_story_ids(reconciled)
     redirects: list[tuple[str, str, str]] = []
     for old_story_id, old_items in previous_items.items():
         if old_story_id in assigned_old:
@@ -2465,6 +2677,26 @@ def _reconcile_story_identity(
         if new_story_id != old_story_id:
             redirects.append((old_story_id, new_story_id, "story merge/split continuity"))
     return reconciled, redirects
+
+
+def _deduplicate_story_ids(
+    stories: list[tuple[dict[str, Any], list[tuple[str, float, str]]]],
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    seen: set[str] = set()
+    result: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
+    for story, memberships in stories:
+        story_id = str(story["story_id"])
+        if story_id in seen:
+            member_key = ",".join(sorted(item_id for item_id, _, _ in memberships))
+            story_id = _stable_id(story_id, "split", member_key)
+            suffix = 1
+            while story_id in seen:
+                suffix += 1
+                story_id = _stable_id(story_id, "split", member_key, str(suffix))
+            story = {**story, "story_id": story_id}
+        seen.add(story_id)
+        result.append((story, memberships))
+    return result
 
 
 def _story_release_metrics(
@@ -2953,6 +3185,9 @@ def _discover_trends_graph(
     top_k = int(params.get("trend_top_k", 12))
     edge_threshold = float(params.get("trend_edge_threshold", 0.45))
     medoid_threshold = float(params.get("trend_medoid_threshold", 0.4))
+    default_max_feature_df = min(500, max(20, int(len(stories) * 0.08)))
+    max_feature_df = int(params.get("trend_max_feature_df") or default_max_feature_df)
+    max_candidate_pairs = int(params.get("trend_max_candidate_pairs", 150_000))
     stories_by_id = {str(story["story_id"]): story for story in stories}
     feature_sets = {
         story_id: _story_trend_features(
@@ -2969,22 +3204,29 @@ def _discover_trends_graph(
                 feature_index[f"{kind}:{value}"].append(story_id)
 
     shared_by_pair: dict[tuple[str, str], set[str]] = defaultdict(set)
-    max_feature_df = max(20, int(len(stories) * 0.35))
+    candidate_pair_total = 0
     for feature, story_ids in feature_index.items():
-        if 1 < len(story_ids) <= max_feature_df:
-            for left_index, left_id in enumerate(sorted(set(story_ids))):
-                for right_id in sorted(set(story_ids))[left_index + 1 :]:
-                    shared_by_pair[_pair_key(left_id, right_id)].add(feature)
+        unique_story_ids = sorted(set(story_ids))
+        if len(unique_story_ids) <= 1 or len(unique_story_ids) > max_feature_df:
+            continue
+        pair_count = len(unique_story_ids) * (len(unique_story_ids) - 1) // 2
+        if candidate_pair_total + pair_count > max_candidate_pairs:
+            continue
+        candidate_pair_total += pair_count
+        for left_index, left_id in enumerate(unique_story_ids):
+            for right_id in unique_story_ids[left_index + 1 :]:
+                shared_by_pair[_pair_key(left_id, right_id)].add(feature)
 
     scored_edges: list[tuple[float, str, str, set[str]]] = []
     for (left_id, right_id), shared in shared_by_pair.items():
-        shared_kinds = {feature.split(":", 1)[0] for feature in shared}
-        has_specific_pattern = "topic" in shared_kinds or (
-            "action" in shared_kinds and "theme" in shared_kinds
-        )
+        specific_shared = {feature for feature in shared if not _is_generic_trend_pattern(feature)}
+        shared_kinds = {feature.split(":", 1)[0] for feature in specific_shared}
+        has_specific_pattern = (
+            "topic" in shared_kinds and bool(shared_kinds & {"theme", "pain", "action"})
+        ) or ("action" in shared_kinds and bool(shared_kinds & {"theme", "pain"}))
         if not has_specific_pattern:
             continue
-        score = sum(_trend_feature_weight(feature) for feature in shared)
+        score = sum(_trend_feature_weight(feature) for feature in specific_shared)
         shared_domains = feature_sets[left_id]["domain"] & feature_sets[right_id]["domain"]
         score += min(0.1, len(shared_domains) * 0.05)
         date_distance = _story_date_distance(
@@ -2997,7 +3239,7 @@ def _discover_trends_graph(
             score -= 0.08
         score = round(min(1.0, max(0.0, score)), 4)
         if score >= edge_threshold:
-            scored_edges.append((score, left_id, right_id, shared))
+            scored_edges.append((score, left_id, right_id, specific_shared))
 
     nearest: dict[str, list[tuple[float, str, set[str]]]] = defaultdict(list)
     for score, left_id, right_id, shared in scored_edges:
@@ -3065,7 +3307,9 @@ def _discover_trends_graph(
         pattern_features = [
             (count, feature)
             for feature, count in feature_counts.items()
-            if count >= min_stories and feature.split(":", 1)[0] in {"topic", "action"}
+            if count >= min_stories
+            and feature.split(":", 1)[0] in {"topic", "action", "pain"}
+            and not _is_generic_trend_pattern(feature)
         ]
         if not pattern_features:
             continue
@@ -3172,7 +3416,10 @@ def _story_trend_features(
     themes = {
         theme
         for item_id in item_ids
-        for theme in _json_list(facets.get(item_id, {}).get("candidate_themes"))
+        for theme in (
+            _json_list(facets.get(item_id, {}).get("candidate_themes"))
+            + _json_list(facets.get(item_id, {}).get("theme_ids"))
+        )
     }
     pains = {
         pain
@@ -4026,6 +4273,92 @@ def evaluate_trend_release(conn: sqlite3.Connection, trend_release_id: str) -> d
     return result
 
 
+def _metric_delta(
+    metrics: dict[str, Any],
+    baseline: dict[str, Any],
+) -> dict[str, float | int]:
+    deltas: dict[str, float | int] = {}
+    for key, value in metrics.items():
+        base_value = baseline.get(key)
+        if isinstance(value, int) and isinstance(base_value, int):
+            deltas[key] = value - base_value
+        elif isinstance(value, float) and isinstance(base_value, int | float):
+            deltas[key] = round(value - float(base_value), 4)
+    return deltas
+
+
+def _story_release_reason_counts(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT membership_reason, COUNT(*) AS count
+        FROM engine_story_items
+        WHERE story_release_id = ?
+          AND membership_reason <> 'story medoid'
+        GROUP BY membership_reason
+        ORDER BY count DESC, membership_reason
+        """,
+        (story_release_id,),
+    ).fetchall()
+    return {str(row["membership_reason"]): int(row["count"]) for row in rows}
+
+
+def _story_release_cross_source_samples(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    story_rows = conn.execute(
+        """
+        SELECT story_id, title, item_count, source_count
+        FROM engine_stories
+        WHERE story_release_id = ? AND source_count >= 2
+        ORDER BY item_count DESC, source_count DESC, title
+        LIMIT ?
+        """,
+        (story_release_id, max(0, limit)),
+    ).fetchall()
+    samples: list[dict[str, Any]] = []
+    for story_row in story_rows:
+        item_rows = conn.execute(
+            """
+            SELECT ri.provider, ri.title, esi.membership_reason
+            FROM engine_story_items AS esi
+            JOIN story_releases AS sr
+              ON sr.story_release_id = esi.story_release_id
+            JOIN facet_releases AS fr
+              ON fr.facet_release_id = sr.facet_release_id
+            JOIN release_items AS ri
+              ON ri.release_id = fr.data_release_id
+             AND ri.item_id = esi.item_id
+            WHERE esi.story_release_id = ? AND esi.story_id = ?
+            ORDER BY ri.provider, ri.title
+            LIMIT 8
+            """,
+            (story_release_id, str(story_row["story_id"])),
+        ).fetchall()
+        samples.append(
+            {
+                "story_id": str(story_row["story_id"]),
+                "title": str(story_row["title"]),
+                "item_count": int(story_row["item_count"]),
+                "source_count": int(story_row["source_count"]),
+                "items": [
+                    {
+                        "provider": str(item_row["provider"]),
+                        "title": str(item_row["title"]),
+                        "reason": str(item_row["membership_reason"]),
+                    }
+                    for item_row in item_rows
+                ],
+            }
+        )
+    return samples
+
+
 def compare_engine_versions(
     conn: sqlite3.Connection,
     left_id: str,
@@ -4102,6 +4435,63 @@ def _add_index_pairs(
             pair_reasons[(left, right)].add(reason)
 
 
+def _near_duplicate_bucket_keys(normalized_title: str) -> list[str]:
+    tokens = extract_ordered_tokens(normalized_title)
+    if len(tokens) < 3:
+        return []
+    shingles = _title_shingles(tokens)
+    fingerprint = _simhash(shingles | set(tokens))
+    keys = [f"nd:sim:{band}:{(fingerprint >> (band * 16)) & 0xFFFF}" for band in range(4)]
+    minhashes = sorted(_stable_u64(shingle) for shingle in shingles)[:4]
+    keys.extend(f"nd:min:{value & 0xFFFFFFFF:08x}" for value in minhashes)
+    return keys
+
+
+def _near_duplicate_similarity_features(left_norm: str, right_norm: str) -> dict[str, Any]:
+    left_tokens = extract_ordered_tokens(left_norm)
+    right_tokens = extract_ordered_tokens(right_norm)
+    left_shingles = _title_shingles(left_tokens)
+    right_shingles = _title_shingles(right_tokens)
+    shingle_jaccard = len(left_shingles & right_shingles) / max(
+        len(left_shingles | right_shingles),
+        1,
+    )
+    left_fingerprint = _simhash(left_shingles | set(left_tokens))
+    right_fingerprint = _simhash(right_shingles | set(right_tokens))
+    return {
+        "near_duplicate_shingle_jaccard": round(shingle_jaccard, 4),
+        "near_duplicate_simhash_distance": (left_fingerprint ^ right_fingerprint).bit_count(),
+    }
+
+
+def _title_shingles(tokens: list[str]) -> set[str]:
+    if len(tokens) < 3:
+        return set(tokens)
+    return {" ".join(tokens[index : index + 3]) for index in range(len(tokens) - 2)}
+
+
+def _simhash(features: set[str]) -> int:
+    if not features:
+        return 0
+    counters = [0] * 64
+    for feature in features:
+        value = _stable_u64(feature)
+        for bit in range(64):
+            counters[bit] += 1 if value & (1 << bit) else -1
+    fingerprint = 0
+    for bit, score in enumerate(counters):
+        if score >= 0:
+            fingerprint |= 1 << bit
+    return fingerprint
+
+
+def _stable_u64(value: str) -> int:
+    return int.from_bytes(
+        hashlib.blake2b(value.encode("utf-8"), digest_size=8).digest(),
+        "big",
+    )
+
+
 def _item_urls(item: FrozenItem) -> set[str]:
     return {
         url.rstrip("/")
@@ -4122,6 +4512,13 @@ def _is_stable_landing_url(url: str) -> bool:
     if hostname in {"huggingface.co", "www.huggingface.co"}:
         return len(parts) <= 2 or (len(parts) <= 3 and parts[0] in {"datasets", "spaces"})
     return False
+
+
+def _is_huggingface_model_url(url: str) -> bool:
+    parsed = urlsplit(url)
+    hostname = (parsed.hostname or "").lower()
+    parts = [part for part in parsed.path.split("/") if part]
+    return hostname in {"huggingface.co", "www.huggingface.co"} and len(parts) == 2
 
 
 def _item_date(item: FrozenItem) -> str:
@@ -4162,16 +4559,52 @@ def _date_distance_days(left: FrozenItem, right: FrozenItem) -> int:
 _TREND_TOPIC_STOP = {
     "after",
     "amid",
+    "are",
+    "been",
+    "being",
+    "can",
+    "does",
     "from",
+    "have",
+    "how",
+    "just",
+    "like",
     "into",
     "more",
     "new",
     "says",
+    "the",
     "this",
+    "was",
+    "were",
+    "what",
+    "when",
+    "who",
+    "why",
+    "will",
     "with",
     "would",
     "year",
     "years",
+}
+_GENERIC_TREND_PATTERNS = {
+    "ai agent",
+    "artificial intelligence",
+    "machine learning",
+    "open source",
+    "president trump",
+    "social media",
+    "united states",
+    "white house",
+}
+_GENERIC_TREND_THEMES = {
+    "ai",
+    "business",
+    "culture",
+    "geopolitics",
+    "markets",
+    "politics",
+    "technology",
 }
 
 
@@ -4184,11 +4617,22 @@ def _story_topic_keys(story: dict[str, Any]) -> list[str]:
         for token in normalize_title(title).split()
         if token not in _TREND_TOPIC_STOP and not token.isdigit()
     ]
-    return [
-        " ".join(sorted((tokens[index], tokens[index + 1])))
-        for index in range(min(len(tokens) - 1, 4))
-        if tokens[index] != tokens[index + 1]
-    ]
+    phrases: list[str] = []
+    for index in range(min(len(tokens) - 1, 4)):
+        if tokens[index] == tokens[index + 1]:
+            continue
+        phrase = " ".join((tokens[index], tokens[index + 1]))
+        if phrase in _GENERIC_TREND_PATTERNS:
+            continue
+        phrases.append(phrase)
+    return phrases
+
+
+def _is_generic_trend_pattern(feature: str) -> bool:
+    kind, value = feature.split(":", 1)
+    return (kind == "topic" and value in _GENERIC_TREND_PATTERNS) or (
+        kind == "theme" and value in _GENERIC_TREND_THEMES
+    )
 
 
 def _normalize_trend_token(token: str) -> str:
