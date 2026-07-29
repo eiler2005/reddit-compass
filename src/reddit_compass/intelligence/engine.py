@@ -2338,7 +2338,7 @@ def _score_story_pair(
     semantic_dedup_match = bool(
         params.get("semantic_dedup_enabled", False)
         and dense_similarity is not None
-        and dense_similarity >= float(params.get("semantic_dedup_threshold", 0.88))
+        and dense_similarity >= float(params.get("semantic_dedup_threshold", 0.92))
         and date_distance <= int(params.get("semantic_dedup_max_days", 7))
         and (
             shared_entities

@@ -1284,7 +1284,7 @@ def build_parser() -> argparse.ArgumentParser:
     engine_experiments_compare.add_argument("--dense-threshold", type=float, default=0.55)
     engine_experiments_compare.add_argument("--auto-merge-threshold", type=float, default=0.82)
     engine_experiments_compare.add_argument("--review-threshold", type=float, default=0.55)
-    engine_experiments_compare.add_argument("--semantic-dedup-threshold", type=float, default=0.88)
+    engine_experiments_compare.add_argument("--semantic-dedup-threshold", type=float, default=0.92)
     engine_experiments_compare.add_argument("--semantic-dedup-max-days", type=int, default=7)
     engine_experiments_compare.add_argument(
         "--near-duplicate-max-bucket-size",
@@ -1341,7 +1341,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable guarded semantic embedding auto-merge for dense candidates.",
     )
-    engine_stories_propose.add_argument("--semantic-dedup-threshold", type=float, default=0.88)
+    engine_stories_propose.add_argument("--semantic-dedup-threshold", type=float, default=0.92)
     engine_stories_propose.add_argument("--semantic-dedup-max-days", type=int, default=7)
     engine_stories_inspect = engine_stories_sub.add_parser("inspect")
     engine_stories_inspect.add_argument("--story-release", required=True)
