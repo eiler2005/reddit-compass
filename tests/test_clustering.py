@@ -109,6 +109,8 @@ class TestGenericAndLowSignal:
     def test_low_signal_titles(self):
         assert is_low_signal_title("Sign up for the Spin newsletter") is True
         assert is_low_signal_title("Methodology for America's Top WorkTech") is True
+        assert is_low_signal_title("America's Best Private Companies 2026 Methodology") is True
+        assert is_low_signal_title("Canada's Best Companies 2026") is True
         assert is_low_signal_title("Tech Life") is True
         assert is_low_signal_title("Morning Briefing") is True
         assert is_low_signal_title("AI agents escape sandbox") is False
