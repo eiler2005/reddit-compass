@@ -46,7 +46,7 @@ from .models import ContentItem
 from .taxonomy import compute_project_scores, normalize_domain_ids
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
-ENGINE_SCHEMA_VERSION = 3
+ENGINE_SCHEMA_VERSION = 4
 DEFAULT_STORY_METHOD = "hybrid_v2"
 DEFAULT_TREND_METHOD = "story_graph_v1"
 
@@ -344,6 +344,46 @@ CREATE TABLE IF NOT EXISTS legacy_lab_imports (
     PRIMARY KEY (legacy_kind, legacy_id)
 );
 
+CREATE TABLE IF NOT EXISTS signal_releases (
+    signal_release_id TEXT PRIMARY KEY,
+    data_release_id   TEXT NOT NULL,
+    facet_release_id  TEXT NOT NULL,
+    story_release_id  TEXT,
+    date              TEXT NOT NULL,
+    status            TEXT NOT NULL,
+    signal_count      INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    finalized_at      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS community_signals (
+    signal_release_id        TEXT NOT NULL,
+    signal_id                TEXT NOT NULL,
+    item_id                  TEXT NOT NULL,
+    subreddit                TEXT NOT NULL,
+    pack_id                  TEXT NOT NULL DEFAULT '',
+    signal_type              TEXT NOT NULL,
+    title                    TEXT NOT NULL,
+    discussion_url           TEXT NOT NULL DEFAULT '',
+    target_url               TEXT NOT NULL DEFAULT '',
+    pulse_score              REAL NOT NULL DEFAULT 0,
+    subreddit_percentile     REAL NOT NULL DEFAULT 0,
+    score_velocity           REAL NOT NULL DEFAULT 0,
+    comment_velocity         REAL NOT NULL DEFAULT 0,
+    discussion_depth         REAL NOT NULL DEFAULT 0,
+    comment_score_ratio      REAL NOT NULL DEFAULT 0,
+    cross_subreddit_repetition REAL NOT NULL DEFAULT 0,
+    novelty                  REAL NOT NULL DEFAULT 0,
+    domain_ids_json          TEXT NOT NULL DEFAULT '[]',
+    theme_ids_json           TEXT NOT NULL DEFAULT '[]',
+    pain_points_json         TEXT NOT NULL DEFAULT '[]',
+    project_scores_json      TEXT NOT NULL DEFAULT '{}',
+    linked_story_id          TEXT,
+    mainstream_coverage_count INTEGER NOT NULL DEFAULT 0,
+    perspective_gap          REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (signal_release_id, signal_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_release_items_provider
     ON release_items(release_id, provider);
 CREATE INDEX IF NOT EXISTS idx_release_items_date
@@ -356,6 +396,12 @@ CREATE INDEX IF NOT EXISTS idx_engine_trend_stories_story
     ON engine_trend_stories(trend_release_id, story_id);
 CREATE INDEX IF NOT EXISTS idx_item_embedding_refs_release
     ON item_embedding_refs(data_release_id, model_hash);
+CREATE INDEX IF NOT EXISTS idx_signals_subreddit
+    ON community_signals(signal_release_id, subreddit);
+CREATE INDEX IF NOT EXISTS idx_signals_type
+    ON community_signals(signal_release_id, signal_type);
+CREATE INDEX IF NOT EXISTS idx_signals_pulse
+    ON community_signals(signal_release_id, pulse_score DESC);
 
 CREATE TRIGGER IF NOT EXISTS immutable_release_header_update
 BEFORE UPDATE ON data_releases

@@ -890,6 +890,174 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     )
                 )
                 return
+        if args.engine_group == "reddit-pulse":
+            if args.pulse_action == "propose":
+                from .intelligence.reddit_pulse import build_reddit_pulse_signals
+
+                # Load items from the data release
+                rows = engine_conn.execute(
+                    """
+                    SELECT item_id, provider, source_cluster, external_id,
+                           source_section, title, excerpt, canonical_url,
+                           discussion_url, target_url, domain_ids,
+                           metadata, raw_engagement, snapshot_date
+                    FROM release_items
+                    WHERE release_id = ? AND snapshot_date = ? AND provider = 'reddit'
+                    ORDER BY json_extract(raw_engagement, '$.score') DESC
+                    """,
+                    (args.release, args.date),
+                ).fetchall()
+                if not rows:
+                    print(
+                        json.dumps(
+                            {
+                                "error": "no reddit items found",
+                                "release": args.release,
+                                "date": args.date,
+                            }
+                        )
+                    )
+                    return
+                import json as _json
+
+                from .intelligence.models import ContentItem
+
+                items: list[ContentItem] = []
+                for r in rows:
+                    meta = _json.loads(r["metadata"] or "{}")
+                    eng = _json.loads(r["raw_engagement"] or "{}")
+                    domain_ids = _json.loads(r["domain_ids"] or '["other"]')
+                    items.append(
+                        ContentItem(
+                            item_id=r["item_id"],
+                            provider=r["provider"],
+                            source_cluster=r["source_cluster"],
+                            external_id=r["external_id"],
+                            source_section=r["source_section"],
+                            title=r["title"],
+                            excerpt=r["excerpt"] or "",
+                            canonical_url=r["canonical_url"] or "",
+                            discussion_url=r["discussion_url"] or "",
+                            target_url=r["target_url"] or "",
+                            domain_ids=domain_ids,
+                            metadata=meta,
+                            raw_engagement=eng,
+                            snapshot_date=r["snapshot_date"],
+                        )
+                    )
+                signals = build_reddit_pulse_signals(items)
+                # Store in DB
+                import datetime
+                import hashlib
+
+                signal_release_id = (
+                    "signals_"
+                    + hashlib.sha256(
+                        f"{args.release}:{args.date}:{args.profile}".encode()
+                    ).hexdigest()[:20]
+                )
+                now = datetime.datetime.now(datetime.UTC).isoformat()
+                engine_conn.execute(
+                    """INSERT OR REPLACE INTO signal_releases
+                       (signal_release_id, data_release_id, facet_release_id,
+                        story_release_id, date, status, signal_count, created_at)
+                       VALUES (?, ?, '', NULL, ?, 'finalized', ?, ?)""",
+                    (signal_release_id, args.release, args.date, len(signals), now),
+                )
+                for s in signals:
+                    engine_conn.execute(
+                        """INSERT OR REPLACE INTO community_signals
+                           (signal_release_id, signal_id, item_id, subreddit, pack_id,
+                            signal_type, title, discussion_url, target_url,
+                            pulse_score, subreddit_percentile, score_velocity,
+                            comment_velocity, discussion_depth, comment_score_ratio,
+                            cross_subreddit_repetition, novelty,
+                            domain_ids_json, theme_ids_json, pain_points_json,
+                            project_scores_json, linked_story_id,
+                            mainstream_coverage_count, perspective_gap)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                        (
+                            signal_release_id,
+                            s.signal_id,
+                            s.item_id,
+                            s.subreddit,
+                            s.pack_id,
+                            s.signal_type,
+                            s.title,
+                            s.discussion_url,
+                            s.target_url,
+                            s.pulse_score,
+                            s.subreddit_percentile,
+                            s.score_velocity,
+                            s.comment_velocity,
+                            s.discussion_depth,
+                            s.comment_score_ratio,
+                            s.cross_subreddit_repetition,
+                            s.novelty,
+                            _json.dumps(s.domain_ids),
+                            _json.dumps(s.theme_ids),
+                            _json.dumps(s.pain_points),
+                            _json.dumps(s.project_scores),
+                            s.linked_story_id,
+                            s.mainstream_coverage_count,
+                            s.perspective_gap,
+                        ),
+                    )
+                engine_conn.commit()
+                # Summary
+                by_type: dict[str, int] = {}
+                for s in signals:
+                    by_type[s.signal_type] = by_type.get(s.signal_type, 0) + 1
+                top5 = sorted(signals, key=lambda x: x.pulse_score, reverse=True)[:5]
+                print(
+                    json.dumps(
+                        {
+                            "signal_release_id": signal_release_id,
+                            "total_signals": len(signals),
+                            "by_type": by_type,
+                            "top5": [
+                                {
+                                    "title": s.title[:80],
+                                    "subreddit": s.subreddit,
+                                    "pulse_score": s.pulse_score,
+                                    "type": s.signal_type,
+                                }
+                                for s in top5
+                            ],
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return
+            if args.pulse_action == "inspect":
+                where = "signal_release_id = ?"
+                params: list[str] = [args.signal_release]
+                if args.signal_type:
+                    where += " AND signal_type = ?"
+                    params.append(args.signal_type)
+                if args.subreddit:
+                    where += " AND subreddit = ?"
+                    params.append(args.subreddit.lower())
+                rows = engine_conn.execute(
+                    f"""SELECT signal_id, subreddit, signal_type, title,
+                               pulse_score, subreddit_percentile, comment_velocity,
+                               discussion_depth, cross_subreddit_repetition, novelty
+                        FROM community_signals
+                        WHERE {where}
+                        ORDER BY pulse_score DESC
+                        LIMIT ?""",
+                    (*params, args.limit),
+                ).fetchall()
+                print(
+                    json.dumps(
+                        [dict(r) for r in rows],
+                        ensure_ascii=False,
+                        indent=2,
+                        default=str,
+                    )
+                )
+                return
         if args.engine_group == "label":
             target_id = args.target
             if args.kind == "story_pair":
@@ -1381,6 +1549,18 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_review.add_argument("--trend-release", required=True)
     engine_trends_review.add_argument("--limit", type=int, default=50)
     engine_trends_review.add_argument("--model", default="qwen-max")
+
+    engine_pulse = engine_sub.add_parser("reddit-pulse", help="Reddit Pulse signal operations")
+    engine_pulse_sub = engine_pulse.add_subparsers(dest="pulse_action", required=True)
+    engine_pulse_propose = engine_pulse_sub.add_parser("propose")
+    engine_pulse_propose.add_argument("--release", required=True)
+    engine_pulse_propose.add_argument("--date", required=True)
+    engine_pulse_propose.add_argument("--profile", default="broad")
+    engine_pulse_inspect = engine_pulse_sub.add_parser("inspect")
+    engine_pulse_inspect.add_argument("--signal-release", required=True)
+    engine_pulse_inspect.add_argument("--limit", type=int, default=50)
+    engine_pulse_inspect.add_argument("--signal-type", default=None)
+    engine_pulse_inspect.add_argument("--subreddit", default=None)
 
     engine_label = engine_sub.add_parser("label", help="Add version-scoped manual label")
     engine_label.add_argument(
