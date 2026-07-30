@@ -24,6 +24,7 @@ class SourceDefinition:
     language: str = "en"
     default_scope: ContentScope = "headline"
     expected_freshness_hours: int = 24
+    expected_min_items: int = 0
     requires_env: tuple[str, ...] = field(default_factory=tuple)
     enabled_by_default: bool = True
 
@@ -38,6 +39,7 @@ SOURCES: dict[str, SourceDefinition] = {
         cluster="voices",
         access="reddit",
         default_scope="excerpt",
+        expected_min_items=1,
     ),
     # Hacker News
     "hackernews": SourceDefinition(
@@ -47,6 +49,7 @@ SOURCES: dict[str, SourceDefinition] = {
         cluster="developers",
         access="api",
         default_scope="abstract",
+        expected_min_items=1,
     ),
     # RSS feeds
     "bbc": SourceDefinition(

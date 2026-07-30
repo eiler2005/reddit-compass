@@ -78,9 +78,11 @@ class TestGetProviderLabel:
 class TestRegistryCompleteness:
     def test_reddit_sources(self):
         assert "reddit" in SOURCES
+        assert SOURCES["reddit"].expected_min_items >= 1
 
     def test_hackernews(self):
         assert "hackernews" in SOURCES
+        assert SOURCES["hackernews"].expected_min_items >= 1
 
     def test_rss_sources(self):
         rss_sources = ["bbc", "guardian", "reuters", "techcrunch", "theverge", "arstechnica"]

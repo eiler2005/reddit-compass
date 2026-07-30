@@ -11,8 +11,8 @@ import hashlib
 import json
 import sqlite3
 import subprocess
-from collections import defaultdict
-from collections.abc import Iterable
+from collections import Counter, defaultdict
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 from rapidfuzz import fuzz
 
 from ..config import DEFAULT_DATA_DIR, PROJECT_ROOT
+from ..sources.registry import SOURCES
 from .clustering import (
     extract_entities,
     extract_ordered_tokens,
@@ -862,15 +863,18 @@ def create_data_release(
     health_rows = _fetch_table_for_runs(corpus_conn, "source_health", run_ids)
     release_id = _next_release_id(engine_conn, profile, dates)
     created_at = now_iso()
-    input_status = (
-        "complete" if all(str(row["status"]) == "complete" for row in run_rows) else "partial"
-    )
-    coverage = _source_coverage(health_rows)
     source_db_checksum = _sha256_file(source_db_path)
 
     item_payloads = [_normalize_item_row(row) for row in item_rows]
     observation_payloads = [_normalize_observation_row(row) for row in observation_rows]
-    health_payloads = [_normalize_health_row(row) for row in health_rows]
+    health_payloads = _normalize_release_health_payloads(health_rows)
+    input_status = _release_input_status(
+        profile=profile,
+        run_rows=run_rows,
+        item_payloads=item_payloads,
+        health_payloads=health_payloads,
+    )
+    coverage = _source_coverage_from_payloads(health_payloads)
     input_checksum = _release_checksum(item_payloads, observation_payloads, health_payloads)
 
     try:
@@ -1253,19 +1257,29 @@ def load_release_embeddings(
     data_release_id: str,
     model_name: str = DEFAULT_EMBEDDING_MODEL,
     model_revision: str = "default",
+    item_ids: Iterable[str] | None = None,
 ) -> dict[str, list[float]]:
     model_hash = _stable_id("embedding_model", model_name, model_revision)
+    selected_item_ids = sorted(set(item_ids)) if item_ids is not None else None
+    if selected_item_ids == []:
+        return {}
+    item_filter = ""
+    args: list[Any] = [data_release_id, model_hash]
+    if selected_item_ids is not None:
+        placeholders = ",".join("?" for _ in selected_item_ids)
+        item_filter = f" AND r.item_id IN ({placeholders})"
+        args.extend(selected_item_ids)
     rows = conn.execute(
-        """
+        f"""
         SELECT r.item_id, v.vector_json
         FROM item_embedding_refs AS r
         JOIN embedding_vectors AS v
           ON v.model_hash = r.model_hash
          AND v.input_hash = r.input_hash
-        WHERE r.data_release_id = ? AND r.model_hash = ?
+        WHERE r.data_release_id = ? AND r.model_hash = ?{item_filter}
         ORDER BY r.item_id
         """,
-        (data_release_id, model_hash),
+        args,
     ).fetchall()
     return {
         str(row["item_id"]): [float(value) for value in (_json_value(row["vector_json"]) or [])]
@@ -1414,6 +1428,77 @@ def _normalize_health_row(row: sqlite3.Row) -> tuple[Any, ...]:
     )
 
 
+def _normalize_release_health_payloads(rows: list[sqlite3.Row]) -> list[tuple[Any, ...]]:
+    payloads: list[tuple[Any, ...]] = []
+    for row in rows:
+        payload = list(_normalize_health_row(row))
+        source_id = str(payload[1])
+        provider = str(payload[2])
+        status = str(payload[4])
+        count = int(payload[5] or 0)
+        source = SOURCES.get(source_id) or next(
+            (definition for definition in SOURCES.values() if definition.provider == provider),
+            None,
+        )
+        expected_min = source.expected_min_items if source else 0
+        if status == "ok" and expected_min > 0 and count == 0:
+            payload[4] = "empty"
+            payload[8] = _append_health_message(
+                str(payload[8] or ""),
+                f"expected at least {expected_min} item(s), got 0",
+            )
+        elif status == "ok" and expected_min > 0 and count < expected_min:
+            payload[4] = "degraded"
+            payload[8] = _append_health_message(
+                str(payload[8] or ""),
+                f"expected at least {expected_min} item(s), got {count}",
+            )
+        payloads.append(tuple(payload))
+    return payloads
+
+
+def _append_health_message(message: str, addition: str) -> str:
+    return f"{message}; {addition}" if message else addition
+
+
+def _profile_expects_voice_cluster(profile: str) -> bool:
+    if profile not in {"broad", "ai-native"}:
+        return False
+    return any(
+        definition.enabled_by_default
+        and definition.expected_min_items > 0
+        and definition.cluster == "voices"
+        for definition in SOURCES.values()
+    )
+
+
+def _release_input_status(
+    *,
+    profile: str,
+    run_rows: list[sqlite3.Row],
+    item_payloads: list[tuple[Any, ...]],
+    health_payloads: list[tuple[Any, ...]],
+) -> str:
+    run_complete = all(str(row["status"]) == "complete" for row in run_rows)
+    if not run_complete:
+        return "partial"
+    cluster_counts = Counter(str(payload[2]) for payload in item_payloads)
+    expected_voices = _profile_expects_voice_cluster(profile) or any(
+        str(payload[3]) == "voices" for payload in health_payloads
+    )
+    if (
+        profile in {"broad", "ai-native"}
+        and expected_voices
+        and cluster_counts.get("voices", 0) == 0
+    ):
+        return "partial"
+    required_source_empty = any(
+        str(payload[3]) == "voices" and str(payload[4]) in {"empty", "degraded"}
+        for payload in health_payloads
+    )
+    return "partial" if required_source_empty else "complete"
+
+
 def _observation_default(column: str) -> Any:
     return {
         "source_rank": None,
@@ -1439,6 +1524,15 @@ def _source_coverage(rows: list[sqlite3.Row]) -> dict[str, int]:
         if str(_row_value(row, "status", "")) == "ok":
             key = f"{_row_value(row, 'provider', '')}:{_row_value(row, 'source_id', '')}"
             coverage[key] += int(_row_value(row, "count", 0) or 0)
+    return dict(sorted(coverage.items()))
+
+
+def _source_coverage_from_payloads(payloads: list[tuple[Any, ...]]) -> dict[str, int]:
+    coverage: dict[str, int] = defaultdict(int)
+    for payload in payloads:
+        if str(payload[4]) == "ok":
+            key = f"{payload[2]}:{payload[1]}"
+            coverage[key] += int(payload[5] or 0)
     return dict(sorted(coverage.items()))
 
 
@@ -1621,6 +1715,19 @@ def _select_engine_items(
     limit: int,
 ) -> list[FrozenItem]:
     """Stratified seeds plus likely neighbours, so a small lab slice tests clustering."""
+    item_by_id = {item.item_id: item for item in items}
+    item_norms = {item.item_id: normalize_title(item.title, item.provider) for item in items}
+    item_tokens = {item_id: extract_tokens(norm) for item_id, norm in item_norms.items()}
+    item_urls = {item.item_id: _item_urls(item) for item in items}
+    token_index: dict[str, set[str]] = defaultdict(set)
+    url_index: dict[str, set[str]] = defaultdict(set)
+    for item_id, tokens in item_tokens.items():
+        for token in tokens:
+            token_index[token].add(item_id)
+    for item_id, urls in item_urls.items():
+        for url in urls:
+            url_index[url].add(item_id)
+
     strata: dict[str, list[FrozenItem]] = defaultdict(list)
     for item in items:
         domains = _json_list(
@@ -1649,16 +1756,27 @@ def _select_engine_items(
     seed_count = min(len(ordered), max(1, limit // 2))
     selected = {item.item_id: item for item in ordered[:seed_count]}
     for seed in ordered[:seed_count]:
-        seed_norm = normalize_title(seed.title, seed.provider)
-        seed_tokens = extract_tokens(seed_norm)
+        seed_norm = item_norms[seed.item_id]
+        seed_tokens = item_tokens[seed.item_id]
+        seed_urls = item_urls[seed.item_id]
+        candidate_ids: set[str] = set()
+        for url in seed_urls:
+            candidate_ids.update(url_index.get(url, set()))
+        token_hits: Counter[str] = Counter()
+        for token in seed_tokens:
+            token_hits.update(token_index.get(token, set()))
+        candidate_ids.update(item_id for item_id, count in token_hits.items() if count >= 2)
+        candidate_ids.discard(seed.item_id)
         neighbours: list[tuple[int, float, str, FrozenItem]] = []
-        for candidate in items:
-            if candidate.item_id in selected:
+        for candidate_id in sorted(candidate_ids):
+            if candidate_id in selected:
                 continue
-            shared_url = bool(_item_urls(seed) & _item_urls(candidate))
-            candidate_norm = normalize_title(candidate.title, candidate.provider)
-            candidate_tokens = extract_tokens(candidate_norm)
-            shared_tokens = len(seed_tokens & candidate_tokens)
+            candidate = item_by_id[candidate_id]
+            shared_url = bool(seed_urls & item_urls[candidate.item_id])
+            shared_tokens = len(seed_tokens & item_tokens[candidate.item_id])
+            if not shared_url and shared_tokens < 2:
+                continue
+            candidate_norm = item_norms[candidate.item_id]
             title_score = fuzz.token_set_ratio(seed_norm, candidate_norm) / 100.0
             if not shared_url and (shared_tokens < 2 or title_score < 0.65):
                 continue
@@ -1690,6 +1808,22 @@ def _select_engine_items(
     return sorted(selected.values(), key=lambda item: item.item_id)
 
 
+def _story_generation_params(params: dict[str, Any] | None = None) -> dict[str, Any]:
+    return {
+        "auto_merge_threshold": 0.82,
+        "review_threshold": 0.62,
+        "max_token_df_ratio": 0.2,
+        "embedding_model": DEFAULT_EMBEDDING_MODEL,
+        "embedding_revision": "default",
+        "dense_top_k": 12,
+        "dense_candidate_threshold": 0.68,
+        "review_model": "qwen-plus",
+        "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
+        "llm_merge_min_confidence": 0.85,
+        **(params or {}),
+    }
+
+
 def create_story_release(
     conn: sqlite3.Connection,
     *,
@@ -1705,19 +1839,7 @@ def create_story_release(
         raise ValueError(f"Facet release is not evaluated: {facet_release_id}")
     if not verify_data_release(conn, facet_release.data_release_id):
         raise ValueError(f"Data release checksum failed: {facet_release.data_release_id}")
-    params = {
-        "auto_merge_threshold": 0.82,
-        "review_threshold": 0.62,
-        "max_token_df_ratio": 0.2,
-        "embedding_model": DEFAULT_EMBEDDING_MODEL,
-        "embedding_revision": "default",
-        "dense_top_k": 12,
-        "dense_candidate_threshold": 0.68,
-        "review_model": "qwen-plus",
-        "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
-        "llm_merge_min_confidence": 0.85,
-        **(params or {}),
-    }
+    params = _story_generation_params(params)
     items = load_frozen_items(conn, facet_release.data_release_id)
     facets = _load_item_facets(conn, facet_release_id)
     if domain:
@@ -1734,11 +1856,8 @@ def create_story_release(
         data_release_id=facet_release.data_release_id,
         model_name=str(params["embedding_model"]),
         model_revision=str(params["embedding_revision"]),
+        item_ids=(item.item_id for item in items),
     )
-    selected_item_ids = {item.item_id for item in items}
-    embeddings = {
-        item_id: vector for item_id, vector in embeddings.items() if item_id in selected_item_ids
-    }
     params_hash = _hash_json({**params, "limit": limit, "domain": domain or ""})
     created_at = now_iso()
     story_release_id = _stable_id("stories", facet_release_id, method, params_hash, created_at)
@@ -1977,6 +2096,554 @@ def compare_story_engine_variants(
         "domain": domain or "",
         "variants": results,
     }
+
+
+def export_story_candidates_for_release(
+    conn: sqlite3.Connection,
+    *,
+    facet_release_id: str,
+    params: dict[str, Any] | None = None,
+    limit: int = 300,
+    domain: str | None = None,
+    candidate_limit: int = 0,
+) -> dict[str, Any]:
+    """Build scored pair candidates for a frozen FacetRelease without saving an attempt."""
+    facet_release = get_facet_release(conn, facet_release_id)
+    if facet_release is None or facet_release.status not in {"evaluated", "published"}:
+        raise ValueError(f"Facet release is not evaluated: {facet_release_id}")
+    if not verify_data_release(conn, facet_release.data_release_id):
+        raise ValueError(f"Data release checksum failed: {facet_release.data_release_id}")
+    params = _story_generation_params(params)
+    items = load_frozen_items(conn, facet_release.data_release_id)
+    facets = _load_item_facets(conn, facet_release_id)
+    if domain:
+        items = [
+            item
+            for item in items
+            if domain
+            in set(item.domain_ids + _json_list(facets.get(item.item_id, {}).get("domain_ids"), []))
+        ]
+    if limit > 0:
+        items = _select_engine_items(items, facets, limit)
+    embeddings = load_release_embeddings(
+        conn,
+        data_release_id=facet_release.data_release_id,
+        model_name=str(params["embedding_model"]),
+        model_revision=str(params["embedding_revision"]),
+        item_ids=(item.item_id for item in items),
+    )
+    candidates = generate_story_candidates(
+        items,
+        facets,
+        params=params,
+        embeddings=embeddings,
+    )
+    if candidate_limit > 0:
+        candidates = candidates[:candidate_limit]
+    item_by_id = {item.item_id: item for item in items}
+    serialized = [
+        _serialize_story_candidate(candidate, item_by_id)
+        for candidate in candidates
+        if candidate.item_id_a in item_by_id and candidate.item_id_b in item_by_id
+    ]
+    return {
+        "facet_release_id": facet_release_id,
+        "data_release_id": facet_release.data_release_id,
+        "limit": limit,
+        "domain": domain or "",
+        "item_count": len(items),
+        "embedding_model": str(params["embedding_model"]),
+        "embedding_coverage": round(len(embeddings) / max(len(items), 1), 4),
+        "candidate_count": len(serialized),
+        "decision_counts": dict(Counter(candidate["decision"] for candidate in serialized)),
+        "reason_counts": dict(Counter(candidate["reason"] for candidate in serialized)),
+        "candidates": serialized,
+    }
+
+
+def diagnose_engine_release(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str | None = None,
+    story_release_id: str | None = None,
+    trend_release_id: str | None = None,
+    limit: int = 10,
+) -> dict[str, Any]:
+    """Explain current Story/Trend Engine quality and likely undermerge causes."""
+    if story_release_id:
+        story_release = get_story_release(conn, story_release_id)
+        if story_release is None:
+            raise ValueError(f"Story release not found: {story_release_id}")
+        facet_release = get_facet_release(conn, story_release.facet_release_id)
+        if facet_release is None:
+            raise ValueError(f"Facet release not found: {story_release.facet_release_id}")
+        data_release_id = facet_release.data_release_id
+    else:
+        data_release_id = data_release_id or _latest_data_release_id(conn)
+        if not data_release_id:
+            raise ValueError("No finalized data release found")
+        facet_release = _latest_facet_release(conn, data_release_id)
+        story_release = (
+            _latest_story_release(conn, facet_release.facet_release_id) if facet_release else None
+        )
+    data_release = get_data_release(conn, data_release_id)
+    if data_release is None:
+        raise ValueError(f"Data release not found: {data_release_id}")
+    if trend_release_id:
+        trend_release = get_trend_release(conn, trend_release_id)
+        if trend_release is None:
+            raise ValueError(f"Trend release not found: {trend_release_id}")
+    elif story_release is not None:
+        trend_release = _latest_trend_release(conn, story_release.story_release_id)
+    else:
+        trend_release = None
+
+    items = load_frozen_items(conn, data_release.release_id)
+    source_sections = _diagnose_source_sections(items)
+    result: dict[str, Any] = {
+        "data_release": asdict(data_release),
+        "source_sections": source_sections[:limit],
+        "provider_counts": dict(Counter(item.provider for item in items)),
+        "source_cluster_counts": dict(Counter(item.source_cluster for item in items)),
+        "source_health_issues": _source_health_issues(
+            conn,
+            data_release.release_id,
+            limit=limit,
+        ),
+        "warnings": [],
+    }
+    if data_release.input_status != "complete":
+        result["warnings"].append(f"input_status_{data_release.input_status}")
+    expected_voices = _profile_expects_voice_cluster(data_release.profile) or any(
+        issue.get("cluster") == "voices" for issue in result["source_health_issues"]
+    )
+    if (
+        data_release.profile in {"broad", "ai-native"}
+        and expected_voices
+        and not any(item.source_cluster == "voices" for item in items)
+    ):
+        result["warnings"].append("dominant_cluster_empty:voices")
+    if result["source_health_issues"]:
+        result["warnings"].append("source_health_has_empty_or_degraded_sources")
+    if facet_release is not None:
+        result["facet_release"] = asdict(facet_release)
+    if story_release is not None:
+        story_metrics = dict(story_release.metrics)
+        result["story_release"] = asdict(story_release)
+        result["candidate_decision_counts"] = _candidate_decision_counts(
+            conn,
+            story_release.story_release_id,
+        )
+        result["candidate_reason_counts"] = _candidate_reason_counts(
+            conn,
+            story_release.story_release_id,
+            limit=limit,
+        )
+        result["membership_reason_counts"] = _story_release_reason_counts(
+            conn,
+            story_release.story_release_id,
+        )
+        result["singleton_provider_counts"] = _singleton_provider_counts(
+            conn,
+            story_release.story_release_id,
+            data_release.release_id,
+        )
+        result["possible_undermerge_pairs"] = _possible_undermerge_pairs(
+            conn,
+            story_release.story_release_id,
+            data_release.release_id,
+            limit=limit,
+        )
+        result["shared_url_split_groups"] = _shared_url_split_groups(
+            items,
+            _story_by_item(conn, story_release.story_release_id),
+            limit=limit,
+        )
+        result["cross_source_samples"] = _story_release_cross_source_samples(
+            conn,
+            story_release.story_release_id,
+            limit=limit,
+        )
+        if float(story_metrics.get("compression_ratio") or 0) >= 0.9:
+            result["warnings"].append(
+                "compression_ratio_high: clustering is mostly singleton stories"
+            )
+        if int(story_metrics.get("cross_source_story_count") or 0) < 20:
+            result["warnings"].append(
+                "cross_source_low: verify canonical URLs, Reddit target URLs "
+                "and title/entity matching"
+            )
+        if not result["possible_undermerge_pairs"] and not result["shared_url_split_groups"]:
+            result["warnings"].append(
+                "no_obvious_undermerge_pairs: data may have low true cross-source overlap"
+            )
+    else:
+        result["warnings"].append("missing_story_release")
+    if trend_release is not None:
+        result["trend_release"] = asdict(trend_release)
+        trend_metrics = dict(trend_release.metrics)
+        if int(trend_metrics.get("confirmed_trend_count") or 0) == 0:
+            result["warnings"].append("no_confirmed_trends")
+        if trend_release.history_status == "insufficient_history":
+            result["warnings"].append("insufficient_history_for_lifecycle")
+    else:
+        result["warnings"].append("missing_trend_release")
+    result["next_commands"] = _diagnose_next_commands(
+        facet_release_id=facet_release.facet_release_id if facet_release else "",
+        story_release_id=story_release.story_release_id if story_release else "",
+        trend_release_id=trend_release.trend_release_id if trend_release else "",
+    )
+    return result
+
+
+def _serialize_story_candidate(
+    candidate: PairCandidate,
+    item_by_id: dict[str, FrozenItem],
+) -> dict[str, Any]:
+    left = item_by_id[candidate.item_id_a]
+    right = item_by_id[candidate.item_id_b]
+    return {
+        "left_item_id": candidate.item_id_a,
+        "right_item_id": candidate.item_id_b,
+        "score": candidate.score,
+        "decision": candidate.decision,
+        "reason": candidate.reason,
+        "features": candidate.features,
+        "left": _candidate_item_summary(left),
+        "right": _candidate_item_summary(right),
+    }
+
+
+def _candidate_item_summary(item: FrozenItem) -> dict[str, Any]:
+    return {
+        "item_id": item.item_id,
+        "provider": item.provider,
+        "source_cluster": item.source_cluster,
+        "source_section": item.source_section,
+        "title": item.title,
+        "canonical_url": item.canonical_url,
+        "target_url": item.target_url,
+        "discussion_url": item.discussion_url,
+        "published_at": item.published_at,
+        "snapshot_date": item.snapshot_date,
+        "content_scope": item.content_scope,
+        "domain_ids": item.domain_ids,
+    }
+
+
+def _latest_data_release_id(conn: sqlite3.Connection) -> str:
+    row = conn.execute(
+        """
+        SELECT release_id
+        FROM data_releases
+        WHERE status = 'finalized'
+        ORDER BY finalized_at DESC, created_at DESC, release_id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    return str(row["release_id"]) if row else ""
+
+
+def _latest_facet_release(
+    conn: sqlite3.Connection,
+    data_release_id: str,
+) -> FacetRelease | None:
+    row = conn.execute(
+        """
+        SELECT facet_release_id
+        FROM facet_releases
+        WHERE data_release_id = ? AND status IN ('evaluated', 'published')
+        ORDER BY created_at DESC, facet_release_id DESC
+        LIMIT 1
+        """,
+        (data_release_id,),
+    ).fetchone()
+    return get_facet_release(conn, str(row["facet_release_id"])) if row else None
+
+
+def _latest_story_release(
+    conn: sqlite3.Connection,
+    facet_release_id: str,
+) -> StoryRelease | None:
+    row = conn.execute(
+        """
+        SELECT story_release_id
+        FROM story_releases
+        WHERE facet_release_id = ? AND status IN ('evaluated', 'published')
+        ORDER BY created_at DESC, story_release_id DESC
+        LIMIT 1
+        """,
+        (facet_release_id,),
+    ).fetchone()
+    return get_story_release(conn, str(row["story_release_id"])) if row else None
+
+
+def _latest_trend_release(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+) -> TrendRelease | None:
+    row = conn.execute(
+        """
+        SELECT trend_release_id
+        FROM trend_releases
+        WHERE story_release_id = ? AND status IN ('evaluated', 'published')
+        ORDER BY created_at DESC, trend_release_id DESC
+        LIMIT 1
+        """,
+        (story_release_id,),
+    ).fetchone()
+    return get_trend_release(conn, str(row["trend_release_id"])) if row else None
+
+
+def _diagnose_source_sections(items: list[FrozenItem]) -> list[dict[str, Any]]:
+    counts = Counter(
+        (
+            item.provider,
+            item.source_cluster,
+            item.source_section or item.source_cluster,
+        )
+        for item in items
+    )
+    return [
+        {
+            "provider": provider,
+            "source_cluster": source_cluster,
+            "source_section": source_section,
+            "count": count,
+        }
+        for (provider, source_cluster, source_section), count in counts.most_common()
+    ]
+
+
+def _candidate_decision_counts(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT decision, COUNT(*) AS count
+        FROM story_candidate_pairs
+        WHERE story_release_id = ?
+        GROUP BY decision
+        ORDER BY count DESC, decision
+        """,
+        (story_release_id,),
+    ).fetchall()
+    return {str(row["decision"]): int(row["count"]) for row in rows}
+
+
+def _candidate_reason_counts(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    *,
+    limit: int,
+) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT reason, COUNT(*) AS count
+        FROM story_candidate_pairs
+        WHERE story_release_id = ?
+        GROUP BY reason
+        ORDER BY count DESC, reason
+        LIMIT ?
+        """,
+        (story_release_id, max(1, limit)),
+    ).fetchall()
+    return {str(row["reason"]): int(row["count"]) for row in rows}
+
+
+def _singleton_provider_counts(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    data_release_id: str,
+) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT ri.provider, COUNT(*) AS count
+        FROM engine_stories s
+        JOIN engine_story_items si
+          ON si.story_release_id = s.story_release_id
+         AND si.story_id = s.story_id
+        JOIN release_items ri
+          ON ri.release_id = ?
+         AND ri.item_id = si.item_id
+        WHERE s.story_release_id = ? AND s.item_count = 1
+        GROUP BY ri.provider
+        ORDER BY count DESC, ri.provider
+        """,
+        (data_release_id, story_release_id),
+    ).fetchall()
+    return {str(row["provider"]): int(row["count"]) for row in rows}
+
+
+def _source_health_issues(
+    conn: sqlite3.Connection,
+    data_release_id: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        SELECT run_id, source_id, provider, cluster, status, count, message
+        FROM release_source_health
+        WHERE release_id = ?
+          AND status IN ('empty', 'degraded', 'error', 'not_configured')
+        ORDER BY
+          CASE status
+            WHEN 'empty' THEN 0
+            WHEN 'degraded' THEN 1
+            WHEN 'error' THEN 2
+            ELSE 3
+          END,
+          provider,
+          source_id
+        LIMIT ?
+        """,
+        (data_release_id, max(1, limit)),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _story_by_item(conn: sqlite3.Connection, story_release_id: str) -> dict[str, str]:
+    rows = conn.execute(
+        """
+        SELECT item_id, story_id
+        FROM engine_story_items
+        WHERE story_release_id = ?
+        """,
+        (story_release_id,),
+    ).fetchall()
+    return {str(row["item_id"]): str(row["story_id"]) for row in rows}
+
+
+def _possible_undermerge_pairs(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    data_release_id: str,
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    item_by_id = {
+        str(row["item_id"]): row
+        for row in conn.execute(
+            "SELECT * FROM release_items WHERE release_id = ?",
+            (data_release_id,),
+        ).fetchall()
+    }
+    story_by_item = _story_by_item(conn, story_release_id)
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM story_candidate_pairs
+        WHERE story_release_id = ?
+          AND decision != 'auto_merge'
+          AND score >= 0.58
+        ORDER BY score DESC, item_id_a, item_id_b
+        LIMIT ?
+        """,
+        (story_release_id, max(1, limit * 4)),
+    ).fetchall()
+    examples: list[dict[str, Any]] = []
+    for row in rows:
+        left_id = str(row["item_id_a"])
+        right_id = str(row["item_id_b"])
+        left = item_by_id.get(left_id)
+        right = item_by_id.get(right_id)
+        if left is None or right is None:
+            continue
+        if story_by_item.get(left_id) == story_by_item.get(right_id):
+            continue
+        features = _json_dict(row["features_json"])
+        source_independent = (
+            bool(features.get("source_independent")) or left["provider"] != right["provider"]
+        )
+        if not source_independent:
+            continue
+        examples.append(
+            {
+                "left_item_id": left_id,
+                "right_item_id": right_id,
+                "left_story_id": story_by_item.get(left_id, ""),
+                "right_story_id": story_by_item.get(right_id, ""),
+                "score": float(row["score"]),
+                "decision": str(row["decision"]),
+                "reason": str(row["reason"]),
+                "features": features,
+                "left": {
+                    "provider": left["provider"],
+                    "source_cluster": left["source_cluster"],
+                    "title": left["title"],
+                    "canonical_url": left["canonical_url"],
+                    "target_url": left["target_url"],
+                },
+                "right": {
+                    "provider": right["provider"],
+                    "source_cluster": right["source_cluster"],
+                    "title": right["title"],
+                    "canonical_url": right["canonical_url"],
+                    "target_url": right["target_url"],
+                },
+            }
+        )
+        if len(examples) >= limit:
+            break
+    return examples
+
+
+def _shared_url_split_groups(
+    items: list[FrozenItem],
+    story_by_item: dict[str, str],
+    *,
+    limit: int,
+) -> list[dict[str, Any]]:
+    url_to_items: dict[str, list[FrozenItem]] = defaultdict(list)
+    for item in items:
+        for url in _item_urls(item):
+            if _is_stable_landing_url(url):
+                continue
+            url_to_items[url].append(item)
+    groups: list[dict[str, Any]] = []
+    for url, url_items in url_to_items.items():
+        story_ids = sorted({story_by_item.get(item.item_id, "") for item in url_items})
+        story_ids = [story_id for story_id in story_ids if story_id]
+        if len(story_ids) <= 1:
+            continue
+        groups.append(
+            {
+                "url": url,
+                "story_ids": story_ids,
+                "items": [_candidate_item_summary(item) for item in url_items[:6]],
+            }
+        )
+    groups.sort(key=lambda group: (-len(group["story_ids"]), group["url"]))
+    return groups[:limit]
+
+
+def _diagnose_next_commands(
+    *,
+    facet_release_id: str,
+    story_release_id: str,
+    trend_release_id: str,
+) -> list[str]:
+    commands = []
+    if facet_release_id:
+        commands.append(
+            "reddit-compass engine stories candidates "
+            f"--facet-release {facet_release_id} --limit 300 --candidate-limit 50"
+        )
+        commands.append(
+            "reddit-compass engine experiments compare "
+            f"--facet-release {facet_release_id} --limit 300 --sample-limit 5"
+        )
+    if story_release_id:
+        commands.append(f"reddit-compass engine stories eval --story-release {story_release_id}")
+        commands.append(
+            f"reddit-compass engine golden export --story-release {story_release_id} "
+            "--output data/golden/story-golden.json"
+        )
+    if trend_release_id:
+        commands.append(f"reddit-compass engine trends eval --trend-release {trend_release_id}")
+    return commands
 
 
 def generate_story_candidates(
@@ -2426,7 +3093,7 @@ def _score_story_pair(
             or bool(left_numbers & right_numbers)
         )
     )
-    semantic_dedup_match = bool(
+    semantic_review_match = bool(
         params.get("semantic_dedup_enabled", False)
         and dense_similarity is not None
         and dense_similarity >= _semantic_threshold
@@ -2440,7 +3107,7 @@ def _score_story_pair(
         and params.get("semantic_dedup_enabled", False)
         and dense_similarity is not None
         and dense_similarity >= 0.88
-        and not semantic_dedup_match
+        and not semantic_review_match
     )
     dense_event_match = bool(
         dense_similarity is not None
@@ -2468,6 +3135,72 @@ def _score_story_pair(
             or left.canonical_url != right.canonical_url
         )
     )
+    event_action_tokens = {
+        "acquire",
+        "acquires",
+        "ban",
+        "bans",
+        "block",
+        "blocks",
+        "buy",
+        "buys",
+        "charge",
+        "charges",
+        "crash",
+        "cuts",
+        "delay",
+        "delays",
+        "drop",
+        "drops",
+        "fall",
+        "falls",
+        "hire",
+        "hiring",
+        "invest",
+        "invests",
+        "launch",
+        "launches",
+        "layoff",
+        "lawsuit",
+        "leak",
+        "leaks",
+        "pause",
+        "pauses",
+        "raise",
+        "raises",
+        "release",
+        "releases",
+        "resign",
+        "resigns",
+        "sell",
+        "sells",
+        "strike",
+        "strikes",
+        "sue",
+        "sues",
+        "tumble",
+        "tumbles",
+    }
+    shared_action_tokens = shared_tokens & event_action_tokens
+    strong_cross_source_overlap = bool(
+        token_jaccard >= float(params.get("cross_source_event_token_jaccard", 0.42))
+        and title_score >= float(params.get("cross_source_event_title_score", 0.83))
+        and (len(shared_entities) >= 2 or title_score >= 0.88)
+        and (shared_action_tokens or (title_score >= 0.86 and len(shared_tokens) >= 5))
+    )
+    short_title_action_overlap = bool(
+        title_score >= 0.86
+        and token_jaccard >= 0.18
+        and shared_action_tokens
+        and (shared_entities or len(shared_tokens) >= 3)
+    )
+    cross_source_event_title_match = bool(
+        params.get("cross_source_event_title_enabled", True)
+        and source_independent
+        and date_distance <= int(params.get("cross_source_event_title_max_days", 3))
+        and (strong_cross_source_overlap or short_title_action_overlap)
+        and ("token" in generated_by or "entity" in generated_by or "dense" in generated_by)
+    )
     # --- Hard guards: block semantic-only auto-merge for risky patterns ---
     _show_hn_left = "show hn" in left_norm.lower()
     _show_hn_right = "show hn" in right_norm.lower()
@@ -2480,7 +3213,6 @@ def _score_story_pair(
     )
     if _both_show_hn or _same_provider_hn:
         # Show HN / same-provider HN: semantic-only merge blocked
-        semantic_dedup_match = False
         dense_event_match = False
     if hard_conflict:
         decision = "reject"
@@ -2492,20 +3224,23 @@ def _score_story_pair(
         decision = "auto_merge"
         reason = "near-duplicate title fingerprint"
         score = max(score, 0.86)
-    elif semantic_dedup_match:
+    elif cross_source_event_title_match:
         decision = "auto_merge"
-        reason = "semantic embedding dedup"
-        score = max(score, float(params.get("semantic_dedup_score", 0.84)))
+        reason = "cross-source event title/entity match"
+        score = max(score, 0.84)
     elif exact_title_event_match:
         decision = "auto_merge"
         reason = "exact event title match without hard conflict"
-    elif dense_event_match:
+    elif score >= auto_threshold and shared_entities and bool(left_numbers & right_numbers):
         decision = "auto_merge"
-        reason = "high dense event similarity without hard conflict"
-    elif score >= auto_threshold and (shared_entities or title_score >= 0.9):
-        decision = "auto_merge"
-        reason = "high event similarity without hard conflict"
-    elif score >= review_threshold or dense_review_match or _semantic_review_fallback:
+        reason = "high event similarity with shared entity/number provenance"
+    elif (
+        score >= review_threshold
+        or dense_review_match
+        or dense_event_match
+        or semantic_review_match
+        or _semantic_review_fallback
+    ):
         decision = "review"
         reason = "ambiguous event similarity; LLM/manual review required"
     else:
@@ -2523,6 +3258,10 @@ def _score_story_pair(
         "location_conflict": location_conflict,
         "person_conflict": person_conflict,
         "action_match": action_match,
+        "cross_source_event_title_match": cross_source_event_title_match,
+        "semantic_review_match": semantic_review_match,
+        "dense_event_match": dense_event_match,
+        "shared_action_tokens": sorted(shared_action_tokens),
         "source_independent": source_independent,
         "generated_by": sorted(generated_by),
         "stable_landing_url_match": bool(shared_urls),
@@ -2545,7 +3284,6 @@ def _constrained_story_groups(
     params: dict[str, Any],
 ) -> list[list[tuple[FrozenItem, float, str]]]:
     """Merge only auto edges while validating every new member against a medoid."""
-    del params
     item_by_id = {item.item_id: item for item in items}
     groups: dict[str, list[str]] = {item.item_id: [item.item_id] for item in items}
     owner = {item.item_id: item.item_id for item in items}
@@ -2563,6 +3301,13 @@ def _constrained_story_groups(
         left_group = groups[left_owner]
         right_group = groups[right_owner]
         merged_ids = sorted(set(left_group + right_group))
+        if _single_provider_large_group_without_event_url(
+            merged_ids,
+            item_by_id,
+            pair_by_ids,
+            max_size=int(params.get("single_provider_without_event_url_max_items", 3)),
+        ):
+            continue
         medoid_id = _choose_medoid(merged_ids, pair_by_ids)
         if not _valid_group_against_medoid(merged_ids, medoid_id, pair_by_ids):
             continue
@@ -2619,6 +3364,26 @@ def _valid_group_against_medoid(
             for conflict in ("number_conflict", "location_conflict", "person_conflict")
         ):
             return False
+    return True
+
+
+def _single_provider_large_group_without_event_url(
+    item_ids: list[str],
+    item_by_id: dict[str, FrozenItem],
+    pair_by_ids: dict[tuple[str, str], PairCandidate],
+    *,
+    max_size: int,
+) -> bool:
+    if len(item_ids) <= max_size:
+        return False
+    providers = {item_by_id[item_id].provider for item_id in item_ids if item_id in item_by_id}
+    if len(providers) != 1:
+        return False
+    for index, left_id in enumerate(item_ids):
+        for right_id in item_ids[index + 1 :]:
+            pair = pair_by_ids.get(_pair_key(left_id, right_id))
+            if pair and pair.reason == "shared canonical/target URL":
+                return False
     return True
 
 
@@ -3931,6 +4696,129 @@ def label_engine_target(
     )
     conn.commit()
     return label_id
+
+
+def active_label_story_pairs(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    *,
+    target: int = 150,
+    input_fn: Callable[[str], str] = input,
+    output_fn: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """Interactively label the most informative story pairs for active learning."""
+    release = get_story_release(conn, story_release_id)
+    if release is None:
+        raise ValueError(f"Story release not found: {story_release_id}")
+    facet_release = get_facet_release(conn, release.facet_release_id)
+    if facet_release is None:
+        raise ValueError(f"Facet release not found: {release.facet_release_id}")
+    item_rows = {
+        str(row["item_id"]): row
+        for row in conn.execute(
+            "SELECT * FROM release_items WHERE release_id = ?",
+            (facet_release.data_release_id,),
+        ).fetchall()
+    }
+    existing = {
+        str(row["target_id"])
+        for row in conn.execute(
+            """
+            SELECT target_id
+            FROM engine_labels
+            WHERE target_kind = 'story_pair' AND release_id = ?
+            """,
+            (story_release_id,),
+        ).fetchall()
+    }
+    rows = conn.execute(
+        """
+        SELECT *
+        FROM story_candidate_pairs
+        WHERE story_release_id = ?
+        ORDER BY
+          CASE decision WHEN 'review' THEN 0 WHEN 'auto_merge' THEN 1 ELSE 2 END,
+          ABS(score - 0.82),
+          score DESC,
+          item_id_a,
+          item_id_b
+        """,
+        (story_release_id,),
+    ).fetchall()
+    labeled: Counter[LabelValue] = Counter()
+    asked = 0
+    for row in rows:
+        left_id = str(row["item_id_a"])
+        right_id = str(row["item_id_b"])
+        target_id = "|".join(_pair_key(left_id, right_id))
+        if target_id in existing:
+            continue
+        left = item_rows.get(left_id)
+        right = item_rows.get(right_id)
+        if left is None or right is None:
+            continue
+        features = _json_dict(row["features_json"])
+        output_fn("")
+        output_fn(f"[{asked + 1}/{target}] score={float(row['score']):.3f} {row['decision']}")
+        output_fn(
+            f"A {left['provider']} / {left['source_cluster']} / {left['source_section']}: "
+            f"{left['title']}"
+        )
+        output_fn(
+            f"B {right['provider']} / {right['source_cluster']} / {right['source_section']}: "
+            f"{right['title']}"
+        )
+        output_fn(
+            "features: "
+            + json.dumps(
+                {
+                    key: features.get(key)
+                    for key in (
+                        "title_score",
+                        "token_jaccard",
+                        "dense_similarity",
+                        "shared_entities",
+                        "shared_action_tokens",
+                        "date_distance_days",
+                        "number_conflict",
+                        "location_conflict",
+                        "person_conflict",
+                        "generated_by",
+                    )
+                },
+                ensure_ascii=False,
+            )
+        )
+        answer = input_fn("same story? [y]es/[n]o/[u]nsure/[f]inish: ").strip().lower()
+        if answer in {"f", "finish", "q", "quit"}:
+            break
+        label: LabelValue | None = None
+        if answer in {"y", "yes", "same", "s"}:
+            label = "same_story"
+        elif answer in {"n", "no", "different", "d"}:
+            label = "different_story"
+        elif answer in {"u", "unsure", "low", "l"}:
+            label = "low_signal"
+        if label is None:
+            output_fn("skipped: unknown answer")
+            continue
+        label_engine_target(
+            conn,
+            target_kind="story_pair",
+            target_id=target_id,
+            release_id=story_release_id,
+            label=label,
+            note="active_label",
+        )
+        labeled[label] += 1
+        asked += 1
+        if asked >= target:
+            break
+    return {
+        "story_release_id": story_release_id,
+        "asked": asked,
+        "labels": dict(labeled),
+    }
 
 
 def export_golden_candidates(

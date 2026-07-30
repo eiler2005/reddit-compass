@@ -3,6 +3,8 @@
 This document is the canonical contract for developing clustering and trend discovery.
 Research background lives in
 [`STORY_TREND_CLUSTERING_RESEARCH.md`](STORY_TREND_CLUSTERING_RESEARCH.md).
+End-to-end source-to-trend lineage with text diagrams lives in
+[`COLLECTOR_TO_TRENDS_FLOW.md`](COLLECTOR_TO_TRENDS_FLOW.md).
 
 ## 1. Runtime boundary
 
@@ -69,6 +71,14 @@ A Data Release freezes:
 
 Before facets, stories, trends and publication, the checksum is verified again.
 
+Source health is part of the frozen input contract:
+
+- `SourceDefinition.expected_min_items` marks sources that must not silently pass empty;
+- an `ok` health row below that minimum is frozen as `empty` or `degraded`;
+- `broad` and `ai-native` releases with an expected but empty `voices` cluster become `partial`;
+- `engine diagnose` reports partial input, empty dominant clusters and degraded source rows before
+  story/trend debugging.
+
 ### FacetRelease
 
 Facets contain domains, themes, candidate themes, pains, typed entities, event frames, project
@@ -93,14 +103,19 @@ Candidate generation combines:
 The implementation creates only inverted-index and dense top-K pairs. It does not persist an
 all-pairs matrix. Event-specific exact URLs merge deterministically. Long-lived landing URLs
 (repository roots and model/project pages) still require title/time/event agreement, because one
-URL can host multiple releases or reports. High-confidence pairs auto-merge. Hard event conflicts
-reject. Only the grey zone is eligible for Qwen review.
+URL can host multiple releases or reports. High-confidence pairs auto-merge only with provenance
+anchors such as exact event URL, cross-source event-title agreement, shared typed entities plus
+numbers/dates, or near-duplicate textual evidence. Dense/E5 similarity alone can generate or rank a
+candidate, but it cannot auto-merge a Story. Hard event conflicts reject. Only the grey zone is
+eligible for Qwen/manual review.
 
 Cluster construction is constrained agglomeration:
 
 - each new member must match the cluster medoid;
 - numbers, people and geography cannot have hard conflicts;
 - a transitive bridge cannot merge two groups if members fail the medoid threshold;
+- large same-provider groups without shared event URLs are blocked to avoid single-provider
+  semantic overmerge;
 - story IDs are reconciled with the previous accepted attempt by item overlap;
 - merge/split redirects retain provenance.
 
@@ -146,6 +161,20 @@ Collection is independent:
 reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
 ```
 
+Repair an existing corpus DB before Engine work when old runs were produced by an earlier schema:
+
+```bash
+reddit-compass db repair \
+  --source-db data/compass.db \
+  --output-dir data/snapshots
+```
+
+`db repair` is not a network collection and not a full rebuild. It applies SQLite migrations,
+backfills current item fields from local JSONL snapshots (`discussion_url`, `target_url`,
+`domain_ids`, `dedupe_group_id`, `evidence_refs`) and rebuilds `source_health` from
+`observations × items`. This is the preferred way to make old SQLite runs usable for Story/Trend
+Engine experiments before creating a DataRelease.
+
 Create an immutable input:
 
 ```bash
@@ -154,6 +183,17 @@ reddit-compass engine release create \
   --source-db data/compass.db
 
 reddit-compass engine release verify --release RELEASE_ID
+```
+
+For historical analysis over existing local runs, freeze several dates into one release:
+
+```bash
+reddit-compass engine release create \
+  --run 2026-07-22:ai-native \
+  --run 2026-07-23:ai-native \
+  --run 2026-07-25:ai-native \
+  --run 2026-07-27:ai-native \
+  --source-db data/compass.db
 ```
 
 Run deterministic facets:
@@ -178,6 +218,15 @@ reddit-compass engine embeddings \
 Run a small, reproducible Story attempt:
 
 ```bash
+reddit-compass engine diagnose --release RELEASE_ID
+
+reddit-compass engine stories candidates \
+  --facet-release FACET_ID \
+  --limit 50 \
+  --candidate-limit 50 \
+  --embedding-model lexical-hash-v1 \
+  --output data/engine-candidates-50.jsonl
+
 reddit-compass engine stories propose \
   --facet-release FACET_ID \
   --limit 50 \
@@ -190,6 +239,35 @@ reddit-compass engine stories inspect --story-release STORY_ID --limit 20
 
 `--limit` uses stratified domain/source/date seeds plus likely neighbours. A small slice therefore
 tests actual merge candidates rather than fifty unrelated rows.
+The limit must be applied before heavy candidate generation and before loading embeddings; lab runs
+must not deserialize vectors for the full frozen release when only 50/100/300 items are requested.
+
+`engine diagnose` and `engine stories candidates` are the first debugging step for weak clustering.
+They do not create a StoryRelease, do not call Qwen and do not mutate `compass.db`. Use them to
+inspect:
+
+- source/provider coverage;
+- current compression and cross-source counts;
+- candidate decisions and merge/reject reasons;
+- high-scoring cross-source pairs that stayed split;
+- event-specific URLs that appear in more than one story;
+- the exact next commands for 50/100/300-item iterations.
+
+Recommended iteration before any full release:
+
+```bash
+reddit-compass engine stories candidates --facet-release FACET_ID --limit 50 --candidate-limit 50
+reddit-compass engine stories propose --facet-release FACET_ID --limit 50
+reddit-compass engine stories eval --story-release STORY_50
+
+reddit-compass engine stories candidates --facet-release FACET_ID --limit 100 --candidate-limit 100
+reddit-compass engine stories propose --facet-release FACET_ID --limit 100
+reddit-compass engine stories eval --story-release STORY_100
+
+reddit-compass engine stories candidates --facet-release FACET_ID --limit 300 --candidate-limit 150
+reddit-compass engine stories propose --facet-release FACET_ID --limit 300
+reddit-compass engine stories eval --story-release STORY_300
+```
 
 Review only ambiguous pairs:
 
@@ -207,6 +285,18 @@ clustering. Create another immutable attempt to consume valid cached reviews:
 ```bash
 reddit-compass engine stories propose --facet-release FACET_ID --limit 50
 ```
+
+Create the first active-learning labels directly from a StoryRelease:
+
+```bash
+reddit-compass engine label active \
+  --story-release STORY_ID \
+  --target 150
+```
+
+The command prioritizes review/near-threshold pairs, prints title/provider/URL/features and stores
+version-scoped `story_pair` labels. It is intended for the first local Golden Set before Qwen
+pre-labels or model training.
 
 Build and review trends. Trend graph generation is bounded; extremely broad features are skipped
 instead of materializing an all-pairs graph:
@@ -523,3 +613,51 @@ Production gate remains closed until:
 - the 120-pair / 30-group Golden Set confirms precision, recall and overmerge limits;
 - TrendRelease contains confirmed useful trends rather than only deterministic `pending` candidates;
 - seven daily finalized Data Releases exist for lifecycle/status history.
+
+## 11. Local Story Engine v2.2 checkpoint (2026-07-30)
+
+This checkpoint used local `data/trend_engine.db` release `2026-07-27-ai-native-r1` only. It did not
+run network collection, did not mutate `compass.db` and did not publish Radar.
+
+New debugging commands:
+
+```bash
+reddit-compass engine diagnose --limit 5
+reddit-compass engine stories candidates --facet-release FACET_ID --limit 300 --candidate-limit 50
+```
+
+Observed latest pre-change full attempt:
+
+```text
+2,116 items
+1,980 stories
+11 cross-source stories
+9,457 candidate pairs
+552 review pairs
+24 pending trend candidates
+0 confirmed trends
+history: insufficient_history
+```
+
+After the guarded cross-source event-title rule:
+
+```text
+2,116 items
+1,976 stories
+129 multi-item stories
+14 cross-source stories
+9,048 candidate pairs
+120 review pairs
+7 pending trend candidates
+0 confirmed trends
+history: insufficient_history
+```
+
+The new rule auto-merges source-independent pairs only when title/entity overlap is event-like and
+there are no hard conflicts. It covers cases such as FT/Guardian versions of the same Iran/oil
+event and keeps topic posts like “Mechanism of Vibe Coding” vs “I love Vibe Coding” out of
+auto-merge.
+
+Decision: keep this rule for lab/shadow attempts. It improves cross-source count and sharply
+reduces grey-zone review volume, but it is still not enough for production publish. The next
+required step is Golden Set labeling plus Qwen review on the remaining high-score review pairs.

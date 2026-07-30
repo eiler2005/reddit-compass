@@ -306,7 +306,9 @@ Legacy (один переходный релиз): `/legacy/dashboard`, `/legacy
 publication pointers.
 
 Published analysis is explicitly split into `News → Stories → Trends → Project Lens`.
-See [`docs/NEWS_STORIES_TRENDS.md`](docs/NEWS_STORIES_TRENDS.md).
+See [`docs/NEWS_STORIES_TRENDS.md`](docs/NEWS_STORIES_TRENDS.md). End-to-end collection and
+analysis lineage is documented in
+[`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md).
 Published Radar includes a cockpit section that links these layers.
 
 ```bash
@@ -382,6 +384,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full system architecture with diagrams |
 | [`ROADMAP.md`](ROADMAP.md) | Phases 2–6, status |
 | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | 21 sources, 5 clusters |
+| [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) | Text diagrams from source collection to News, Stories, Trends and Radar |
 | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) | Canonical immutable Engine workflow, gates and rollback |
 | [`docs/CLUSTER_LAB.md`](docs/CLUSTER_LAB.md) | Deprecated Cluster Lab compatibility guide |
 | [`docs/STORY_TREND_CLUSTERING_RESEARCH.md`](docs/STORY_TREND_CLUSTERING_RESEARCH.md) | Research-backed story/trend clustering roadmap |

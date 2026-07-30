@@ -489,7 +489,11 @@ async def _execute_collection(args: argparse.Namespace) -> object:
 
     config = _load_config(args)
     snapshots_dir = _snapshots_dir(args)
-    db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+    db_path = (
+        Path(args.source_db)
+        if getattr(args, "source_db", None)
+        else DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+    )
     sources = None
     if args.sources:
         sources = [s.strip() for s in args.sources.split(",")]
@@ -590,6 +594,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         _git_sha,
         _hash_json,
         _stable_id,
+        active_label_story_pairs,
         cache_release_embeddings,
         compare_engine_versions,
         compare_story_engine_variants,
@@ -597,10 +602,12 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         create_facet_release,
         create_story_release,
         create_trend_release,
+        diagnose_engine_release,
         engine_db,
         evaluate_story_release,
         evaluate_trend_release,
         export_golden_candidates,
+        export_story_candidates_for_release,
         import_golden_labels,
         import_legacy_lab,
         inspect_story_release,
@@ -743,7 +750,58 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
+        if args.engine_group == "diagnose":
+            result = diagnose_engine_release(
+                engine_conn,
+                data_release_id=args.release,
+                story_release_id=args.story_release,
+                trend_release_id=args.trend_release,
+                limit=args.limit,
+            )
+            print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+            return
         if args.engine_group == "stories":
+            if args.engine_action == "candidates":
+                story_params = {
+                    "embedding_model": args.embedding_model,
+                    "embedding_revision": args.embedding_revision,
+                    "dense_top_k": args.dense_top_k,
+                    "dense_candidate_threshold": args.dense_threshold,
+                    "auto_merge_threshold": args.auto_merge_threshold,
+                    "review_threshold": args.review_threshold,
+                    "near_duplicate_enabled": not args.no_near_duplicates,
+                    "near_duplicate_max_bucket_size": args.near_duplicate_max_bucket_size,
+                    "near_duplicate_simhash_distance": args.near_duplicate_simhash_distance,
+                    "near_duplicate_shingle_jaccard": args.near_duplicate_shingle_jaccard,
+                    "semantic_dedup_enabled": args.semantic_dedup,
+                    "semantic_dedup_threshold": args.semantic_dedup_threshold,
+                    "semantic_dedup_max_days": args.semantic_dedup_max_days,
+                }
+                result = export_story_candidates_for_release(
+                    engine_conn,
+                    facet_release_id=args.facet_release,
+                    params=story_params,
+                    limit=args.limit,
+                    domain=args.domain,
+                    candidate_limit=args.candidate_limit,
+                )
+                if args.output:
+                    output_path = Path(args.output)
+                    output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(
+                        "\n".join(
+                            json.dumps(candidate, ensure_ascii=False)
+                            for candidate in result["candidates"]
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    summary = {k: v for k, v in result.items() if k != "candidates"}
+                    summary["output"] = str(output_path)
+                    print(json.dumps(summary, ensure_ascii=False, indent=2))
+                else:
+                    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+                return
             if args.engine_action == "propose":
                 story_params = {
                     "embedding_model": args.embedding_model,
@@ -1232,6 +1290,21 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 )
                 return
         if args.engine_group == "label":
+            if args.label_action == "active":
+                if not args.story_release:
+                    raise SystemExit("engine label active requires --story-release")
+                result = active_label_story_pairs(
+                    engine_conn,
+                    args.story_release,
+                    target=int(args.target),
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return
+            if not args.kind or not args.target or not args.label or not args.release:
+                raise SystemExit(
+                    "engine label requires --kind, --target, --release and --label "
+                    "unless using `engine label active`"
+                )
             target_id = args.target
             if args.kind == "story_pair":
                 target_id = "|".join(sorted(part.strip() for part in target_id.split(",")))
@@ -1303,7 +1376,11 @@ async def _cmd_db(args: argparse.Namespace) -> None:
     """SQLite: init / stats / rebuild."""
     from .db import get_db, query_stats
 
-    db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+    db_path = (
+        Path(args.source_db)
+        if getattr(args, "source_db", None)
+        else DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+    )
     action = args.db_action
 
     if action == "init":
@@ -1338,6 +1415,22 @@ async def _cmd_db(args: argparse.Namespace) -> None:
         print(
             f"✅ Rebuild: {stats['dates']} дат, {stats['items']} items, "
             f"{stats['skipped']} пропущено"
+        )
+    elif action == "repair":
+        from .intelligence.repair import repair_corpus_db
+
+        conn = get_db(db_path)
+        snapshots_dir = _snapshots_dir(args)
+        print(f"🛠️ Repair {db_path} из локальных snapshots {snapshots_dir}...")
+        stats = repair_corpus_db(conn, snapshots_dir)
+        conn.close()
+        print(
+            "✅ Repair: "
+            f"{stats['dates']} дат, "
+            f"{stats['items_backfilled']} items backfilled, "
+            f"{stats['snapshot_items_missing_in_db']} snapshot items missing, "
+            f"{stats['runs_health_rebuilt']} runs health rebuilt, "
+            f"{stats['source_health_rows']} source_health rows"
         )
 
 
@@ -1643,11 +1736,69 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.34,
     )
 
+    engine_diagnose = engine_sub.add_parser(
+        "diagnose",
+        help="Explain current frozen release, story undermerge and trend readiness",
+    )
+    engine_diagnose.add_argument("--release", default=None)
+    engine_diagnose.add_argument("--story-release", default=None)
+    engine_diagnose.add_argument("--trend-release", default=None)
+    engine_diagnose.add_argument("--limit", type=int, default=10)
+
     engine_stories = engine_sub.add_parser("stories", help="Story release operations")
     engine_stories_sub = engine_stories.add_subparsers(
         dest="engine_action",
         required=True,
     )
+    engine_stories_candidates = engine_stories_sub.add_parser(
+        "candidates",
+        help="Export scored Story Engine pair candidates without saving a release",
+    )
+    engine_stories_candidates.add_argument("--facet-release", required=True)
+    engine_stories_candidates.add_argument("--limit", type=int, default=300)
+    engine_stories_candidates.add_argument("--domain", default=None)
+    engine_stories_candidates.add_argument("--candidate-limit", type=int, default=0)
+    engine_stories_candidates.add_argument("--output", default="")
+    engine_stories_candidates.add_argument(
+        "--embedding-model",
+        default="intfloat/multilingual-e5-small",
+        help=(
+            "Embedding model hash to read for dense retrieval. Use "
+            f"{LEXICAL_HASH_EMBEDDING_MODEL} for dependency-free VPS runs."
+        ),
+    )
+    engine_stories_candidates.add_argument("--embedding-revision", default="default")
+    engine_stories_candidates.add_argument("--dense-top-k", type=int, default=16)
+    engine_stories_candidates.add_argument("--dense-threshold", type=float, default=0.62)
+    engine_stories_candidates.add_argument("--auto-merge-threshold", type=float, default=0.82)
+    engine_stories_candidates.add_argument("--review-threshold", type=float, default=0.58)
+    engine_stories_candidates.add_argument(
+        "--no-near-duplicates",
+        action="store_true",
+        help="Disable SimHash/MinHash-style near-duplicate candidate generation.",
+    )
+    engine_stories_candidates.add_argument(
+        "--near-duplicate-max-bucket-size",
+        type=int,
+        default=40,
+    )
+    engine_stories_candidates.add_argument(
+        "--near-duplicate-simhash-distance",
+        type=int,
+        default=18,
+    )
+    engine_stories_candidates.add_argument(
+        "--near-duplicate-shingle-jaccard",
+        type=float,
+        default=0.34,
+    )
+    engine_stories_candidates.add_argument(
+        "--semantic-dedup",
+        action="store_true",
+        help="Enable guarded semantic embedding auto-merge for dense candidates.",
+    )
+    engine_stories_candidates.add_argument("--semantic-dedup-threshold", type=float, default=0.92)
+    engine_stories_candidates.add_argument("--semantic-dedup-max-days", type=int, default=7)
     engine_stories_propose = engine_stories_sub.add_parser("propose")
     engine_stories_propose.add_argument("--facet-release", required=True)
     engine_stories_propose.add_argument("--limit", type=int, default=0)
@@ -1771,15 +1922,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     engine_label = engine_sub.add_parser("label", help="Add version-scoped manual label")
     engine_label.add_argument(
+        "label_action",
+        nargs="?",
+        choices=["active"],
+        help="Use `active` for interactive active-learning pair labeling.",
+    )
+    engine_label.add_argument(
         "--kind",
-        required=True,
         choices=["story_pair", "story", "trend"],
     )
     engine_label.add_argument("--target", required=True)
-    engine_label.add_argument("--release", required=True)
+    engine_label.add_argument("--release", default="")
+    engine_label.add_argument("--story-release", default="")
     engine_label.add_argument(
         "--label",
-        required=True,
         choices=[
             "same_story",
             "different_story",
@@ -1810,10 +1966,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
 
-    db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats / rebuild")
-    db_p.add_argument("db_action", choices=["init", "stats", "rebuild"], help="Действие с БД")
+    db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats / rebuild / repair")
+    db_p.add_argument(
+        "db_action",
+        choices=["init", "stats", "rebuild", "repair"],
+        help="Действие с БД",
+    )
     db_p.add_argument("--date", type=str, default=None, help="Дата для rebuild (YYYY-MM-DD)")
     db_p.add_argument("--profile", type=str, default=DEFAULT_PROFILE, help="Профиль для rebuild")
+    db_p.add_argument(
+        "--source-db",
+        type=str,
+        default=None,
+        help="Путь к compass.db для init/stats/rebuild/repair",
+    )
 
     lab_p = sub.add_parser(
         "lab",

@@ -13,15 +13,19 @@ from reddit_compass.intelligence.engine import (
     FrozenItem,
     _discover_trends_graph,
     _story_topic_keys,
+    active_label_story_pairs,
+    cache_release_embeddings,
     compare_story_engine_variants,
     create_data_release,
     create_facet_release,
     create_story_release,
     create_trend_release,
+    diagnose_engine_release,
     engine_db,
     evaluate_story_release,
     evaluate_trend_release,
     export_golden_candidates,
+    export_story_candidates_for_release,
     generate_story_candidates,
     get_current_publication,
     import_golden_labels,
@@ -30,6 +34,7 @@ from reddit_compass.intelligence.engine import (
     inspect_trend_release,
     label_engine_target,
     load_frozen_items,
+    load_release_embeddings,
     publish_radar,
     rollback_publication,
     store_story_review_response,
@@ -68,6 +73,43 @@ def test_data_release_is_frozen_and_checksum_verified(tmp_path: Path) -> None:
                WHERE release_id = ? AND item_id = 'event1_reuters'""",
             (release.release_id,),
         )
+
+
+def test_data_release_marks_expected_empty_voice_source_partial(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    save_source_health(
+        corpus,
+        "2026-07-27:broad",
+        [
+            SourceHealth(
+                source_id="reddit",
+                provider="reddit",
+                cluster="voices",
+                status="ok",
+                count=0,
+            )
+        ],
+    )
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=["2026-07-27:broad"],
+    )
+
+    health = engine.execute(
+        "SELECT status, message FROM release_source_health WHERE release_id = ?",
+        (release.release_id,),
+    ).fetchone()
+    assert release.input_status == "partial"
+    assert health["status"] == "empty"
+    assert "expected at least 1 item" in health["message"]
+    report = diagnose_engine_release(engine, data_release_id=release.release_id)
+    assert "input_status_partial" in report["warnings"]
+    assert "dominant_cluster_empty:voices" in report["warnings"]
 
 
 def test_story_and_trend_releases_are_independent_versions(tmp_path: Path) -> None:
@@ -202,7 +244,7 @@ def test_near_duplicate_title_fingerprint_merges_syndicated_headlines() -> None:
     assert candidates[0].features["near_duplicate_simhash_distance"] <= 18
 
 
-def test_semantic_dedup_embedding_merges_guarded_paraphrase() -> None:
+def test_semantic_dedup_embedding_needs_provenance_review() -> None:
     items = [
         _frozen_item(
             "guardian:openai",
@@ -237,9 +279,60 @@ def test_semantic_dedup_embedding_merges_guarded_paraphrase() -> None:
     )
 
     assert len(candidates) == 1
-    assert candidates[0].decision == "auto_merge"
-    assert candidates[0].reason == "semantic embedding dedup"
+    assert candidates[0].decision == "review"
+    assert candidates[0].reason == "ambiguous event similarity; LLM/manual review required"
     assert candidates[0].features["dense_similarity"] >= 0.9
+    assert candidates[0].features["semantic_review_match"] is True
+
+
+def test_cross_source_event_title_match_merges_news_but_not_topic_posts() -> None:
+    news_items = [
+        _frozen_item(
+            "ft:oil",
+            "https://ft.example/oil-hormuz",
+            "Oil price tumbles as Iran and US pause strikes over Strait of Hormuz",
+            "2026-07-29T08:00:00Z",
+        ),
+        _frozen_item(
+            "guardian:oil",
+            "https://guardian.example/oil-hormuz",
+            "Oil prices fall as US pauses strikes on Iran over strait of Hormuz",
+            "2026-07-30T08:00:00Z",
+        ),
+    ]
+    candidates = generate_story_candidates(
+        news_items,
+        {
+            "ft:oil": {"entities": json.dumps(["oil", "iran", "hormuz"])},
+            "guardian:oil": {"entities": json.dumps(["oil", "iran", "hormuz"])},
+        },
+    )
+    assert len(candidates) == 1
+    assert candidates[0].decision == "auto_merge"
+    assert candidates[0].reason == "cross-source event title/entity match"
+
+    topic_items = [
+        _frozen_item(
+            "hn:vibe",
+            "https://news.ycombinator.com/item?id=1",
+            "Mechanism of Vibe Coding",
+            "2026-07-29T08:00:00Z",
+        ),
+        _frozen_item(
+            "reddit:vibe",
+            "https://reddit.example/vibe",
+            "I love Vibe Coding!",
+            "2026-07-30T08:00:00Z",
+        ),
+    ]
+    topic_candidates = generate_story_candidates(
+        topic_items,
+        {
+            "hn:vibe": {"entities": json.dumps(["vibe", "coding"])},
+            "reddit:vibe": {"entities": json.dumps(["vibe", "coding"])},
+        },
+    )
+    assert all(candidate.decision != "auto_merge" for candidate in topic_candidates)
 
 
 def test_story_engine_ab_compare_runs_all_variants(tmp_path: Path) -> None:
@@ -274,6 +367,115 @@ def test_story_engine_ab_compare_runs_all_variants(tmp_path: Path) -> None:
     ]
     assert all(variant["story_release_id"].startswith("stories_") for variant in variants)
     assert variants[0]["delta_vs_baseline"]["story_count"] == 0
+
+
+def test_story_candidate_export_is_read_only_and_explainable(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=data_release.release_id)
+
+    exported = export_story_candidates_for_release(
+        engine,
+        facet_release_id=facets.facet_release_id,
+        params={"embedding_model": "missing-model"},
+        limit=6,
+        candidate_limit=3,
+    )
+
+    assert exported["data_release_id"] == data_release.release_id
+    assert exported["item_count"] == 6
+    assert exported["candidate_count"] == 3
+    assert exported["decision_counts"]["auto_merge"] >= 1
+    assert exported["candidates"][0]["left"]["provider"] in {"nytimes", "reuters"}
+    assert exported["candidates"][0]["features"]["generated_by"]
+    assert engine.execute("SELECT COUNT(*) FROM story_releases").fetchone()[0] == 0
+
+
+def test_release_embeddings_can_be_loaded_for_selected_items_only(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    cache_release_embeddings(
+        engine,
+        data_release_id=data_release.release_id,
+        model_name="lexical-hash-v1",
+    )
+
+    all_item_ids = [item.item_id for item in load_frozen_items(engine, data_release.release_id)]
+    selected_item_ids = set(all_item_ids[:2])
+
+    selected = load_release_embeddings(
+        engine,
+        data_release_id=data_release.release_id,
+        model_name="lexical-hash-v1",
+        item_ids=selected_item_ids,
+    )
+
+    assert set(selected) == selected_item_ids
+    assert len(selected) < len(all_item_ids)
+    assert (
+        load_release_embeddings(
+            engine,
+            data_release_id=data_release.release_id,
+            model_name="lexical-hash-v1",
+            item_ids=[],
+        )
+        == {}
+    )
+
+
+def test_engine_diagnose_reports_undermerge_and_next_commands(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=data_release.release_id)
+    stories = create_story_release(
+        engine,
+        facet_release_id=facets.facet_release_id,
+        params={
+            "auto_merge_threshold": 0.99,
+            "review_threshold": 0.4,
+            "cross_source_event_title_enabled": False,
+        },
+    )
+    trends = create_trend_release(engine, story_release_id=stories.story_release_id)
+
+    report = diagnose_engine_release(
+        engine,
+        story_release_id=stories.story_release_id,
+        trend_release_id=trends.trend_release_id,
+        limit=5,
+    )
+
+    assert report["data_release"]["release_id"] == data_release.release_id
+    assert report["story_release"]["story_release_id"] == stories.story_release_id
+    assert report["trend_release"]["trend_release_id"] == trends.trend_release_id
+    assert report["candidate_decision_counts"]["review"] >= 1
+    assert report["possible_undermerge_pairs"]
+    assert (
+        "cross_source_low: verify canonical URLs, Reddit target URLs and title/entity matching"
+        in report["warnings"]
+    )
+    assert any("engine stories candidates" in command for command in report["next_commands"])
 
 
 def test_generic_topic_phrase_does_not_become_trend_pattern() -> None:
@@ -379,6 +581,7 @@ def test_publish_and_rollback_switch_only_channel_pointer(tmp_path: Path) -> Non
         story_release_id=first_stories.story_release_id,
         trend_release_id=first_trends.trend_release_id,
         channel="shadow",
+        allow_partial=True,
     )
     second_stories = create_story_release(
         engine,
@@ -409,6 +612,7 @@ def test_publish_and_rollback_switch_only_channel_pointer(tmp_path: Path) -> Non
         story_release_id=second_stories.story_release_id,
         trend_release_id=second_trends.trend_release_id,
         channel="shadow",
+        allow_partial=True,
     )
 
     assert get_current_publication(engine, "shadow") == second_publication
@@ -550,6 +754,43 @@ def test_manual_labels_are_version_scoped(tmp_path: Path) -> None:
     row = engine.execute("SELECT * FROM engine_labels WHERE label_id = ?", (label_id,)).fetchone()
     assert row["release_id"] == "stories_v1"
     assert row["label"] == "same_story"
+
+
+def test_active_label_story_pairs_writes_informative_pair_labels(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=data_release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    answers = iter(["y", "n"])
+    output: list[str] = []
+
+    result = active_label_story_pairs(
+        engine,
+        stories.story_release_id,
+        target=2,
+        input_fn=lambda _: next(answers),
+        output_fn=output.append,
+    )
+
+    rows = engine.execute(
+        """
+        SELECT label
+        FROM engine_labels
+        WHERE target_kind = 'story_pair' AND release_id = ?
+        ORDER BY created_at
+        """,
+        (stories.story_release_id,),
+    ).fetchall()
+    assert result["asked"] == 2
+    assert {row["label"] for row in rows} == {"same_story", "different_story"}
+    assert any("features:" in line for line in output)
 
 
 def test_invalid_story_review_cache_can_be_replaced(tmp_path: Path) -> None:

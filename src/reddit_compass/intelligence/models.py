@@ -28,7 +28,7 @@ StoryDirection = Literal["new", "growing", "stable", "fading", "resurfacing"]
 ConfidenceLevel = Literal["low", "medium", "high"]
 
 ResearchStatus = Literal["unread", "read", "in_progress", "archived", "dismissed"]
-SourceStatus = Literal["ok", "empty", "partial", "error", "not_configured", "skipped"]
+SourceStatus = Literal["ok", "empty", "degraded", "partial", "error", "not_configured", "skipped"]
 
 
 @dataclass(frozen=True)

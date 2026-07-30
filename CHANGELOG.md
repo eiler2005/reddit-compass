@@ -44,6 +44,30 @@
 - **Engine preview fallback**: News, Stories, Trends, Radar and Project Lens show the latest
   evaluated Engine release when a channel has no `RadarPublication`; UI/API mark it as `preview`
   so it cannot be confused with production.
+- **Engine diagnostics workflow**: `engine diagnose` reports release coverage, compression,
+  candidate decisions, undermerge examples and next commands; `engine stories candidates` exports
+  scored pair candidates on 50/100/300-item frozen slices without creating a StoryRelease.
+- **DataRelease source-health gate**: sources with `expected_min_items` no longer pass as `ok`
+  when empty/degraded; `broad`/`ai-native` releases with an empty expected voices cluster become
+  `partial` and `engine diagnose` surfaces the issue explicitly.
+- **Story Engine v2.3 conservative merge gate**: dense/E5 similarity alone can no longer auto-merge
+  stories; auto-merge now requires event provenance anchors, and large same-provider groups without
+  shared event URLs are blocked.
+- **Active-learning labels**: `engine label active --story-release STORY_ID --target N` prioritizes
+  review/near-threshold story pairs and stores version-scoped manual labels for the Golden Set.
+- **Offline corpus repair**: `db repair --source-db data/compass.db --output-dir data/snapshots`
+  migrates old SQLite projections to the current item schema, backfills Reddit
+  `discussion_url`/`target_url`/domains from local JSONL snapshots and rebuilds `source_health`
+  from existing observations without network collection or full legacy rebuild.
+- **Engine lab performance guard**: limited `stories candidates/propose` runs now use token/URL
+  indexes and selective embedding loading, so 50/100/300-item lab slices do not deserialize vectors
+  or fuzzy-match against the full frozen release.
+- **Collector-to-Trends documentation**: added text diagrams and developer checklist covering
+  source adapters, `compass.db`, immutable Data Releases, facets, stories, trends, publications and
+  GUI lineage.
+- **Story Engine v2.2 cross-source guard**: conservative source-independent event-title/entity
+  auto-merge reduces local full-release review pairs from 552 to 120 and improves cross-source
+  stories from 11 to 14 without merging generic topic posts in tests.
 - **Cluster Lab sandbox**: отдельный `cluster_lab.db` для immutable data releases,
   experiments, story proposals и trend proposals без mutation production `stories`.
   CLI: `lab release create/list`, `lab experiment create`, `lab propose`, `lab compare/eval`.

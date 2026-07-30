@@ -1,6 +1,8 @@
 # News, Stories, Trends and Project Lens
 
 This is the product contract for the published analysis UI.
+For the operational data lineage from source collection to Radar publication, see
+[`COLLECTOR_TO_TRENDS_FLOW.md`](COLLECTOR_TO_TRENDS_FLOW.md).
 
 ## Layer definitions
 
