@@ -12,7 +12,7 @@ import json
 import sqlite3
 import subprocess
 from collections import Counter, defaultdict
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -44,6 +44,7 @@ from .engine_reviews import (
 from .entities import extract_structured_event_frame
 from .llm_pipeline import build_deterministic_item_signals
 from .models import ContentItem
+from .reddit_pulse import build_reddit_pulse_signals, perspective_gap_available_counts
 from .story_scoring import MergeModel, auto_label_pair, extract_feature_vector, train_merge_model
 from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
 
@@ -4988,16 +4989,21 @@ def train_story_merge_model(
            WHERE target_kind = 'story_pair' AND release_id = ?""",
         (story_release_id,),
     ).fetchall()
-    labels_by_id: dict[str, str] = {}
-    human_count = 0
+    # Приоритет меток: человек > Qwen > авто-разметка (детерминированно, без гонок).
+    auto_labels: dict[str, str] = {}
+    qwen_labels: dict[str, str] = {}
+    human_labels: dict[str, str] = {}
     for row in label_rows:
         note = str(row["note"] or "")
         target_id = str(row["target_id"])
+        label = str(row["label"])
         if note == "auto_label":
-            labels_by_id.setdefault(target_id, str(row["label"]))
+            auto_labels[target_id] = label
+        elif note == "qwen_review":
+            qwen_labels[target_id] = label
         else:
-            labels_by_id[target_id] = str(row["label"])
-            human_count += 1
+            human_labels[target_id] = label
+    labels_by_id = {**auto_labels, **qwen_labels, **human_labels}
     pair_rows = conn.execute(
         """SELECT item_id_a, item_id_b, features_json
            FROM story_candidate_pairs WHERE story_release_id = ?""",
@@ -5007,14 +5013,14 @@ def train_story_merge_model(
     labels: list[bool] = []
     for row in pair_rows:
         target_id = "|".join(_pair_key(str(row["item_id_a"]), str(row["item_id_b"])))
-        label = labels_by_id.get(target_id)
-        if label in (None, "low_signal"):
+        pair_label = labels_by_id.get(target_id)
+        if pair_label in (None, "low_signal"):
             continue
         vectors.append(extract_feature_vector(_json_dict(row["features_json"])))
-        labels.append(label == "same_story")
+        labels.append(pair_label == "same_story")
     if not vectors:
         raise ValueError(f"No labeled pairs available for training: {story_release_id}")
-    label_source = "human" if human_count else "auto"
+    label_source = "human" if human_labels else ("qwen" if qwen_labels else "auto")
     model = train_merge_model(
         vectors,
         labels,
@@ -5034,6 +5040,361 @@ def train_story_merge_model(
         "labeled_pairs": len(vectors),
         "label_source": label_source,
         "model": summary,
+    }
+
+
+def _load_pulse_items(
+    conn: sqlite3.Connection, data_release_id: str, snapshot_date: str
+) -> list[ContentItem]:
+    rows = conn.execute(
+        """SELECT item_id, provider, source_cluster, external_id, source_section,
+                  title, excerpt, canonical_url, discussion_url, target_url,
+                  domain_ids, metadata, raw_engagement, snapshot_date,
+                  published_at, observed_at
+           FROM release_items
+           WHERE release_id = ? AND snapshot_date = ? AND provider = 'reddit'""",
+        (data_release_id, snapshot_date),
+    ).fetchall()
+    items: list[ContentItem] = []
+    for r in rows:
+        items.append(
+            ContentItem(
+                item_id=r["item_id"],
+                provider=r["provider"],
+                source_cluster=r["source_cluster"],
+                external_id=r["external_id"],
+                source_section=r["source_section"],
+                title=r["title"],
+                excerpt=r["excerpt"] or "",
+                canonical_url=r["canonical_url"] or "",
+                discussion_url=r["discussion_url"] or "",
+                target_url=r["target_url"] or "",
+                domain_ids=_json_list(r["domain_ids"], ["other"]),
+                metadata=_json_dict(r["metadata"]),
+                raw_engagement=_json_dict(r["raw_engagement"]),
+                snapshot_date=r["snapshot_date"],
+                observed_at=r["observed_at"] or "",
+                published_at=r["published_at"] or None,
+            )
+        )
+    return items
+
+
+def _load_pulse_history_titles(
+    conn: sqlite3.Connection,
+    data_release_id: str,
+    profile: str,
+    snapshot_date: str,
+    history_window_days: int,
+) -> set[str]:
+    rows = conn.execute(
+        """SELECT ri.title
+           FROM release_items ri
+           JOIN data_releases dr ON dr.release_id = ri.release_id
+           WHERE dr.status = 'finalized' AND dr.profile = ?
+             AND ri.provider = 'reddit' AND ri.snapshot_date < ?
+             AND date(ri.snapshot_date) >= date(?, '-' || ? || ' days')""",
+        (profile, snapshot_date, snapshot_date, history_window_days),
+    ).fetchall()
+    from .reddit_pulse import tokenize_title
+
+    return {" ".join(sorted(tokenize_title(str(r["title"])))) for r in rows}
+
+
+def create_signal_release(
+    conn: sqlite3.Connection,
+    *,
+    items: list[ContentItem],
+    history_titles: set[str],
+    pack_by_subreddit: dict[str, str],
+    story_release_id: str,
+    data_release_id: str,
+    profile: str,
+    date: str,
+    method: str = "reddit_pulse_v2",
+    history_window_days: int = 7,
+    signal_release_id: str | None = None,
+) -> dict[str, Any]:
+    """Собирает Reddit Pulse и пишет signal_release + community_signals (Фаза 7/cycle)."""
+
+    facet_row = conn.execute(
+        "SELECT facet_release_id FROM story_releases WHERE story_release_id = ?",
+        (story_release_id,),
+    ).fetchone()
+    facet_release_id = str(facet_row["facet_release_id"]) if facet_row else ""
+    story_id_by_item_id: dict[str, str] = {}
+    mainstream_coverage_by_story_id: dict[str, int] = {}
+    if story_release_id:
+        story_rows = conn.execute(
+            "SELECT item_id, story_id FROM engine_story_items WHERE story_release_id = ?",
+            (story_release_id,),
+        ).fetchall()
+        story_id_by_item_id = {str(r["item_id"]): str(r["story_id"]) for r in story_rows}
+        coverage_rows = conn.execute(
+            """SELECT esi.story_id,
+                      COUNT(DISTINCT ri.provider || ':' ||
+                            COALESCE(NULLIF(ri.source_section, ''), ri.source_cluster))
+                      AS mainstream_coverage
+               FROM engine_story_items esi
+               JOIN release_items ri ON ri.release_id = ? AND ri.item_id = esi.item_id
+               WHERE esi.story_release_id = ? AND ri.provider != 'reddit'
+                 AND ri.source_cluster IN ('mainstream', 'business', 'tech_culture')
+               GROUP BY esi.story_id""",
+            (data_release_id, story_release_id),
+        ).fetchall()
+        mainstream_coverage_by_story_id = {
+            str(r["story_id"]): int(r["mainstream_coverage"] or 0) for r in coverage_rows
+        }
+    balance_rows = conn.execute(
+        "SELECT source_cluster, COUNT(*) AS n FROM release_items "
+        "WHERE release_id = ? GROUP BY source_cluster",
+        (data_release_id,),
+    ).fetchall()
+    cluster_counts = {str(r["source_cluster"]): int(r["n"]) for r in balance_rows}
+    gap_available = perspective_gap_available_counts(
+        cluster_counts.get("voices", 0), cluster_counts.get("mainstream", 0)
+    )
+    signals = build_reddit_pulse_signals(
+        items,
+        history_titles,
+        pack_by_subreddit=pack_by_subreddit,
+        story_id_by_item_id=story_id_by_item_id,
+        mainstream_coverage_by_story_id=mainstream_coverage_by_story_id,
+        history_available=bool(history_titles),
+        gap_available=gap_available,
+    )
+    params = {
+        "method": method,
+        "profile": profile,
+        "date": date,
+        "history_window_days": history_window_days,
+        "story_release_id": story_release_id,
+        "facet_release_id": facet_release_id,
+        "history_item_count": len(history_titles),
+        "pack_count": len(pack_by_subreddit),
+    }
+    params_hash = _hash_json(params)
+    signal_release_id = signal_release_id or _stable_id(
+        "signals", data_release_id, date, profile, method, params_hash, now_iso()
+    )
+    now = now_iso()
+    metrics = {
+        "schema_version": 2,
+        "signal_count": len(signals),
+        "history_item_count": len(history_titles),
+        "history_available": bool(history_titles),
+        "linked_story_count": len({s.linked_story_id for s in signals if s.linked_story_id}),
+        "mainstream_covered_signal_count": sum(
+            1 for s in signals if s.mainstream_coverage_count > 0
+        ),
+        "perspective_gap_available": gap_available,
+        "neutral_novelty": not bool(history_titles),
+    }
+    conn.execute(
+        """INSERT OR REPLACE INTO signal_releases
+           (signal_release_id, data_release_id, facet_release_id, story_release_id,
+            date, method, params_hash, metrics_json, git_sha, status, signal_count,
+            created_at, finalized_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'finalized', ?, ?, ?)""",
+        (
+            signal_release_id,
+            data_release_id,
+            facet_release_id,
+            story_release_id,
+            date,
+            method,
+            params_hash,
+            _json(metrics),
+            _git_sha(),
+            len(signals),
+            now,
+            now,
+        ),
+    )
+    conn.execute("DELETE FROM community_signals WHERE signal_release_id = ?", (signal_release_id,))
+    conn.executemany(
+        """INSERT OR REPLACE INTO community_signals
+           (signal_release_id, signal_id, item_id, subreddit, pack_id, signal_type, title,
+            discussion_url, target_url, pulse_score, subreddit_percentile, score_velocity,
+            comment_velocity, discussion_depth, comment_score_ratio,
+            cross_subreddit_repetition, novelty, domain_ids_json, theme_ids_json,
+            pain_points_json, project_scores_json, linked_story_id,
+            mainstream_coverage_count, perspective_gap)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+        [
+            (
+                signal_release_id,
+                s.signal_id,
+                s.item_id,
+                s.subreddit,
+                s.pack_id,
+                s.signal_type,
+                s.title,
+                s.discussion_url,
+                s.target_url,
+                s.pulse_score,
+                s.subreddit_percentile,
+                s.score_velocity,
+                s.comment_velocity,
+                s.discussion_depth,
+                s.comment_score_ratio,
+                s.cross_subreddit_repetition,
+                s.novelty,
+                _json(s.domain_ids),
+                _json(s.theme_ids),
+                _json(s.pain_points),
+                _json(s.project_scores),
+                s.linked_story_id,
+                s.mainstream_coverage_count,
+                s.perspective_gap,
+            )
+            for s in signals
+        ],
+    )
+    conn.commit()
+    by_type: dict[str, int] = {}
+    for s in signals:
+        by_type[s.signal_type] = by_type.get(s.signal_type, 0) + 1
+    top5 = sorted(signals, key=lambda x: x.pulse_score, reverse=True)[:5]
+    return {
+        "signal_release_id": signal_release_id,
+        "metrics": metrics,
+        "by_type": by_type,
+        "top5": [
+            {
+                "title": s.title[:80],
+                "subreddit": s.subreddit,
+                "pulse_score": s.pulse_score,
+                "type": s.signal_type,
+            }
+            for s in top5
+        ],
+    }
+
+
+async def run_engine_cycle(
+    corpus_conn: sqlite3.Connection,
+    conn: sqlite3.Connection,
+    *,
+    corpus_path: Path,
+    profile: str = "broad",
+    window: int = 7,
+    theme_catalog: dict[str, list[str]] | None = None,
+    pack_by_subreddit: dict[str, str] | None = None,
+    trend_method: str = "story_graph_v1",
+    review_model: str = "qwen-plus",
+    review_limit: int = 0,
+    review_runner: Callable[[str, str], Awaitable[str]] | None = None,
+    publish_channel: str | None = None,
+    allow_partial: bool = True,
+    pulse: bool = True,
+    history_window_days: int = 7,
+) -> dict[str, Any]:
+    """Полный ночной цикл нового Engine (Фаза 7): релиз → stories → разметка → обучение →
+    trends → pulse → (опц.) публикация. Один вызов = одна cron-строка."""
+
+    corpus_conn.row_factory = sqlite3.Row
+    run_rows = corpus_conn.execute(
+        """SELECT run_id FROM runs
+           WHERE profile = ? AND status <> 'running'
+           ORDER BY snapshot_date DESC LIMIT ?""",
+        (profile, window),
+    ).fetchall()
+    if not run_rows:
+        raise ValueError(f"No finalized runs for profile {profile}")
+    run_ids = [str(r["run_id"]) for r in reversed(run_rows)]
+    data = create_data_release(corpus_conn, conn, source_db_path=corpus_path, run_ids=run_ids)
+    facets = create_facet_release(
+        conn, data_release_id=data.release_id, theme_catalog=theme_catalog or {}
+    )
+    stories = create_story_release(conn, facet_release_id=facets.facet_release_id)
+    auto = auto_label_story_pairs(conn, stories.story_release_id)
+    reviewed = 0
+    if review_limit > 0 and review_runner is not None:
+        jobs = prepare_story_review_jobs(
+            conn, stories.story_release_id, limit=review_limit, model=review_model
+        )
+        for job in jobs:
+            raw = await review_runner(str(job["prompt"]), review_model)
+            result = store_story_review_response(
+                conn,
+                target_id=str(job["target_id"]),
+                input_hash=str(job["input_hash"]),
+                raw_response=raw,
+                allowed_item_ids={str(i) for i in job["item_ids"]},
+                model=review_model,
+                prompt_version=str(job["prompt_version"]),
+            )
+            if result.get("valid") and result.get("decision") in (
+                "same_story",
+                "different_story",
+            ):
+                label_engine_target(
+                    conn,
+                    target_kind="story_pair",
+                    target_id=str(job["target_id"]),
+                    release_id=stories.story_release_id,
+                    label=str(result["decision"]),  # type: ignore[arg-type]
+                    note="qwen_review",
+                )
+            reviewed += 1
+    # Обучение не должно валить ночной цикл: вырожденный набор меток (один класс) —
+    # пропускаем, модель предыдущего цикла продолжит жить в metrics.
+    try:
+        trained = train_story_merge_model(conn, stories.story_release_id)
+        label_source = str(trained.get("label_source", "auto"))
+    except ValueError:
+        trained = {}
+        label_source = "skipped"
+    trends = create_trend_release(
+        conn, story_release_id=stories.story_release_id, method=trend_method
+    )
+    pulse_result: dict[str, Any] | None = None
+    if pulse:
+        date_row = conn.execute(
+            """SELECT snapshot_date FROM release_items
+               WHERE release_id = ? AND provider = 'reddit'
+               ORDER BY snapshot_date DESC LIMIT 1""",
+            (data.release_id,),
+        ).fetchone()
+        if date_row is not None:
+            pulse_date = str(date_row["snapshot_date"])
+            pulse_result = create_signal_release(
+                conn,
+                items=_load_pulse_items(conn, data.release_id, pulse_date),
+                history_titles=_load_pulse_history_titles(
+                    conn, data.release_id, profile, pulse_date, history_window_days
+                ),
+                pack_by_subreddit=pack_by_subreddit or {},
+                story_release_id=stories.story_release_id,
+                data_release_id=data.release_id,
+                profile=profile,
+                date=pulse_date,
+                history_window_days=history_window_days,
+            )
+    publication_id = ""
+    if publish_channel:
+        publication = publish_radar(
+            conn,
+            story_release_id=stories.story_release_id,
+            trend_release_id=trends.trend_release_id,
+            channel=publish_channel,
+            allow_partial=allow_partial,
+        )
+        publication_id = publication.publication_id
+    return {
+        "data_release_id": data.release_id,
+        "facet_release_id": facets.facet_release_id,
+        "story_release_id": stories.story_release_id,
+        "trend_release_id": trends.trend_release_id,
+        "auto_labels": auto.get("added", 0),
+        "reviewed_pairs": reviewed,
+        "label_source": label_source,
+        "signal_release_id": (pulse_result or {}).get("signal_release_id", ""),
+        "perspective_gap_available": bool(
+            (pulse_result or {}).get("metrics", {}).get("perspective_gap_available")
+        ),
+        "publication_id": publication_id,
     }
 
 

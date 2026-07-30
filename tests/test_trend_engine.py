@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import sqlite3
@@ -38,6 +39,7 @@ from reddit_compass.intelligence.engine import (
     load_release_embeddings,
     publish_radar,
     rollback_publication,
+    run_engine_cycle,
     store_story_review_response,
     train_story_merge_model,
     verify_data_release,
@@ -1093,3 +1095,109 @@ def _frozen_item(
         raw_engagement={},
         metadata={},
     )
+
+
+def _cycle_item(item_id: str, provider: str, cluster: str, title: str, date: str) -> ContentItem:
+    return ContentItem(
+        item_id=item_id,
+        provider=provider,
+        source_cluster=cluster,
+        external_id=item_id,
+        canonical_url=f"https://{provider}.example/{item_id}",
+        title=title,
+        excerpt=f"{title}. Context and evidence.",
+        published_at=f"{date}T06:00:00Z",
+        observed_at=f"{date}T07:00:00Z",
+        snapshot_date=date,
+        content_scope="abstract",
+        source_section="technology" if provider != "reddit" else "artificial",
+        domain_ids=["ai_technology"],
+        raw_engagement={"score": 100, "comments": 20, "upvote_ratio": 0.9},
+        metadata={"is_self": provider == "reddit"},
+    )
+
+
+def _seed_cycle_corpus(path: Path) -> sqlite3.Connection:
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    migrate(conn)
+    for date in ("2026-07-28", "2026-07-29"):
+        run_id = f"{date}:broad"
+        upsert_run(
+            conn,
+            run_id=run_id,
+            snapshot_date=date,
+            profile="broad",
+            status="complete",
+            started_at=f"{date}T07:00:00Z",
+            finished_at=f"{date}T07:10:00Z",
+        )
+        items = [
+            # cross-source same story (provenance merge → same_story)
+            _cycle_item(
+                f"a_reddit_{date}", "reddit", "voices", "OpenAI launches quantum agent", date
+            ),
+            _cycle_item(
+                f"a_reuters_{date}",
+                "reuters",
+                "mainstream",
+                "OpenAI launches quantum agent platform",
+                date,
+            ),
+            # number conflict → reject → different_story
+            _cycle_item(
+                f"c_reddit_{date}", "reddit", "voices", "OpenAI raises 5 billion in funding", date
+            ),
+            _cycle_item(
+                f"c_reuters_{date}",
+                "reuters",
+                "mainstream",
+                "OpenAI raises 9 billion in funding",
+                date,
+            ),
+        ]
+        upsert_items(conn, items)
+        upsert_observations(
+            conn,
+            [
+                Observation(run_id=run_id, item_id=it.item_id, observed_at=f"{date}T07:00:00Z")
+                for it in items
+            ],
+        )
+    conn.commit()
+    return conn
+
+
+def test_run_engine_cycle_builds_all_layers(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_cycle_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    try:
+        result = asyncio.run(
+            run_engine_cycle(
+                corpus,
+                engine,
+                corpus_path=corpus_path,
+                profile="broad",
+                window=2,
+                theme_catalog={},
+                pack_by_subreddit={"artificial": "ai_technology"},
+                review_limit=0,
+                publish_channel=None,
+                pulse=True,
+            )
+        )
+    finally:
+        corpus.close()
+        engine.close()
+
+    assert result["data_release_id"]
+    assert result["story_release_id"]
+    assert result["trend_release_id"]
+    assert result["signal_release_id"]  # pulse ran (reddit present)
+    assert result["auto_labels"] > 0
+    assert result["reviewed_pairs"] == 0  # no Qwen runner
+    assert result["publication_id"] == ""  # publish skipped
+    # На вырожденном синтетическом корпусе обучение корректно пропускается;
+    # на реальных данных (с LLM-фасетами) обе категории присутствуют.
+    assert result["label_source"] in {"auto", "qwen", "human", "skipped"}

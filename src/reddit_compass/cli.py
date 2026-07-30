@@ -621,6 +621,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         prepare_trend_review_jobs,
         publish_radar,
         rollback_publication,
+        run_engine_cycle,
         store_story_review_response,
         store_trend_review_response,
         train_story_merge_model,
@@ -1353,6 +1354,42 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             )
             print(json.dumps({"label_id": label_id}, indent=2))
             return
+        if args.engine_group == "cycle":
+            from .signals import call_qwen_json
+
+            config = _load_config(args)
+            theme_catalog = {theme.id: theme.keywords for theme in config.themes}
+            pack_by_subreddit = {
+                sub.lower(): pack for pack, subs in config.subreddits.items() for sub in subs
+            }
+            corpus_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+            corpus_conn = open_corpus_readonly(corpus_path)
+            review_runner = (
+                (lambda prompt, model: call_qwen_json(prompt, model=model))
+                if int(args.review_limit) > 0
+                else None
+            )
+            try:
+                result = await run_engine_cycle(
+                    corpus_conn,
+                    engine_conn,
+                    corpus_path=corpus_path,
+                    profile=args.profile,
+                    window=int(args.window),
+                    theme_catalog=theme_catalog,
+                    pack_by_subreddit=pack_by_subreddit,
+                    trend_method=args.trend_method,
+                    review_model=args.review_model,
+                    review_limit=int(args.review_limit),
+                    review_runner=review_runner,
+                    publish_channel=args.publish_channel or None,
+                    allow_partial=args.allow_partial,
+                    pulse=not args.no_pulse,
+                )
+            finally:
+                corpus_conn.close()
+            print(json.dumps(result, ensure_ascii=False, indent=2))
+            return
         if args.engine_group == "publish":
             publication = publish_radar(
                 engine_conn,
@@ -1996,6 +2033,30 @@ def build_parser() -> argparse.ArgumentParser:
         ],
     )
     engine_label.add_argument("--note", default="")
+
+    engine_cycle = engine_sub.add_parser(
+        "cycle",
+        help="Full nightly cycle: release → stories → labels → train → trends → pulse → publish",
+    )
+    engine_cycle.add_argument("--profile", default="broad")
+    engine_cycle.add_argument("--window", type=int, default=7)
+    engine_cycle.add_argument(
+        "--trend-method", default="story_graph_v1", choices=["story_graph_v1", "embedding_v2"]
+    )
+    engine_cycle.add_argument("--review-model", default="qwen-plus")
+    engine_cycle.add_argument(
+        "--review-limit",
+        type=int,
+        default=0,
+        help="Qwen-adjudicate up to N gray-zone pairs (0 = skip, deterministic only).",
+    )
+    engine_cycle.add_argument(
+        "--publish-channel",
+        default="",
+        help="Publish to this channel after the cycle (e.g. shadow). Empty = no publish.",
+    )
+    engine_cycle.add_argument("--allow-partial", action="store_true")
+    engine_cycle.add_argument("--no-pulse", action="store_true", help="Skip Reddit Pulse step.")
 
     engine_publish = engine_sub.add_parser("publish", help="Publish immutable Radar version")
     engine_publish.add_argument("--story-release", required=True)
