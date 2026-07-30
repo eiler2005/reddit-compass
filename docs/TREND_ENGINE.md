@@ -286,6 +286,15 @@ published to a non-production channel such as `shadow`.
 
 ## 5. Publish and rollback
 
+Preview before publication:
+
+- if `published_channels[channel]` has no pointer, `/news`, `/stories`, `/trends`, `/radar` and
+  `/projects/{project_id}` may show the latest `evaluated` TrendRelease;
+- API responses set `preview=true` and keep `publication_id=""`;
+- UI shows a visible Preview warning;
+- preview is read-only inspection and does not create or move a publication pointer;
+- production `broad`/`ai-native` still require the gates above and manual `engine publish`.
+
 ```bash
 reddit-compass engine publish \
   --story-release STORY_ID \

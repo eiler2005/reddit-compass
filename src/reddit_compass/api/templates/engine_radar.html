@@ -25,10 +25,17 @@
     <div class="freshness-bar">
         <span class="status-badge status-{{ radar.input_status }}">{{ radar.input_status }}</span>
         <span class="freshness-text">
-            {{ radar.run.item_count }} материалов · публикация {{ radar.publication_id }}
+            {{ radar.run.item_count }} материалов{% if radar.publication_id %} · публикация {{ radar.publication_id }}{% endif %}
         </span>
         <span class="profile">{{ radar.engine_version }}</span>
     </div>
+
+    {% if radar.preview %}
+    <p class="section-note" style="color: var(--warning);">
+        Preview mode: опубликованной версии для channel {{ radar.channel }} нет. Показан latest evaluated Engine release,
+        не production RadarPublication.
+    </p>
+    {% endif %}
 
     {% if radar.serving_previous_publication %}
     <p class="section-note" style="color: var(--warning);">

@@ -18,6 +18,15 @@
         <p class="section-note">Конкретные события, собранные из нескольких материалов. Это слой дедупликации и evidence matrix.</p>
     </div>
 
+    {% if stories.preview %}
+    <section class="section">
+        <p class="section-note" style="color: var(--warning);">
+            Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated StoryRelease,
+            не production RadarPublication.
+        </p>
+    </section>
+    {% endif %}
+
     <section class="section">
         <form class="filters" method="get" action="/stories">
             <input type="hidden" name="channel" value="{{ channel }}">
@@ -28,7 +37,7 @@
             <button class="btn-primary" type="submit">Фильтр</button>
         </form>
         <p class="section-note">
-            {{ stories.total }} stories · publication {{ stories.publication_id }} · story release {{ stories.story_release_id }}
+            {{ stories.total }} stories · {% if stories.publication_id %}publication {{ stories.publication_id }} · {% endif %}story release {{ stories.story_release_id }}
         </p>
     </section>
 

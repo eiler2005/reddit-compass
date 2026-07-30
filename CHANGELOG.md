@@ -41,6 +41,9 @@
 - **Reddit Pulse hardening**: `signal_releases` store method, params hash, metrics and git SHA;
   `reddit-pulse propose` can link Reddit signals to an existing StoryRelease and compute mainstream
   coverage from frozen rows without running a new network collection.
+- **Engine preview fallback**: News, Stories, Trends, Radar and Project Lens show the latest
+  evaluated Engine release when a channel has no `RadarPublication`; UI/API mark it as `preview`
+  so it cannot be confused with production.
 - **Cluster Lab sandbox**: отдельный `cluster_lab.db` для immutable data releases,
   experiments, story proposals и trend proposals без mutation production `stories`.
   CLI: `lab release create/list`, `lab experiment create`, `lab propose`, `lab compare/eval`.

@@ -17,9 +17,18 @@
         <p class="section-note">Рабочий слой для книги, РБК и других проектов поверх опубликованных stories/trends.</p>
     </div>
 
+    {% if lens.preview %}
+    <section class="section">
+        <p class="section-note" style="color: var(--warning);">
+            Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated Engine release,
+            не production RadarPublication.
+        </p>
+    </section>
+    {% endif %}
+
     <section class="section">
         <p class="section-note">
-            publication {{ lens.publication_id }} · story {{ lens.story_release_id }} · trend {{ lens.trend_release_id }}
+            {% if lens.publication_id %}publication {{ lens.publication_id }} · {% endif %}story {{ lens.story_release_id }} · trend {{ lens.trend_release_id }}
         </p>
     </section>
 

@@ -20,9 +20,11 @@ from pydantic import BaseModel, Field
 from ..config import DEFAULT_PROFILE
 from ..intelligence.engine import (
     DEFAULT_ENGINE_DB_PATH,
+    Publication,
     compare_engine_versions,
     get_current_publication,
     get_data_release,
+    get_facet_release,
     get_publication,
     get_story_release,
     get_trend_release,
@@ -171,6 +173,7 @@ class RadarOut(BaseModel):
     input_status: str = ""
     published_at: str = ""
     serving_previous_publication: bool = False
+    preview: bool = False
 
 
 class NewsItemOut(BaseModel):
@@ -205,6 +208,7 @@ class PaginatedNews(BaseModel):
     data_release_id: str
     story_release_id: str
     trend_release_id: str
+    preview: bool = False
 
 
 class PublishedStoryOut(BaseModel):
@@ -229,6 +233,7 @@ class PublishedStoryDetailOut(PublishedStoryOut):
     data_release_id: str = ""
     story_release_id: str = ""
     trend_release_id: str = ""
+    preview: bool = False
 
 
 class PaginatedPublishedStories(BaseModel):
@@ -239,6 +244,7 @@ class PaginatedPublishedStories(BaseModel):
     publication_id: str
     data_release_id: str
     story_release_id: str
+    preview: bool = False
 
 
 class TrendOut(BaseModel):
@@ -265,6 +271,7 @@ class TrendDetailOut(TrendOut):
     data_release_id: str = ""
     story_release_id: str = ""
     trend_release_id: str = ""
+    preview: bool = False
 
 
 class PaginatedTrends(BaseModel):
@@ -277,6 +284,7 @@ class PaginatedTrends(BaseModel):
     story_release_id: str
     trend_release_id: str
     history_status: str
+    preview: bool = False
 
 
 class ProjectLensOut(BaseModel):
@@ -285,6 +293,7 @@ class ProjectLensOut(BaseModel):
     data_release_id: str
     story_release_id: str
     trend_release_id: str
+    preview: bool = False
     trends: list[TrendOut] = Field(default_factory=list)
     stories: list[PublishedStoryOut] = Field(default_factory=list)
 
@@ -371,13 +380,17 @@ def _resolve_publication(
     *,
     channel: str,
     publication_id: str | None,
-) -> tuple[Any, Any, Any, Any]:
+) -> tuple[Any, Any, Any, Any, bool]:
     publication = (
         get_publication(conn, publication_id)
         if publication_id
         else get_current_publication(conn, channel)
     )
     if publication is None:
+        if not publication_id:
+            preview = _resolve_latest_evaluated_preview(conn, channel=channel)
+            if preview is not None:
+                return (*preview, True)
         detail = (
             f"Engine publication {publication_id} not found"
             if publication_id
@@ -389,6 +402,48 @@ def _resolve_publication(
     trend_release = get_trend_release(conn, publication.trend_release_id)
     if data_release is None or story_release is None or trend_release is None:
         raise HTTPException(status_code=409, detail="Published engine version is incomplete")
+    return publication, data_release, story_release, trend_release, False
+
+
+def _resolve_latest_evaluated_preview(
+    conn: sqlite3.Connection,
+    *,
+    channel: str,
+) -> tuple[Publication, Any, Any, Any] | None:
+    """Resolve latest evaluated TrendRelease as read-only preview when no publication exists."""
+    row = conn.execute(
+        """
+        SELECT trend_release_id
+        FROM trend_releases
+        WHERE status IN ('evaluated', 'published')
+        ORDER BY created_at DESC, trend_release_id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    if row is None:
+        return None
+    trend_release = get_trend_release(conn, str(row["trend_release_id"]))
+    if trend_release is None:
+        return None
+    story_release = get_story_release(conn, trend_release.story_release_id)
+    if story_release is None:
+        return None
+    facet_release = get_facet_release(conn, story_release.facet_release_id)
+    if facet_release is None:
+        return None
+    data_release = get_data_release(conn, facet_release.data_release_id)
+    if data_release is None:
+        return None
+    publication = Publication(
+        publication_id="",
+        channel=channel,
+        data_release_id=data_release.release_id,
+        story_release_id=story_release.story_release_id,
+        trend_release_id=trend_release.trend_release_id,
+        input_status=data_release.input_status,
+        previous_publication_id="",
+        created_at=trend_release.created_at,
+    )
     return publication, data_release, story_release, trend_release
 
 
@@ -527,7 +582,7 @@ def _engine_news(
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedNews:
-    publication, data_release, story_release, trend_release = _resolve_publication(
+    publication, data_release, story_release, trend_release, preview = _resolve_publication(
         conn,
         channel=channel,
         publication_id=publication_id,
@@ -557,6 +612,7 @@ def _engine_news(
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
+        preview=preview,
     )
 
 
@@ -647,7 +703,7 @@ def _engine_stories(
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedPublishedStories:
-    publication, data_release, story_release, _trend_release = _resolve_publication(
+    publication, data_release, story_release, _trend_release, preview = _resolve_publication(
         conn,
         channel=channel,
         publication_id=publication_id,
@@ -709,6 +765,7 @@ def _engine_stories(
         publication_id=publication.publication_id,
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
+        preview=preview,
     )
 
 
@@ -775,7 +832,7 @@ def _engine_trends(
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedTrends:
-    publication, data_release, story_release, trend_release = _resolve_publication(
+    publication, data_release, story_release, trend_release, preview = _resolve_publication(
         conn,
         channel=channel,
         publication_id=publication_id,
@@ -836,6 +893,7 @@ def _engine_trends(
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
         history_status=trend_release.history_status,
+        preview=preview,
     )
 
 
@@ -869,6 +927,7 @@ def _engine_project_lens(
         trend_release_id=trends.trend_release_id,
         trends=trends.items,
         stories=stories.items,
+        preview=trends.preview or stories.preview,
     )
 
 
@@ -879,7 +938,7 @@ def _engine_story_detail(
     channel: str = "broad",
     publication_id: str | None = None,
 ) -> PublishedStoryDetailOut:
-    publication, data_release, story_release, trend_release = _resolve_publication(
+    publication, data_release, story_release, trend_release, preview = _resolve_publication(
         conn,
         channel=channel,
         publication_id=publication_id,
@@ -924,6 +983,7 @@ def _engine_story_detail(
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
+        preview=preview,
     )
 
 
@@ -934,7 +994,7 @@ def _engine_trend_detail(
     channel: str = "broad",
     publication_id: str | None = None,
 ) -> TrendDetailOut:
-    publication, data_release, story_release, trend_release = _resolve_publication(
+    publication, data_release, story_release, trend_release, preview = _resolve_publication(
         conn,
         channel=channel,
         publication_id=publication_id,
@@ -984,6 +1044,7 @@ def _engine_trend_detail(
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
+        preview=preview,
     )
 
 
@@ -997,24 +1058,16 @@ def _engine_radar(
     channel: str,
     publication_id: str | None,
 ) -> RadarOut | None:
-    publication = (
-        get_publication(conn, publication_id)
-        if publication_id
-        else get_current_publication(conn, channel)
-    )
-    if publication is None:
-        if publication_id:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Engine publication {publication_id} not found",
-            )
-        return None
-
-    data_release = get_data_release(conn, publication.data_release_id)
-    story_release = get_story_release(conn, publication.story_release_id)
-    trend_release = get_trend_release(conn, publication.trend_release_id)
-    if data_release is None or story_release is None or trend_release is None:
-        raise HTTPException(status_code=409, detail="Published engine version is incomplete")
+    try:
+        publication, data_release, story_release, trend_release, preview = _resolve_publication(
+            conn,
+            channel=channel,
+            publication_id=publication_id,
+        )
+    except HTTPException as exc:
+        if exc.status_code == 404 and not publication_id:
+            return None
+        raise
 
     selected_domain = domain
     if mode == "ai-native" and selected_domain is None:
@@ -1147,6 +1200,7 @@ def _engine_radar(
         input_status=data_release.input_status,
         published_at=publication.created_at,
         serving_previous_publication=serving_previous,
+        preview=preview,
     )
 
 

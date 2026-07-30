@@ -18,6 +18,15 @@
         <p class="section-note">Повторяющиеся паттерны поверх разных stories. Копии одной новости сюда не должны попадать.</p>
     </div>
 
+    {% if trends.preview %}
+    <section class="section">
+        <p class="section-note" style="color: var(--warning);">
+            Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated TrendRelease,
+            не production RadarPublication.
+        </p>
+    </section>
+    {% endif %}
+
     <section class="section">
         <form class="filters" method="get" action="/trends">
             <input type="hidden" name="channel" value="{{ channel }}">
@@ -29,7 +38,7 @@
             <button class="btn-primary" type="submit">Фильтр</button>
         </form>
         <p class="section-note">
-            {{ trends.total }} trends · history {{ trends.history_status }} · trend release {{ trends.trend_release_id }}
+            {{ trends.total }} trends · history {{ trends.history_status }} · {% if trends.publication_id %}publication {{ trends.publication_id }} · {% endif %}trend release {{ trends.trend_release_id }}
         </p>
     </section>
 

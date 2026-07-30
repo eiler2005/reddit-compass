@@ -17,6 +17,15 @@
         <p class="section-note">Сырой входящий корпус из опубликованного Data Release. Это inbox, а не сюжеты и не тренды.</p>
     </div>
 
+    {% if news.preview %}
+    <section class="section">
+        <p class="section-note" style="color: var(--warning);">
+            Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated Engine release,
+            не production RadarPublication.
+        </p>
+    </section>
+    {% endif %}
+
     <section class="section">
         <form class="filters" method="get" action="/news">
             <input type="hidden" name="channel" value="{{ channel }}">
@@ -29,7 +38,7 @@
             <button class="btn-primary" type="submit">Фильтр</button>
         </form>
         <p class="section-note">
-            {{ news.total }} материалов · publication {{ news.publication_id }} · data {{ news.data_release_id }}
+            {{ news.total }} материалов · {% if news.publication_id %}publication {{ news.publication_id }} · {% endif %}data {{ news.data_release_id }}
         </p>
     </section>
 

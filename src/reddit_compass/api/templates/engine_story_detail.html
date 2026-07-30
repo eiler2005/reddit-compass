@@ -21,6 +21,14 @@
         </p>
     </div>
 
+    {% if story.preview %}
+    <section class="section">
+        <p class="section-note" style="color: var(--warning);">
+            Preview mode: story взята из latest evaluated Engine release, не из published RadarPublication.
+        </p>
+    </section>
+    {% endif %}
+
     <section class="section">
         <div class="detail-grid">
             <div>

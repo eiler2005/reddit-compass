@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -393,6 +394,32 @@ def test_radar_reads_only_current_publication(engine_client: TestClient) -> None
     assert payload["trend_release_id"] == "trend_test"
     assert payload["history_status"] == "ready"
     assert payload["shelves"]["growing"][0]["trend_id"] == "trend_1"
+
+
+def test_unpublished_engine_pages_show_latest_evaluated_preview(
+    engine_client: TestClient,
+) -> None:
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    conn.execute("DELETE FROM published_channels")
+    conn.execute("DELETE FROM radar_publications")
+    conn.commit()
+    conn.close()
+
+    radar_response = engine_client.get("/api/v2/radar/2026-07-29?channel=broad")
+    trends_response = engine_client.get("/api/v2/engine/trends?channel=broad")
+    trends_page = engine_client.get("/trends")
+
+    assert radar_response.status_code == 200
+    assert radar_response.json()["preview"] is True
+    assert radar_response.json()["publication_id"] == ""
+    assert radar_response.json()["trend_release_id"] == "trend_test"
+    assert trends_response.status_code == 200
+    assert trends_response.json()["preview"] is True
+    assert trends_response.json()["items"][0]["trend_id"] == "trend_1"
+    assert trends_page.status_code == 200
+    assert "Preview mode" in trends_page.text
+    assert "Проверяемый тренд" in trends_page.text
 
 
 def test_radar_keeps_previous_publication_for_new_date(
