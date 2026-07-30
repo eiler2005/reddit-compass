@@ -1924,7 +1924,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_stories_review.add_argument("--story-release", required=True)
     engine_stories_review.add_argument("--limit", type=int, default=100)
-    engine_stories_review.add_argument("--model", default="qwen-plus")
+    engine_stories_review.add_argument("--model", default="qwen3.6-flash")
 
     engine_trends = engine_sub.add_parser("trends", help="Trend release operations")
     engine_trends_sub = engine_trends.add_subparsers(
@@ -1967,7 +1967,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_trends_review.add_argument("--trend-release", required=True)
     engine_trends_review.add_argument("--limit", type=int, default=50)
-    engine_trends_review.add_argument("--model", default="qwen-max")
+    engine_trends_review.add_argument("--model", default="qwen3.8-max-preview")
 
     engine_pulse = engine_sub.add_parser("reddit-pulse", help="Reddit Pulse signal operations")
     engine_pulse_sub = engine_pulse.add_subparsers(dest="pulse_action", required=True)
@@ -2043,7 +2043,7 @@ def build_parser() -> argparse.ArgumentParser:
     engine_cycle.add_argument(
         "--trend-method", default="story_graph_v1", choices=["story_graph_v1", "embedding_v2"]
     )
-    engine_cycle.add_argument("--review-model", default="qwen-plus")
+    engine_cycle.add_argument("--review-model", default="qwen3.6-flash")
     engine_cycle.add_argument(
         "--review-limit",
         type=int,

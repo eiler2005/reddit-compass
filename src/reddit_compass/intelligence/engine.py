@@ -1827,7 +1827,7 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "dense_review_threshold": 0.72,
     "semantic_dedup_threshold": 0.92,
     "semantic_dedup_max_days": 7,
-    "review_model": "qwen-plus",
+    "review_model": "qwen3.6-flash",
     "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
     "llm_merge_min_confidence": 0.85,
     "exclude_routine": True,
@@ -2741,7 +2741,7 @@ def prepare_story_review_jobs(
     story_release_id: str,
     *,
     limit: int = 100,
-    model: str = "qwen-plus",
+    model: str = "qwen3.6-flash",
     prompt_version: str = STORY_REVIEW_PROMPT_VERSION,
 ) -> list[dict[str, Any]]:
     """Prepare bounded Qwen jobs for ambiguous pairs in an existing attempt."""
@@ -2802,7 +2802,7 @@ def store_story_review_response(
     input_hash: str,
     raw_response: str,
     allowed_item_ids: set[str],
-    model: str = "qwen-plus",
+    model: str = "qwen3.6-flash",
     prompt_version: str = STORY_REVIEW_PROMPT_VERSION,
 ) -> dict[str, Any]:
     review, errors = validate_story_review(
@@ -3689,7 +3689,7 @@ def create_trend_release(
     params = {
         "min_stories": 3,
         "min_dates": 2,
-        "review_model": "qwen-max",
+        "review_model": "qwen3.8-max-preview",
         "review_prompt_version": TREND_REVIEW_PROMPT_VERSION,
         "verified_only": verified_only,
         **(params or {}),
@@ -3876,7 +3876,7 @@ def prepare_trend_review_jobs(
     trend_release_id: str,
     *,
     limit: int = 50,
-    model: str = "qwen-max",
+    model: str = "qwen3.8-max-preview",
     prompt_version: str = TREND_REVIEW_PROMPT_VERSION,
 ) -> list[dict[str, Any]]:
     release = get_trend_release(conn, trend_release_id)
@@ -3943,7 +3943,7 @@ def store_trend_review_response(
     input_hash: str,
     raw_response: str,
     allowed_story_ids: set[str],
-    model: str = "qwen-max",
+    model: str = "qwen3.8-max-preview",
     prompt_version: str = TREND_REVIEW_PROMPT_VERSION,
 ) -> dict[str, Any]:
     review, errors = validate_trend_review(
@@ -5282,7 +5282,7 @@ async def run_engine_cycle(
     theme_catalog: dict[str, list[str]] | None = None,
     pack_by_subreddit: dict[str, str] | None = None,
     trend_method: str = "story_graph_v1",
-    review_model: str = "qwen-plus",
+    review_model: str = "qwen3.6-flash",
     review_limit: int = 0,
     review_runner: Callable[[str, str], Awaitable[str]] | None = None,
     publish_channel: str | None = None,
@@ -5307,7 +5307,13 @@ async def run_engine_cycle(
     facets = create_facet_release(
         conn, data_release_id=data.release_id, theme_catalog=theme_catalog or {}
     )
-    stories = create_story_release(conn, facet_release_id=facets.facet_release_id)
+    stories = create_story_release(
+        conn,
+        facet_release_id=facets.facet_release_id,
+        # review_model должен совпадать с моделью Qwen-разметки ниже, иначе кэш
+        # llm_reviews не попадёт в apply_cached_story_reviews при следующем цикле.
+        params={"review_model": review_model},
+    )
     auto = auto_label_story_pairs(conn, stories.story_release_id)
     reviewed = 0
     if review_limit > 0 and review_runner is not None:
