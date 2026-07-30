@@ -1772,6 +1772,7 @@ class PulseSignalOut(BaseModel):
     upvote_ratio: float = 0
     is_self: bool = False
     link_flair_text: str = ""
+    mainstream_coverage_count: int = 0
 
 
 class PulseListOut(BaseModel):
@@ -1850,6 +1851,7 @@ def _engine_pulse_signals(
         "cs.subreddit_percentile, cs.comment_velocity, "
         "cs.discussion_depth, cs.cross_subreddit_repetition, cs.novelty, "
         "cs.domain_ids_json, cs.theme_ids_json, cs.pain_points_json, "
+        "cs.mainstream_coverage_count, "
         "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) as reddit_score, "
         "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) as reddit_comments, "
         "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) as upvote_ratio, "
@@ -1886,6 +1888,7 @@ def _engine_pulse_signals(
                 "domain_ids": json.loads(r["domain_ids_json"] or "[]"),
                 "theme_ids": json.loads(r["theme_ids_json"] or "[]"),
                 "pain_points": json.loads(r["pain_points_json"] or "[]"),
+                "mainstream_coverage_count": r["mainstream_coverage_count"],
                 "reddit_score": r["reddit_score"],
                 "reddit_comments": r["reddit_comments"],
                 "upvote_ratio": r["upvote_ratio"],
@@ -1996,48 +1999,39 @@ def reddit_pulse_summary(
     ).fetchall()
     by_type = {r["signal_type"]: r["cnt"] for r in type_rows}
 
-    def _top(where_extra: str, lim: int = 10) -> list[PulseSignalOut]:
-        rows = conn.execute(
-            f"SELECT signal_id, item_id, subreddit, signal_type, "
-            f"title, discussion_url, target_url, pulse_score, "
-            f"subreddit_percentile, comment_velocity, "
-            f"discussion_depth, cross_subreddit_repetition, novelty, "
-            f"domain_ids_json, theme_ids_json, pain_points_json "
-            f"FROM community_signals "
-            f"WHERE signal_release_id = ? {where_extra} "
-            f"ORDER BY pulse_score DESC LIMIT ?",
-            (sig_id, lim),
-        ).fetchall()
-        return [
-            PulseSignalOut(
-                signal_id=r["signal_id"],
-                item_id=r["item_id"],
-                subreddit=r["subreddit"],
-                signal_type=r["signal_type"],
-                title=r["title"],
-                discussion_url=_safe_url(r["discussion_url"]),
-                target_url=_safe_url(r["target_url"]),
-                pulse_score=r["pulse_score"],
-                subreddit_percentile=r["subreddit_percentile"],
-                comment_velocity=r["comment_velocity"],
-                discussion_depth=r["discussion_depth"],
-                cross_subreddit_repetition=r["cross_subreddit_repetition"],
-                novelty=r["novelty"],
-                domain_ids=json.loads(r["domain_ids_json"] or "[]"),
-                theme_ids=json.loads(r["theme_ids_json"] or "[]"),
-                pain_points=json.loads(r["pain_points_json"] or "[]"),
-            )
-            for r in rows
-        ]
+    def _top(signal_type: str | None = None, lim: int = 10) -> list[PulseSignalOut]:
+        items, _ = _engine_pulse_signals(
+            conn,
+            sig_id,
+            signal_type=signal_type,
+            limit=lim,
+            data_release_id=data_release,
+        )
+        return [PulseSignalOut(**item) for item in items]
+
+    def _top_many(signal_types: list[str], lim: int = 10) -> list[PulseSignalOut]:
+        merged: list[PulseSignalOut] = []
+        for item_type in signal_types:
+            merged.extend(_top(item_type, lim=lim))
+        return sorted(merged, key=lambda item: item.pulse_score, reverse=True)[:lim]
 
     return PulseSummaryOut(
         signal_release_id=sig_id,
         total_signals=total,
         by_type=by_type,
-        top_pulse=_top(""),
-        top_pain=_top("AND signal_type IN ('pain_point','complaint')"),
-        top_ai=_top("AND signal_type IN ('ai_capability','ai_risk','ai_tools')"),
-        mainstream_gap=_top("AND pulse_score >= 60 AND mainstream_coverage_count < 2"),
+        top_pulse=_top(),
+        top_pain=_top_many(["pain_point", "complaint"]),
+        top_ai=_top_many(["ai_capability", "ai_risk", "ai_tools"]),
+        mainstream_gap=[
+            PulseSignalOut(**item)
+            for item in _engine_pulse_signals(
+                conn,
+                sig_id,
+                limit=50,
+                data_release_id=data_release,
+            )[0]
+            if item.get("pulse_score", 0) >= 60 and item.get("mainstream_coverage_count", 0) < 2
+        ][:10],
     )
 
 

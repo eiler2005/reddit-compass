@@ -447,6 +447,18 @@ def test_reddit_pulse_api_filters_by_release_date_and_sanitizes_url(
     assert payload["signal_release_id"] == "signals_test"
     assert payload["items"][0]["title"] == "Pulse story"
     assert payload["items"][0]["discussion_url"] == ""
+    assert payload["items"][0]["reddit_score"] == 100
+    assert payload["items"][0]["reddit_comments"] == 40
+
+    summary = engine_client.get(
+        "/api/v2/reddit-pulse/summary?data_release=data_test&date=2026-07-29"
+    )
+    assert summary.status_code == 200
+    top_pulse = summary.json()["top_pulse"][0]
+    assert top_pulse["title"] == "Pulse story"
+    assert top_pulse["discussion_url"] == ""
+    assert top_pulse["reddit_score"] == 100
+    assert top_pulse["reddit_comments"] == 40
 
 
 def test_published_news_stories_trends_and_project_lens_are_separate(
