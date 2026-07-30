@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
 DomainId = Literal[
     "ai_technology",
@@ -41,26 +42,26 @@ BROAD_DOMAINS: dict[DomainId, DomainDefinition] = {
         domain_id="ai_technology",
         label_ru="AI и технологии",
         label_en="AI and technology",
+        # Фаза 6: убраны generic-слова (model, product, startup, code, software,
+        # developer, agent) — они присваивали домен 97.5% корпуса. Оставлены только
+        # специфичные термины.
         keywords=(
             "ai",
             "artificial intelligence",
-            "agent",
             "llm",
             "gpt",
             "claude",
             "openai",
             "anthropic",
-            "model",
             "robot",
             "automation",
             "chip",
-            "software",
-            "developer",
-            "code",
             "programming",
-            "startup",
-            "product",
+            "machine learning",
+            "neural",
         ),
+        # Фаза 6: убраны technology/tech/hackernews — источник сам по себе не должен
+        # назначать рубрику (любой item с HN получал домен автоматически).
         source_hints=(
             "artificial",
             "singularity",
@@ -69,16 +70,11 @@ BROAD_DOMAINS: dict[DomainId, DomainDefinition] = {
             "localllama",
             "machinelearning",
             "openai",
-            "technology",
-            "tech",
-            "programming",
-            "hackernews",
             "techcrunch",
             "theverge",
             "verge",
             "arstechnica",
             "wired",
-            "innovation",
         ),
     ),
     "labor_career": DomainDefinition(
@@ -400,15 +396,7 @@ def classify_domains(
     for domain_id, domain in BROAD_DOMAINS.items():
         if domain_id == "other":
             continue
-        score = 0
-        for hint in domain.source_hints:
-            normalized_hint = hint.lower()
-            if normalized_hint and (
-                normalized_hint in source_tokens
-                if " " not in normalized_hint
-                else normalized_hint in source_text
-            ):
-                score += 5
+        keyword_score = 0
         for kw in domain.keywords:
             normalized_kw = kw.lower()
             if normalized_kw and (
@@ -416,7 +404,20 @@ def classify_domains(
                 if " " not in normalized_kw
                 else normalized_kw in token_text
             ):
-                score += 2 if " " in kw else 1
+                keyword_score += 2 if " " in kw else 1
+        # Фаза 6: источник сам по себе не назначает рубрику. source_hints усиливают
+        # домен, только когда есть хотя бы одно текстовое совпадение.
+        source_score = 0
+        if keyword_score > 0:
+            for hint in domain.source_hints:
+                normalized_hint = hint.lower()
+                if normalized_hint and (
+                    normalized_hint in source_tokens
+                    if " " not in normalized_hint
+                    else normalized_hint in source_text
+                ):
+                    source_score += 5
+        score = keyword_score + source_score
         if domain_id == "sports" and any(
             term in token_text
             for term in ("nba", "nfl", "mlb", "nhl", "fifa", "uefa", "soccer", "tennis")
@@ -481,3 +482,103 @@ def compute_project_scores(
 def stable_hash_id(prefix: str, value: str, length: int = 20) -> str:
     """Build stable ids without Python's process-randomized hash()."""
     return f"{prefix}_{hashlib.sha256(value.encode()).hexdigest()[:length]}"
+
+
+# --- Фаза 6: двухуровневая таксономия, квоты ленты, рутина ---
+
+
+@dataclass(frozen=True)
+class Rubric:
+    """Верхний уровень рубрикатора — читаемые блоки для /today и навигации."""
+
+    rubric_id: str
+    label_ru: str
+    emoji: str
+    domain_ids: tuple[str, ...]
+
+
+# Один источник истины по рубрикам выдачи. Второй уровень — 12 тем профиля
+# (config/profiles/*.json) как фасетный фильтр внутри рубрики.
+RUBRICS: tuple[Rubric, ...] = (
+    Rubric("ai_tech", "AI и технологии", "🤖", ("ai_technology",)),
+    Rubric("surveillance", "Слежка и приватность", "👁", ("security_privacy",)),
+    Rubric("labor", "Труд и карьера", "💼", ("labor_career",)),
+    Rubric("business", "Бизнес и рынки", "🏪", ("business_markets", "finance_consumer")),
+    Rubric("society", "Общество и политика", "🌍", ("society_politics",)),
+    Rubric("world", "Мир и геополитика", "🗺", ("world_geopolitics",)),
+    Rubric("culture", "Культура и медиа", "🎭", ("culture_media", "sports")),
+    Rubric(
+        "science_climate",
+        "Наука, здоровье, климат",
+        "🔬",
+        ("science_health_education", "climate_energy_infrastructure"),
+    ),
+)
+
+_DOMAIN_TO_RUBRIC: dict[str, str] = {
+    domain_id: rubric.rubric_id for rubric in RUBRICS for domain_id in rubric.domain_ids
+}
+
+
+def rubric_for_domains(domain_ids: list[str] | tuple[str, ...] | None) -> str:
+    """Верхняя рубрика по приоритету RUBRICS среди доменов item'а."""
+
+    for domain_id in normalize_domain_ids(domain_ids):
+        rubric_id = _DOMAIN_TO_RUBRIC.get(domain_id)
+        if rubric_id:
+            return rubric_id
+    return "other"
+
+
+def apply_reddit_quota(
+    items: list[Any],
+    *,
+    is_reddit: Callable[[Any], bool],
+    max_share: float = 0.3,
+) -> list[Any]:
+    """Квота доли Reddit в ленте «Мир» (Фаза 6).
+
+    Сохраняет порядок, держит долю Reddit ≤ max_share, не отбрасывая не-Reddit.
+    Если не-Reddit нет (блок «Нерв Reddit»), квота не применяется.
+    """
+
+    if not 0 < max_share < 1:
+        raise ValueError("max_share must be in (0, 1)")
+    total_non_reddit = sum(1 for item in items if not is_reddit(item))
+    if total_non_reddit == 0:
+        return list(items)
+    allowed_reddit = int(total_non_reddit * max_share / (1.0 - max_share))
+    result: list[Any] = []
+    reddit_kept = 0
+    for item in items:
+        if is_reddit(item):
+            if reddit_kept < allowed_reddit:
+                result.append(item)
+                reddit_kept += 1
+        else:
+            result.append(item)
+    return result
+
+
+_ROUTINE_PATTERNS = re.compile(
+    r"\b(injury report|injury update|waiver|waivers|depth chart|roster|lineup|"
+    r"starting lineup|box score|final score|game recap|match recap|press release|"
+    r"earnings calendar|schedule announced|transactions?|trade rumor|trade rumors|"
+    r"dept chart|projection|projections)\b",
+    re.IGNORECASE,
+)
+_ROUTINE_SECTIONS = frozenset(
+    {"scoreboard", "scores", "standings", "schedule", "transactions", "boxscores", "odds"}
+)
+
+
+def is_routine_beat(title: str, source_section: str = "") -> bool:
+    """Детерминированный признак рутинного материала (Фаза 6).
+
+    Рутина (счёта, травмы, депт-чарты, календари, пресс-релизы) остаётся в /news,
+    но исключается из candidate generation и trend discovery.
+    """
+
+    if source_section.strip().lower() in _ROUTINE_SECTIONS:
+        return True
+    return bool(_ROUTINE_PATTERNS.search(title or ""))
