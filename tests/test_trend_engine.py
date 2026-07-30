@@ -14,6 +14,7 @@ from reddit_compass.intelligence.engine import (
     _discover_trends_graph,
     _story_topic_keys,
     active_label_story_pairs,
+    auto_label_story_pairs,
     cache_release_embeddings,
     compare_story_engine_variants,
     create_data_release,
@@ -38,6 +39,7 @@ from reddit_compass.intelligence.engine import (
     publish_radar,
     rollback_publication,
     store_story_review_response,
+    train_story_merge_model,
     verify_data_release,
 )
 from reddit_compass.intelligence.migrations import migrate
@@ -833,6 +835,142 @@ def test_invalid_story_review_cache_can_be_replaced(tmp_path: Path) -> None:
     assert second["valid"] is True
     assert row["decision"] == "same_story"
     assert row["valid"] == 1
+
+
+def test_auto_label_and_train_merge_model_persist(tmp_path: Path) -> None:
+    engine = engine_db(tmp_path / "trend_engine.db")
+    engine.execute(
+        """INSERT INTO story_releases
+           (story_release_id, facet_release_id, method, params_hash, status,
+            metrics_json, git_sha, created_at)
+           VALUES ('stories_ml', 'facets_ml', 'hybrid_v2', 'h', 'evaluated', '{}', 'sha',
+                   '2026-07-30T00:00:00Z')"""
+    )
+
+    def positive() -> dict[str, object]:
+        return {
+            "title_score": 0.93,
+            "token_jaccard": 0.7,
+            "entity_score": 0.8,
+            "shared_entities": ["openai"],
+            "shared_action_tokens": ["launch"],
+            "date_distance_days": 1,
+            "source_independent": True,
+            "action_match": True,
+            "number_conflict": False,
+            "location_conflict": False,
+            "person_conflict": False,
+        }
+
+    def negative() -> dict[str, object]:
+        return {
+            "title_score": 0.2,
+            "token_jaccard": 0.05,
+            "entity_score": 0.0,
+            "shared_entities": [],
+            "shared_action_tokens": [],
+            "date_distance_days": 1,
+            "source_independent": True,
+            "action_match": False,
+            "number_conflict": True,
+            "location_conflict": False,
+            "person_conflict": False,
+        }
+
+    pairs = []
+    for i in range(15):
+        pairs.append(
+            (
+                "stories_ml",
+                f"a{i}",
+                f"b{i}",
+                0.9,
+                "auto_merge",
+                json.dumps(positive()),
+                "near-duplicate title fingerprint",
+            )
+        )
+        pairs.append(
+            (
+                "stories_ml",
+                f"c{i}",
+                f"d{i}",
+                0.2,
+                "reject",
+                json.dumps(negative()),
+                "number/date event conflict",
+            )
+        )
+    engine.executemany(
+        """INSERT INTO story_candidate_pairs
+           (story_release_id, item_id_a, item_id_b, score, decision, features_json, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        pairs,
+    )
+    engine.commit()
+
+    labeled = auto_label_story_pairs(engine, "stories_ml")
+    assert labeled["labels"].get("same_story") == 15
+    assert labeled["labels"].get("different_story") == 15
+    # Повторный прогон не дублирует метки.
+    assert auto_label_story_pairs(engine, "stories_ml")["added"] == 0
+
+    trained = train_story_merge_model(engine, "stories_ml")
+    assert trained["label_source"] == "auto"
+    assert trained["labeled_pairs"] == 30
+    model = trained["model"]
+    assert model["precision_at_threshold"] >= 0.95
+    assert model["model_hash"]
+
+    row = engine.execute(
+        "SELECT metrics_json FROM story_releases WHERE story_release_id = 'stories_ml'"
+    ).fetchone()
+    stored = json.loads(row["metrics_json"])["merge_model"]
+    assert stored["model_hash"] == model["model_hash"]
+
+    # Человеческая метка имеет приоритет над авто-меткой.
+    label_engine_target(
+        engine,
+        target_kind="story_pair",
+        target_id="a0|b0",
+        release_id="stories_ml",
+        label="different_story",
+        note="manual",
+    )
+    retrained = train_story_merge_model(engine, "stories_ml")
+    assert retrained["label_source"] == "human"
+
+
+def test_create_trend_release_embedding_v2(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(
+        engine,
+        data_release_id=release.release_id,
+        theme_catalog={"ai_security": ["security review", "security rules"]},
+    )
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    trends = create_trend_release(
+        engine,
+        story_release_id=stories.story_release_id,
+        method="embedding_v2",
+        params={"min_stories": 3, "min_dates": 2},
+    )
+    assert trends.status == "evaluated"
+    rows = engine.execute(
+        "SELECT name_ru, source_scope, confidence FROM engine_trends WHERE trend_release_id = ?",
+        (trends.trend_release_id,),
+    ).fetchall()
+    for row in rows:
+        assert row["source_scope"] in {"cross_source", "community_only", "mainstream_only"}
+        assert len(str(row["name_ru"]).split()) >= 2
 
 
 def _run_ids() -> list[str]:

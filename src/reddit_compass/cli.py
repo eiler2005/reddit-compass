@@ -595,6 +595,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         _hash_json,
         _stable_id,
         active_label_story_pairs,
+        auto_label_story_pairs,
         cache_release_embeddings,
         compare_engine_versions,
         compare_story_engine_variants,
@@ -622,6 +623,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         rollback_publication,
         store_story_review_response,
         store_trend_review_response,
+        train_story_merge_model,
         verify_data_release,
     )
 
@@ -920,6 +922,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     engine_conn,
                     story_release_id=args.story_release,
                     window=args.window,
+                    method=args.method,
                     params={
                         "trend_top_k": args.top_k,
                         "trend_edge_threshold": args.edge_threshold,
@@ -990,6 +993,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             if args.pulse_action == "propose":
                 from .intelligence.reddit_pulse import (
                     build_reddit_pulse_signals,
+                    perspective_gap_available,
                     tokenize_title,
                 )
 
@@ -1156,6 +1160,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     datetime.datetime.now(datetime.UTC).isoformat(),
                 )
                 now = datetime.datetime.now(datetime.UTC).isoformat()
+                gap_available = perspective_gap_available(items)
                 metrics = {
                     "schema_version": 2,
                     "signal_count": len(signals),
@@ -1167,6 +1172,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     "mainstream_covered_signal_count": sum(
                         1 for s in signals if s.mainstream_coverage_count > 0
                     ),
+                    "perspective_gap_available": gap_available,
                     "neutral_novelty": not bool(history_rows),
                 }
                 engine_conn.execute(
@@ -1296,14 +1302,30 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 result = active_label_story_pairs(
                     engine_conn,
                     args.story_release,
-                    target=int(args.target),
+                    target=int(args.target or 150),
+                )
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return
+            if args.label_action == "auto":
+                if not args.story_release:
+                    raise SystemExit("engine label auto requires --story-release")
+                result = auto_label_story_pairs(engine_conn, args.story_release)
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+                return
+            if args.label_action == "train":
+                if not args.story_release:
+                    raise SystemExit("engine label train requires --story-release")
+                result = train_story_merge_model(
+                    engine_conn,
+                    args.story_release,
+                    target_precision=float(args.target_precision),
                 )
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return
             if not args.kind or not args.target or not args.label or not args.release:
                 raise SystemExit(
                     "engine label requires --kind, --target, --release and --label "
-                    "unless using `engine label active`"
+                    "unless using `engine label active|auto|train`"
                 )
             target_id = args.target
             if args.kind == "story_pair":
@@ -1862,6 +1884,12 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose = engine_trends_sub.add_parser("propose")
     engine_trends_propose.add_argument("--story-release", required=True)
     engine_trends_propose.add_argument("--window", default="30d")
+    engine_trends_propose.add_argument(
+        "--method",
+        default="story_graph_v1",
+        choices=["story_graph_v1", "embedding_v2"],
+        help="Trend discovery method; embedding_v2 clusters story vectors + c-TF-IDF names.",
+    )
     engine_trends_propose.add_argument("--top-k", type=int, default=12)
     engine_trends_propose.add_argument("--edge-threshold", type=float, default=0.45)
     engine_trends_propose.add_argument("--medoid-threshold", type=float, default=0.4)
@@ -1924,14 +1952,22 @@ def build_parser() -> argparse.ArgumentParser:
     engine_label.add_argument(
         "label_action",
         nargs="?",
-        choices=["active"],
-        help="Use `active` for interactive active-learning pair labeling.",
+        choices=["active", "auto", "train"],
+        help=(
+            "active: interactive pair labeling; auto: deterministic high-confidence "
+            "auto-labels (no human); train: learn merge model from labels."
+        ),
     )
     engine_label.add_argument(
         "--kind",
         choices=["story_pair", "story", "trend"],
     )
-    engine_label.add_argument("--target", required=True)
+    engine_label.add_argument("--target", default="")
+    engine_label.add_argument(
+        "--target-precision",
+        default="0.95",
+        help="Target precision for `train` threshold calibration.",
+    )
     engine_label.add_argument("--release", default="")
     engine_label.add_argument("--story-release", default="")
     engine_label.add_argument(

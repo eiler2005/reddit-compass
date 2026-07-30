@@ -542,6 +542,20 @@ a.kpi-card {
 .direction-growing { background: var(--success-dim); color: var(--success); }
 .direction-resurfacing { background: var(--accent-2-dim); color: var(--accent-2-bright); }
 
+/* Фаза 4/6: индикатор разрыва перспективы (source_scope) на карточках. */
+.scope-badge {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: var(--radius-sm);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    background: var(--surface-2);
+    color: var(--text-secondary);
+}
+.scope-cross_source { background: var(--success-dim); color: var(--success); }
+.scope-community_only { background: var(--accent-dim); color: var(--accent-bright); }
+.scope-mainstream_only { background: var(--accent-2-dim); color: var(--accent-2-bright); }
+
 .trend-score {
     font-family: var(--font-mono);
     font-weight: 700;

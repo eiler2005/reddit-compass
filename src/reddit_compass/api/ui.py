@@ -20,9 +20,11 @@ from fastapi.templating import Jinja2Templates
 from ..config import DEFAULT_PROFILE
 from ..intelligence.engine import (
     DEFAULT_ENGINE_DB_PATH,
+    engine_db,
     get_current_publication,
     get_data_release,
     get_publication,
+    label_engine_target,
     list_data_releases,
     list_publications,
     open_engine_readonly,
@@ -994,6 +996,43 @@ async def update_research_state_endpoint(
     )
     conn.commit()
 
+    return RedirectResponse(url=return_to, status_code=303)
+
+
+@router.post("/ui/engine/feedback")
+async def engine_feedback_endpoint(
+    target_kind: str = Form("story"),
+    target_id: str = Form(""),
+    release_id: str = Form(""),
+    value: str = Form("useful"),
+    return_to: str = Form("/today"),
+    csrf_token: str = Form(""),
+) -> Response:
+    """Фаза 7: обратная связь в один клик (полезно/мусор) → engine_labels.
+
+    Ежедневное использование пополняет golden set без отдельной разметки.
+    """
+
+    if not _validate_csrf_token(csrf_token):
+        return Response(status_code=403)
+    if not return_to.startswith("/"):
+        return_to = "/today"
+    if target_kind not in {"story", "trend"} or not target_id or not release_id:
+        return RedirectResponse(url=return_to, status_code=303)
+    label = "useful" if value == "useful" else "useless"
+    engine_path = _engine_path()
+    engine_conn = engine_db(engine_path)
+    try:
+        label_engine_target(
+            engine_conn,
+            target_kind=target_kind,
+            target_id=target_id,
+            release_id=release_id,
+            label=label,  # type: ignore[arg-type]
+            note="ui_feedback",
+        )
+    finally:
+        engine_conn.close()
     return RedirectResponse(url=return_to, status_code=303)
 
 

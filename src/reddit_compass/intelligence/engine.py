@@ -44,7 +44,8 @@ from .engine_reviews import (
 from .entities import extract_structured_event_frame
 from .llm_pipeline import build_deterministic_item_signals
 from .models import ContentItem
-from .taxonomy import compute_project_scores, normalize_domain_ids
+from .story_scoring import MergeModel, auto_label_pair, extract_feature_vector, train_merge_model
+from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
 ENGINE_SCHEMA_VERSION = 5
@@ -61,6 +62,8 @@ LabelValue = Literal[
     "low_signal",
     "useful_trend",
     "useless_trend",
+    "useful",
+    "useless",
 ]
 
 _ENGINE_SCHEMA = """
@@ -1808,20 +1811,30 @@ def _select_engine_items(
     return sorted(selected.values(), key=lambda item: item.item_id)
 
 
+# Единый канонический набор дефолтов story-скоринга (Фаза 3). CLI и experiments
+# могут переопределять отдельные ключи как явные экспериментальные ручки, но базовая
+# точка всегда берётся отсюда, чтобы не держать три расходящихся набора констант.
+DEFAULT_STORY_PARAMS: dict[str, Any] = {
+    "auto_merge_threshold": 0.82,
+    "review_threshold": 0.62,
+    "max_token_df_ratio": 0.2,
+    "embedding_model": DEFAULT_EMBEDDING_MODEL,
+    "embedding_revision": "default",
+    "dense_top_k": 12,
+    "dense_candidate_threshold": 0.68,
+    "dense_auto_threshold": 0.88,
+    "dense_review_threshold": 0.72,
+    "semantic_dedup_threshold": 0.92,
+    "semantic_dedup_max_days": 7,
+    "review_model": "qwen-plus",
+    "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
+    "llm_merge_min_confidence": 0.85,
+    "exclude_routine": True,
+}
+
+
 def _story_generation_params(params: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {
-        "auto_merge_threshold": 0.82,
-        "review_threshold": 0.62,
-        "max_token_df_ratio": 0.2,
-        "embedding_model": DEFAULT_EMBEDDING_MODEL,
-        "embedding_revision": "default",
-        "dense_top_k": 12,
-        "dense_candidate_threshold": 0.68,
-        "review_model": "qwen-plus",
-        "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
-        "llm_merge_min_confidence": 0.85,
-        **(params or {}),
-    }
+    return {**DEFAULT_STORY_PARAMS, **(params or {})}
 
 
 def create_story_release(
@@ -1849,6 +1862,10 @@ def create_story_release(
             if domain
             in set(item.domain_ids + _json_list(facets.get(item.item_id, {}).get("domain_ids"), []))
         ]
+    # Фаза 6: рутина (счёта, травмы, депт-чарты) остаётся в /news, но не участвует в
+    # story/trend-слоях. Флаг входит в params_hash → релиз воспроизводим.
+    if params.get("exclude_routine", True):
+        items = [item for item in items if not is_routine_beat(item.title, item.source_section)]
     if limit > 0:
         items = _select_engine_items(items, facets, limit)
     embeddings = load_release_embeddings(
@@ -3267,6 +3284,23 @@ def _score_story_pair(
         "stable_landing_url_match": bool(shared_urls),
     }
     candidate_features.update(near_duplicate_features)
+    # Фаза 3: обученная модель решает исход серой зоны. Жёсткие правила (auto_merge по
+    # provenance-якорям и reject по hard conflicts) остаются детерминированными — модель
+    # применяется только к парам, которые лестница отправила в review.
+    merge_model_params = params.get("merge_model")
+    if decision == "review" and isinstance(merge_model_params, dict):
+        model = MergeModel.from_params(merge_model_params)
+        model_score = model.score(candidate_features)
+        if model.predict(candidate_features):
+            decision = "auto_merge"
+            reason = "learned merge model"
+            score = max(score, round(model_score, 4))
+            candidate_features["merge_model_score"] = round(model_score, 4)
+            candidate_features["merge_model_hash"] = model.model_hash
+        else:
+            candidate_features["merge_model_score"] = round(model_score, 4)
+            candidate_features["merge_model_hash"] = model.model_hash
+            return None
     return PairCandidate(
         item_id_a=item_id_a,
         item_id_b=item_id_b,
@@ -3592,6 +3626,46 @@ def _story_release_metrics(
     }
 
 
+def _discover_trends_embedding_v2(
+    conn: sqlite3.Connection,
+    stories: list[dict[str, Any]],
+    story_items: dict[str, list[str]],
+    frozen_items: dict[str, FrozenItem],
+    *,
+    data_release_id: str,
+    story_release: StoryRelease,
+    params: dict[str, Any],
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Адаптер слоя Trends v2 (Фаза 5) к контракту create_trend_release."""
+
+    from .trend_discovery import discover_trends
+
+    provider_by_item = {item_id: item.provider for item_id, item in frozen_items.items()}
+    model_name = str(story_release.metrics.get("embedding_model", DEFAULT_EMBEDDING_MODEL))
+    model_revision = str(story_release.metrics.get("embedding_revision", "default"))
+    vectors_by_item = load_release_embeddings(
+        conn,
+        data_release_id=data_release_id,
+        model_name=model_name,
+        model_revision=model_revision,
+        item_ids=iter(frozen_items.keys()),
+    )
+    raw_trends = discover_trends(
+        stories,
+        story_items,
+        provider_by_item,
+        vectors_by_item=vectors_by_item or None,
+        min_stories=int(params.get("min_stories", 3)),
+        min_dates=int(params.get("min_dates", 2)),
+        cluster_threshold=float(params.get("trend_cluster_threshold", 0.55)),
+    )
+    adapted: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
+    for trend in raw_trends:
+        memberships = trend.pop("memberships", [])
+        adapted.append((trend, memberships))
+    return adapted
+
+
 def create_trend_release(
     conn: sqlite3.Connection,
     *,
@@ -3638,13 +3712,25 @@ def create_trend_release(
     frozen_items = {
         item.item_id: item for item in load_frozen_items(conn, facet_release.data_release_id)
     }
-    trends, history_status = _discover_trends_graph(
-        stories,
-        story_items,
-        facets,
-        frozen_items,
-        params=params,
-    )
+    if method == "embedding_v2":
+        trends = _discover_trends_embedding_v2(
+            conn,
+            stories,
+            story_items,
+            frozen_items,
+            data_release_id=facet_release.data_release_id,
+            story_release=story_release,
+            params=params,
+        )
+        history_status = "pending"
+    else:
+        trends, history_status = _discover_trends_graph(
+            stories,
+            story_items,
+            facets,
+            frozen_items,
+            params=params,
+        )
     data_release = get_data_release(conn, facet_release.data_release_id)
     history_release_count = 0
     if data_release is not None:
@@ -4818,6 +4904,135 @@ def active_label_story_pairs(
         "story_release_id": story_release_id,
         "asked": asked,
         "labels": dict(labeled),
+    }
+
+
+def auto_label_story_pairs(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    *,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """Детерминированная авто-разметка пар высокого доверия (Фаза 3, без человека).
+
+    Метки ставятся правилами ``story_scoring.auto_label_pair``: provenance-якоря →
+    ``same_story``, жёсткие конфликты → ``different_story``. Существующие метки
+    (человеческие или более ранние авто) не перезаписываются.
+    """
+
+    release = get_story_release(conn, story_release_id)
+    if release is None:
+        raise ValueError(f"Story release not found: {story_release_id}")
+    existing = {
+        str(row["target_id"])
+        for row in conn.execute(
+            """SELECT target_id FROM engine_labels
+               WHERE target_kind = 'story_pair' AND release_id = ?""",
+            (story_release_id,),
+        ).fetchall()
+    }
+    rows = conn.execute(
+        """SELECT item_id_a, item_id_b, decision, reason, features_json
+           FROM story_candidate_pairs WHERE story_release_id = ?""",
+        (story_release_id,),
+    ).fetchall()
+    counts: Counter[str] = Counter()
+    pending: list[tuple[str, str, str, str, str, str]] = []
+    created_at = now_iso()
+    for row in rows:
+        target_id = "|".join(_pair_key(str(row["item_id_a"]), str(row["item_id_b"])))
+        if target_id in existing:
+            continue
+        features = _json_dict(row["features_json"])
+        label = auto_label_pair(str(row["decision"]), str(row["reason"]), features)
+        if label is None:
+            continue
+        counts[label] += 1
+        label_id = _stable_id("label", "story_pair", target_id, story_release_id, label, created_at)
+        pending.append((label_id, "story_pair", target_id, story_release_id, label, "auto_label"))
+    if persist and pending:
+        conn.executemany(
+            """INSERT INTO engine_labels
+               (label_id, target_kind, target_id, release_id, label, note, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            [(*row, created_at) for row in pending],
+        )
+        conn.commit()
+    return {
+        "story_release_id": story_release_id,
+        "added": len(pending),
+        "labels": dict(counts),
+    }
+
+
+def train_story_merge_model(
+    conn: sqlite3.Connection,
+    story_release_id: str,
+    *,
+    target_precision: float = 0.95,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """Обучает логистическую модель слияния на размеченных парах (Фаза 3).
+
+    Источники меток по приоритету: человеческие (``engine_labels`` без note=auto_label)
+    поверх автоматических. Модель и её хэш сохраняются в ``metrics_json`` релиза, чтобы
+    релиз оставался воспроизводимым.
+    """
+
+    release = get_story_release(conn, story_release_id)
+    if release is None:
+        raise ValueError(f"Story release not found: {story_release_id}")
+    label_rows = conn.execute(
+        """SELECT target_id, label, note FROM engine_labels
+           WHERE target_kind = 'story_pair' AND release_id = ?""",
+        (story_release_id,),
+    ).fetchall()
+    labels_by_id: dict[str, str] = {}
+    human_count = 0
+    for row in label_rows:
+        note = str(row["note"] or "")
+        target_id = str(row["target_id"])
+        if note == "auto_label":
+            labels_by_id.setdefault(target_id, str(row["label"]))
+        else:
+            labels_by_id[target_id] = str(row["label"])
+            human_count += 1
+    pair_rows = conn.execute(
+        """SELECT item_id_a, item_id_b, features_json
+           FROM story_candidate_pairs WHERE story_release_id = ?""",
+        (story_release_id,),
+    ).fetchall()
+    vectors: list[Any] = []
+    labels: list[bool] = []
+    for row in pair_rows:
+        target_id = "|".join(_pair_key(str(row["item_id_a"]), str(row["item_id_b"])))
+        label = labels_by_id.get(target_id)
+        if label in (None, "low_signal"):
+            continue
+        vectors.append(extract_feature_vector(_json_dict(row["features_json"])))
+        labels.append(label == "same_story")
+    if not vectors:
+        raise ValueError(f"No labeled pairs available for training: {story_release_id}")
+    label_source = "human" if human_count else "auto"
+    model = train_merge_model(
+        vectors,
+        labels,
+        target_precision=target_precision,
+        label_source=label_source,
+    )
+    summary = model.to_params()
+    if persist:
+        metrics = {**release.metrics, "merge_model": summary}
+        conn.execute(
+            "UPDATE story_releases SET metrics_json = ? WHERE story_release_id = ?",
+            (_json(metrics), story_release_id),
+        )
+        conn.commit()
+    return {
+        "story_release_id": story_release_id,
+        "labeled_pairs": len(vectors),
+        "label_source": label_source,
+        "model": summary,
     }
 
 
