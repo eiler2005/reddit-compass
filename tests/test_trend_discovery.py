@@ -1,0 +1,109 @@
+"""Тесты слоя Trends v2 (Фаза 5): эмбеддинг-кластеризация + c-TF-IDF."""
+
+from __future__ import annotations
+
+from reddit_compass.intelligence.trend_discovery import (
+    _ctfidf_name,
+    _is_specific_name,
+    discover_trends,
+)
+
+
+def _story(story_id: str, title: str, date: str, domains: list[str] | None = None) -> dict:
+    return {
+        "story_id": story_id,
+        "title": title,
+        "domain_ids": domains or ["ai_technology"],
+        "first_seen": date,
+        "last_seen": date,
+        "source_count": 1,
+        "project_scores": {},
+    }
+
+
+def _providers(story_providers: dict[str, list[str]]) -> tuple[dict, dict[str, str]]:
+    item_ids_by_story: dict[str, list[str]] = {}
+    provider_by_item: dict[str, str] = {}
+    for story_id, providers in story_providers.items():
+        ids = []
+        for index, provider in enumerate(providers):
+            item_id = f"{story_id}_item{index}"
+            ids.append(item_id)
+            provider_by_item[item_id] = provider
+        item_ids_by_story[story_id] = ids
+    return item_ids_by_story, provider_by_item
+
+
+def test_discovers_specific_cross_source_trend() -> None:
+    stories = [
+        _story("s1", "OpenAI launches quantum AI agent platform", "2026-07-25"),
+        _story("s2", "OpenAI quantum AI agent rollout expands", "2026-07-26"),
+        _story("s3", "Anthropic responds to OpenAI quantum agent", "2026-07-28"),
+        _story("s4", "Google weighs OpenAI quantum agent deal", "2026-07-29"),
+    ]
+    item_ids_by_story, provider_by_item = _providers(
+        {
+            "s1": ["reuters", "reddit"],
+            "s2": ["nytimes"],
+            "s3": ["reddit"],
+            "s4": ["bbc"],
+        }
+    )
+    trends = discover_trends(stories, item_ids_by_story, provider_by_item)
+    assert len(trends) == 1
+    trend = trends[0]
+    assert trend["story_count"] == 4
+    assert len(trend["name_ru"].split()) >= 2
+    assert "fall" not in trend["name_ru"].split()
+    assert trend["source_scope"] == "cross_source"
+    assert trend["confidence_components"]["cross_source"] > 0
+    assert trend["lifecycle"] in {"emerging", "growing", "peaked", "steady"}
+    assert len(trend["evidence_story_ids"]) == 4
+
+
+def test_requires_multiple_dates() -> None:
+    stories = [
+        _story("s1", "OpenAI quantum agent launch", "2026-07-29"),
+        _story("s2", "OpenAI quantum agent rollout", "2026-07-29"),
+        _story("s3", "OpenAI quantum agent deal", "2026-07-29"),
+    ]
+    item_ids_by_story, provider_by_item = _providers(
+        {"s1": ["reuters"], "s2": ["nytimes"], "s3": ["bbc"]}
+    )
+    assert discover_trends(stories, item_ids_by_story, provider_by_item) == []
+
+
+def test_community_only_scope_for_reddit_cluster() -> None:
+    stories = [
+        _story("s1", "Local AI agent meetup recap", "2026-07-25"),
+        _story("s2", "Local AI agent meetup photos", "2026-07-27"),
+        _story("s3", "Local AI agent meetup notes", "2026-07-29"),
+    ]
+    item_ids_by_story, provider_by_item = _providers(
+        {"s1": ["reddit"], "s2": ["reddit"], "s3": ["reddit"]}
+    )
+    trends = discover_trends(stories, item_ids_by_story, provider_by_item)
+    assert len(trends) == 1
+    assert trends[0]["source_scope"] == "community_only"
+
+
+def test_is_specific_name_rejects_bare_verbs_and_generic() -> None:
+    assert _is_specific_name("fall") is False
+    assert _is_specific_name("ai agent") is False
+    assert _is_specific_name("") is False
+    assert _is_specific_name("openai quantum agent") is True
+
+
+def test_ctfidf_name_prefers_distinctive_terms() -> None:
+    cluster = [
+        "OpenAI launches quantum AI agent",
+        "OpenAI quantum agent rollout",
+        "OpenAI quantum agent deal",
+    ]
+    corpus = [
+        ["unrelated", "sports", "final", "score"],
+        ["weather", "forecast", "storm", "warning"],
+    ] + [title.split() for title in cluster]
+    name = _ctfidf_name(cluster, corpus)
+    assert "quantum" in name
+    assert len(name.split()) >= 1
