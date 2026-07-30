@@ -7,6 +7,33 @@
 
 ### Added
 
+- **Learned story merge scoring (Фаза 3)**: dependency-light логистическая регрессия
+  (`intelligence/story_scoring.py`, numpy) поверх `features_json`. Детерминированная
+  авто-разметка `engine label auto` (без человека), обучение `engine label train`
+  с калибровкой порога под precision ≥ 0.95; веса и хэш модели сохраняются в
+  `metrics_json.merge_model` (воспроизводимо). Человеческие метки имеют приоритет.
+  Модель решает только серую зону — жёсткие правила (URL-match, hard conflicts)
+  остались детерминированными. Единый источник дефолтов `DEFAULT_STORY_PARAMS`.
+- **Trends v2 `embedding_v2` (Фаза 5)**: новый слой трендов (`intelligence/trend_discovery.py`) —
+  кластеризация векторов историй, имена через c-TF-IDF (вместо «Паттерн: fall»),
+  дедупликация по пересечению множеств историй (Jaccard ≥ 0.5), обязательная производная
+  по дням, confidence с компонентами (volume / cross_source / day_spread), обязательный
+  `source_scope`. Выбор метода: `engine trends propose --method embedding_v2|story_graph_v1`.
+- **Perspective gap (Фаза 4)**: `perspective_gap` теперь реально вычисляется из pulse_score
+  и mainstream-покрытия связанной истории; guard `perspective_gap_available` не считает разрыв
+  на несбалансированных релизах (флаг в metrics signal_release). Расширена классификация
+  сигналов (`complaint`, `product_request`) для снижения доли `other`.
+- **Таксономия и квоты (Фаза 6)**: из `ai_technology` убраны generic-слова
+  (model/product/startup/code/software/developer/agent) и source_hints technology/tech/hackernews —
+  источник больше не назначает рубрику сам по себе. Двухуровневый рубрикатор `RUBRICS`
+  (8 верхних рубрик), `apply_reddit_quota` (Reddit ≤ 30% в блоке «Мир»), детектор рутины
+  `is_routine_beat` — рутина остаётся в /news, но исключается из story/trend-слоёв.
+- **Обратная связь (Фаза 7)**: one-click endpoint `POST /ui/engine/feedback`
+  (полезно/мусор) пишет в `engine_labels`, пополняя golden set без ручной разметки.
+- **GUI**: навигационная метка `Pulse` переименована в `Reddit Pulse`; на карточках
+  Stories/Trends добавлен бейдж `source_scope` (🔗 Reddit + СМИ / 🔴 только Reddit / 📰 только СМИ).
+- **Документация**: `docs/DATA_FLOW_DIAGRAMS.md` — Mermaid-схемы потока данных
+  Reddit → stories → trends → Reddit Pulse → публикации.
 - **Versioned Story/Trend Engine**: новая `trend_engine.db` с frozen Data Releases,
   независимыми Facet/Story/Trend attempts, checksum verification и SQLite immutability triggers.
 - **Hybrid Story Engine**: bounded top-K retrieval по URL/title/entities/optional E5,

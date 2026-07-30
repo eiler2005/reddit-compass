@@ -415,6 +415,23 @@ GDELT — что таксономия должна быть многоуровн
 Порядок: полнота сбора → точность историй → разрыв перспективы → тренды → читаемая лента →
 ежедневный выход → упрощение.
 
+> **Статус реализации (2026-07-30).**
+> | Фаза | Статус | Где |
+> |---|---|---|
+> | 1. Гейт полноты сбора | ✅ закрыта (ранее) | `expected_min_items`, `input_status`, `release_source_health` |
+> | 2. Убрать E5-only merge | ✅ закрыта (ранее) | conservative merge gate v2.2/v2.3 |
+> | 3. Обучаемый скоринг | ✅ закрыта | `intelligence/story_scoring.py`; авто-разметка вместо ручной (`engine label auto/train`) |
+> | 4. Разрыв перспективы | ✅ закрыта | `reddit_pulse.py`: `compute_signal_perspective_gap`, `perspective_gap_available`, `complaint`/`product_request`; `source_scope` на карточках |
+> | 5. Переписать Trends | ✅ закрыта | `intelligence/trend_discovery.py`, метод `embedding_v2` |
+> | 6. Таксономия/квоты/рутина | ✅ закрыта | фикс `ai_technology`, `RUBRICS`, `apply_reddit_quota`, `is_routine_beat` |
+> | 7. Ежедневный выход | ⚠️ частично | feedback-эндпоинт есть; `/today` и `publish --channel shadow` существуют, автопубликация по cron — на стороне деплоя |
+> | 8. Упрощение | ⚠️ частично | вынесены `story_scoring.py`/`trend_discovery.py`; удаление legacy и полный split `engine.py` отложены (риск) |
+>
+> Ворота качества: `uv run ruff check . && uv run ruff format --check . && uv run mypy src && uv run pytest`
+> — зелёные (448 тестов, покрытие 75%). «Готово, когда»-критерии, требующие прогона на полном
+> frozen-релизе (число overmerge, распределение рубрик, топ-20 разрыва), проверяются руками на
+> `2026-07-23_2026-07-29-broad-r1` командами из §8.
+
 ### Фаза 1. Гейт полноты сбора (1–2 дня)
 
 Без этого всё остальное считается на неполных данных, и никто этого не заметит.
