@@ -1,9 +1,9 @@
 # Reddit Pulse + Verified Story/Trend Radar — Implementation Report
 
-Date: 2026-07-29
+Date: 2026-07-29; follow-up fixes: 2026-07-30
 Task: `docs/QWEN_REDDIT_PULSE_AND_VERIFIED_TRENDS_TASK.md`
 Baseline: `e1f1009` (semantic_dedup_threshold 0.92)
-HEAD: `6b3a5b2`
+HEAD: see git log; report updated after UI/API/Pulse hardening commits.
 
 ## Commits
 
@@ -13,6 +13,7 @@ HEAD: `6b3a5b2`
 | 2 | `3066862` | Verified Story layer + hard guards + safe E5 mode |
 | 3 | `aaadfd1` | Trend Watch verified-only + perspective gap |
 | 4 | `6b3a5b2` | CLI engine stories verified + broad theme/news_link tests |
+| 5 | `18780f5`–`c0ca0e8` | Reddit Pulse API/UI, Radar integration and query fixes |
 
 ## Files Changed
 
@@ -21,7 +22,7 @@ HEAD: `6b3a5b2`
 | `src/reddit_compass/intelligence/reddit_pulse.py` | 302 | Reddit-native scoring, signal classification, CommunitySignal |
 | `src/reddit_compass/intelligence/verified_stories.py` | 314 | Provenance-based verification, group size guards |
 | `src/reddit_compass/intelligence/perspective_gap.py` | 114 | Mainstream gap + elite media gap computation |
-| `src/reddit_compass/intelligence/engine.py` | +108 | Schema v4, hard guards, safe E5, verified-only trends |
+| `src/reddit_compass/intelligence/engine.py` | +108 | Schema v5, hard guards, safe E5, verified-only trends, versioned SignalRelease metadata |
 | `src/reddit_compass/cli.py` | +232 | CLI: reddit-pulse propose/inspect, stories verified, trends --verified-only |
 | `tests/test_reddit_pulse.py` | 252 | 30 tests: percentile, velocity, depth, classification |
 | `tests/test_verified_stories.py` | 434 | 18 tests: verification, group size, broad themes, news_link |
@@ -80,16 +81,41 @@ reddit-compass engine stories verified --story-release ID --signal-release ID --
 reddit-compass engine trends propose --story-release ID --verified-only --signal-release ID
 ```
 
+## 2026-07-30 Follow-up Fixes
+
+These fixes use only existing frozen SQLite data. They do not require `collect`, `run`, Reddit fetches,
+RSS fetches or any other network collection.
+
+| Area | Fix |
+|------|-----|
+| Radar Pulse UI | Pulse summary is built before closing the read-only engine DB connection. |
+| Signal lookup | Latest signal release can be filtered by `data_release_id` and `date`; Radar no longer pulls a random latest release from another date. |
+| Signal versioning | `signal_releases` now stores `method`, `params_hash`, `metrics_json`, `git_sha`; `reddit-pulse propose` creates a versioned attempt instead of overwriting the same ID. |
+| URL safety | Pulse API sanitizes `discussion_url` and `target_url` to `http/https` only before UI rendering. |
+| Mainstream coverage | `reddit-pulse propose --story-release ...` links Reddit signals to existing stories and fills `mainstream_coverage_count` from non-Reddit mainstream/business/tech-culture evidence in the same StoryRelease. |
+| Reddit history | If no prior frozen releases exist, novelty is neutral (`0.5`) instead of fake-new (`1.0`). When prior finalized releases exist, novelty uses titles from the configured history window. |
+| Velocity | `score_velocity` and `comment_velocity` use item age from frozen timestamps when available, not a hardcoded 24h default. |
+| Verified reasons | Same-provider URL duplicates are reported as `same_provider_duplicate`, not `cross_source_url`. |
+
+### Current Data Limitation
+
+Local `trend_engine.db` currently has only one finalized `DataRelease`. Therefore true 7-day Reddit
+history cannot be reconstructed from local engine data. The code now behaves honestly:
+
+- no prior release → neutral novelty;
+- prior finalized releases → historical novelty based on the configured window;
+- no story release passed to Pulse → no linked stories and no mainstream coverage;
+- story release passed → linked stories and coverage are computed from frozen release rows.
+
 ## What Was NOT Done (Requires Live Data)
 
 | Item | Reason |
 |------|--------|
-| Reddit Pulse A/B on prod data | Needs `engine reddit-pulse propose` on VPS with real release |
+| Reddit Pulse A/B on prod data | Needs `engine reddit-pulse propose` on VPS with existing frozen releases; no network collection required |
 | Verified story count on prod | Needs `engine stories verified` on VPS |
 | Trend propose verified-only on prod | Needs 7+ daily releases for lifecycle |
 | Full grey-zone Qwen review | Incremental 200/night strategy in progress |
-| UI integration (Radar page) | Separate frontend task |
-| API endpoints for reddit-pulse | Separate API task |
+| UI/API hardening | Done in follow-up; add browser visual checks if UI layout changes further |
 
 ## Decision
 
@@ -100,7 +126,7 @@ reddit-compass engine trends propose --story-release ID --verified-only --signal
 
 ## Next Steps
 
-1. Deploy to VPS and run `engine reddit-pulse propose` on latest release
+1. Deploy to VPS and run `engine reddit-pulse propose` on latest existing frozen release; do not run network collection
 2. Run `engine stories verified` to measure verified story count
 3. Run `engine trends propose --verified-only` to measure trend quality
 4. Continue incremental Qwen review (200 pairs/night)

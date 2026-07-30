@@ -23,15 +23,18 @@ VerificationReason = Literal[
     "manual_label",
     "community_only_high_pulse",
     "exact_title_match",
+    "same_provider_duplicate",
 ]
 
 # Membership reasons that constitute provenance-based verification
 _VERIFIED_REASONS: dict[str, VerificationReason] = {
-    "shared canonical/target URL": "cross_source_url",
-    "shared HuggingFace model release URL": "cross_source_url",
     "near-duplicate title fingerprint": "near_duplicate_title",
     "validated by cached Qwen story review": "qwen_confirmed",
     "exact event title match without hard conflict": "exact_title_match",
+}
+_URL_MATCH_REASONS = {
+    "shared canonical/target URL",
+    "shared HuggingFace model release URL",
 }
 
 # Generic anchors that do NOT count as entity anchors for verification
@@ -125,14 +128,14 @@ def get_verified_stories(
     manual_labels: set[str] = {str(r["target_id"]) for r in label_rows}
 
     # Build per-story data
-    story_reasons: dict[str, set[VerificationReason]] = {}
+    raw_story_reasons: dict[str, set[str]] = {}
     story_providers: dict[str, set[str]] = {}
 
     for row in membership_rows:
         sid = str(row["story_id"])
         reason = str(row["membership_reason"] or "")
-        if reason in _VERIFIED_REASONS:
-            story_reasons.setdefault(sid, set()).add(_VERIFIED_REASONS[reason])
+        if reason in _VERIFIED_REASONS or reason in _URL_MATCH_REASONS:
+            raw_story_reasons.setdefault(sid, set()).add(reason)
 
     for row in provider_rows:
         sid = str(row["story_id"])
@@ -140,7 +143,7 @@ def get_verified_stories(
 
     # Add manual labels
     for sid in manual_labels:
-        story_reasons.setdefault(sid, set()).add("manual_label")
+        raw_story_reasons.setdefault(sid, set()).add("manual_label")
 
     # Check community_only high pulse if signal_release_id provided
     high_pulse_items: set[str] = set()
@@ -156,8 +159,16 @@ def get_verified_stories(
     verified: list[VerifiedStory] = []
     for row in story_rows:
         sid = str(row["story_id"])
-        reasons = story_reasons.get(sid, set())
         providers = story_providers.get(sid, set())
+        raw_reasons = raw_story_reasons.get(sid, set())
+        reasons: set[VerificationReason] = set()
+        for reason in raw_reasons:
+            if reason == "manual_label":
+                reasons.add("manual_label")
+            elif reason in _URL_MATCH_REASONS:
+                reasons.add("cross_source_url" if len(providers) > 1 else "same_provider_duplicate")
+            elif reason in _VERIFIED_REASONS:
+                reasons.add(_VERIFIED_REASONS[reason])
         source_count = int(row["source_count"])
         item_count = int(row["item_count"])
         is_cross_source = len(providers) > 1

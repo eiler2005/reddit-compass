@@ -46,7 +46,7 @@ from .models import ContentItem
 from .taxonomy import compute_project_scores, normalize_domain_ids
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
-ENGINE_SCHEMA_VERSION = 4
+ENGINE_SCHEMA_VERSION = 5
 DEFAULT_STORY_METHOD = "hybrid_v2"
 DEFAULT_TREND_METHOD = "story_graph_v1"
 
@@ -350,6 +350,10 @@ CREATE TABLE IF NOT EXISTS signal_releases (
     facet_release_id  TEXT NOT NULL,
     story_release_id  TEXT,
     date              TEXT NOT NULL,
+    method            TEXT NOT NULL DEFAULT 'reddit_pulse_v1',
+    params_hash       TEXT NOT NULL DEFAULT '',
+    metrics_json      TEXT NOT NULL DEFAULT '{}',
+    git_sha           TEXT NOT NULL DEFAULT '',
     status            TEXT NOT NULL,
     signal_count      INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL,
@@ -621,6 +625,30 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
         conn,
         "engine_trends",
         "review_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_engine_column(
+        conn,
+        "signal_releases",
+        "method",
+        "TEXT NOT NULL DEFAULT 'reddit_pulse_v1'",
+    )
+    _ensure_engine_column(
+        conn,
+        "signal_releases",
+        "params_hash",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    _ensure_engine_column(
+        conn,
+        "signal_releases",
+        "metrics_json",
+        "TEXT NOT NULL DEFAULT '{}'",
+    )
+    _ensure_engine_column(
+        conn,
+        "signal_releases",
+        "git_sha",
         "TEXT NOT NULL DEFAULT ''",
     )
     conn.execute(f"PRAGMA user_version = {ENGINE_SCHEMA_VERSION}")

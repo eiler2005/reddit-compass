@@ -72,6 +72,31 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     )
     conn.execute(
         """
+        INSERT INTO release_items (
+            release_id, item_id, provider, source_cluster, external_id,
+            canonical_url, title, snapshot_date, source_section, domain_ids,
+            discussion_url, raw_engagement, metadata, row_checksum
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "data_test",
+            "zreddit:1",
+            "reddit",
+            "voices",
+            "1",
+            "https://www.reddit.com/r/news/comments/1/pulse",
+            "Pulse story",
+            "2026-07-29",
+            "news",
+            '["society_politics"]',
+            "javascript:alert(1)",
+            '{"score": 100, "comments": 40, "upvote_ratio": 0.91}',
+            '{"is_self": false}',
+            "reddit-row-checksum",
+        ),
+    )
+    conn.execute(
+        """
         INSERT INTO facet_releases (
             facet_release_id, data_release_id, method, params_hash,
             status, metrics_json, created_at
@@ -143,6 +168,14 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
     )
     conn.execute(
         """
+        INSERT INTO engine_story_items (
+            story_release_id, story_id, item_id, membership_score, membership_reason
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        ("story_test", "story_1", "zreddit:1", 0.95, "shared canonical/target URL"),
+    )
+    conn.execute(
+        """
         INSERT INTO trend_releases (
             trend_release_id, story_release_id, window, method, params_hash,
             status, history_status, metrics_json, created_at
@@ -194,6 +227,95 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
         ) VALUES (?, ?, ?, ?, ?)
         """,
         ("trend_test", "trend_1", "story_1", 0.97, "shared_pattern"),
+    )
+    conn.execute(
+        """
+        INSERT INTO signal_releases (
+            signal_release_id, data_release_id, facet_release_id, story_release_id,
+            date, method, params_hash, metrics_json, git_sha, status,
+            signal_count, created_at, finalized_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "signals_test",
+            "data_test",
+            "facet_test",
+            "story_test",
+            "2026-07-29",
+            "reddit_pulse_v2",
+            "params",
+            "{}",
+            "test-sha",
+            "finalized",
+            1,
+            "2026-07-29T10:00:00Z",
+            "2026-07-29T10:00:00Z",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO signal_releases (
+            signal_release_id, data_release_id, facet_release_id, story_release_id,
+            date, method, params_hash, metrics_json, git_sha, status,
+            signal_count, created_at, finalized_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "signals_wrong_date",
+            "data_test",
+            "facet_test",
+            "story_test",
+            "2026-07-28",
+            "reddit_pulse_v2",
+            "params",
+            "{}",
+            "test-sha",
+            "finalized",
+            1,
+            "2026-07-30T10:00:00Z",
+            "2026-07-30T10:00:00Z",
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO community_signals (
+            signal_release_id, signal_id, item_id, subreddit, signal_type,
+            title, discussion_url, pulse_score, domain_ids_json,
+            linked_story_id, mainstream_coverage_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "signals_test",
+            "pulse_zreddit:1",
+            "zreddit:1",
+            "news",
+            "policy_politics",
+            "Pulse story",
+            "javascript:alert(1)",
+            77.0,
+            '["society_politics"]',
+            "story_1",
+            1,
+        ),
+    )
+    conn.execute(
+        """
+        INSERT INTO community_signals (
+            signal_release_id, signal_id, item_id, subreddit, signal_type,
+            title, discussion_url, pulse_score, domain_ids_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "signals_wrong_date",
+            "pulse_wrong",
+            "zreddit:1",
+            "news",
+            "policy_politics",
+            "Wrong date pulse",
+            "https://reddit.com/r/news/comments/wrong",
+            99.0,
+            '["society_politics"]',
+        ),
     )
     conn.execute(
         """
@@ -306,9 +428,25 @@ def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
     assert "Проверяемый тренд" in radar_page.text
     assert "trend_test" in radar_page.text
     assert "Trendwatching cockpit" in radar_page.text
+    assert "Reddit Pulse" in radar_page.text
+    assert "Pulse story" in radar_page.text
+    assert "Wrong date pulse" not in radar_page.text
+    assert "javascript:alert" not in radar_page.text
     assert today_page.status_code == 200
     assert "Проверяемый тренд" in today_page.text
     assert "publication_test" in today_page.text
+
+
+def test_reddit_pulse_api_filters_by_release_date_and_sanitizes_url(
+    engine_client: TestClient,
+) -> None:
+    response = engine_client.get("/api/v2/reddit-pulse?data_release=data_test&date=2026-07-29")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["signal_release_id"] == "signals_test"
+    assert payload["items"][0]["title"] == "Pulse story"
+    assert payload["items"][0]["discussion_url"] == ""
 
 
 def test_published_news_stories_trends_and_project_lens_are_separate(

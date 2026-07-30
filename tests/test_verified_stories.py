@@ -214,6 +214,30 @@ class TestVerifiedStories:
         assert len(verified) == 1
         assert "cross_source_url" in verified[0].verification_reasons
 
+    def test_same_provider_url_duplicate_is_not_called_cross_source(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        _setup_engine_db(conn)
+        _insert_releases(conn)
+        _insert_story(conn, "sr1", "s1", "Same-provider duplicate", source_count=1, item_count=2)
+        _insert_item(conn, "dr1", "sr1", "s1", "i1", "hackernews", "story medoid")
+        _insert_item(
+            conn,
+            "dr1",
+            "sr1",
+            "s1",
+            "i2",
+            "hackernews",
+            "shared canonical/target URL",
+        )
+        conn.commit()
+
+        verified = get_verified_stories(conn, "sr1")
+        assert len(verified) == 1
+        assert "same_provider_duplicate" in verified[0].verification_reasons
+        assert "cross_source_url" not in verified[0].verification_reasons
+        assert not verified[0].is_cross_source
+
     def test_semantic_only_not_verified(self):
         conn = sqlite3.connect(":memory:")
         conn.row_factory = sqlite3.Row

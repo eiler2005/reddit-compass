@@ -422,6 +422,7 @@ async def pulse_page(
     from .v2 import (
         _engine_pulse_signals,
         _latest_signal_release,
+        _safe_url,
     )
 
     engine_conn = open_engine_readonly(engine_path)
@@ -483,7 +484,7 @@ async def pulse_page(
                     "subreddit": r["subreddit"],
                     "signal_type": r["signal_type"],
                     "title": r["title"],
-                    "discussion_url": r["discussion_url"],
+                    "discussion_url": _safe_url(r["discussion_url"]),
                     "pulse_score": r["pulse_score"],
                     "reddit_score": r["reddit_score"],
                     "reddit_comments": r["reddit_comments"],
@@ -1124,6 +1125,7 @@ async def radar_page(
         from .v2 import _engine_radar
 
         engine_conn = open_engine_readonly(engine_path)
+        pulse_summary = None
         try:
             published_radar = _engine_radar(
                 engine_conn,
@@ -1134,15 +1136,14 @@ async def radar_page(
                 channel=channel,
                 publication_id=publication_id,
             )
-        finally:
-            engine_conn.close()
-        if published_radar is not None:
-            # Fetch Reddit Pulse summary for the Radar page
-            pulse_summary = None
-            try:
-                from .v2 import _engine_pulse_signals, _latest_signal_release
+            if published_radar is not None:
+                from .v2 import _engine_pulse_signals, _latest_signal_release, _safe_url
 
-                sig_id = _latest_signal_release(engine_conn)
+                sig_id = _latest_signal_release(
+                    engine_conn,
+                    data_release_id=published_radar.data_release_id,
+                    date=date,
+                )
                 if sig_id:
                     top_pulse, _ = _engine_pulse_signals(engine_conn, sig_id, limit=8)
                     top_pain, _ = _engine_pulse_signals(
@@ -1180,7 +1181,7 @@ async def radar_page(
                             "subreddit": r["subreddit"],
                             "signal_type": r["signal_type"],
                             "title": r["title"],
-                            "discussion_url": r["discussion_url"],
+                            "discussion_url": _safe_url(r["discussion_url"]),
                             "pulse_score": r["pulse_score"],
                         }
                         for r in gap_rows
@@ -1192,8 +1193,9 @@ async def radar_page(
                         "top_ai": top_ai,
                         "mainstream_gap": mainstream_gap,
                     }
-            except Exception:
-                pass  # Pulse data is optional
+        finally:
+            engine_conn.close()
+        if published_radar is not None:
             return templates.TemplateResponse(
                 request=request,
                 name="engine_radar.html",

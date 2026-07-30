@@ -197,6 +197,12 @@ Engine в shadow-канале. Отсутствие LLM не меняет collec
 - Engine открывает `compass.db` только `mode=ro`; finalized release защищён SQLite triggers.
 - Повторный запуск создаёт новую версию и не удаляет предыдущие результаты.
 - Story и Trend можно пересчитывать независимо; full rebuild не входит в workflow.
+- Reddit Pulse хранится как отдельный `SignalRelease`: метод, params hash, metrics и git SHA
+  фиксируются в `signal_releases`; пересчёт создаёт новую попытку поверх frozen rows, а не запускает
+  сетевой сбор и не перезаписывает старые analysis versions.
+- Если для Pulse указан `--story-release`, engine связывает Reddit-сигналы с уже построенными
+  stories и считает mainstream coverage из `release_items`; если истории нет, novelty становится
+  нейтральной, а UI не должен выдавать это за подтверждённую динамику.
 - `broad`/`ai-native` публикуются только после Golden Set gates и ручного решения.
 - Publish/rollback атомарно переключают immutable pointer.
 - Старый `cluster_lab.db` и `lab` CLI — compatibility alias на один релиз.

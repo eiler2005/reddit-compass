@@ -12,6 +12,7 @@ from reddit_compass.intelligence.reddit_pulse import (
     compute_discussion_depth,
     compute_novelty,
     compute_pulse_score,
+    compute_score_velocity,
     compute_subreddit_percentile,
 )
 
@@ -26,6 +27,9 @@ def _make_reddit_item(
     canonical_url: str = "https://www.reddit.com/r/technology/comments/r1",
     target_url: str = "",
     excerpt: str = "",
+    metadata: dict[str, object] | None = None,
+    published_at: str | None = None,
+    observed_at: str = "",
 ) -> ContentItem:
     return ContentItem(
         item_id=item_id,
@@ -38,6 +42,9 @@ def _make_reddit_item(
         source_section=subreddit,
         target_url=target_url,
         raw_engagement={"score": score, "comments": comments, "upvote_ratio": upvote_ratio},
+        metadata=metadata or {},
+        published_at=published_at,
+        observed_at=observed_at,
     )
 
 
@@ -98,6 +105,10 @@ class TestClassifySignalType:
         )
         assert classify_signal_type(item) == "news_link"
 
+    def test_self_post_without_patterns_is_discussion(self):
+        item = _make_reddit_item(title="My experience this week", metadata={"is_self": True})
+        assert classify_signal_type(item) == "discussion"
+
 
 class TestSubredditPercentile:
     def test_percentile_within_subreddit_not_global(self):
@@ -145,6 +156,12 @@ class TestCommentVelocity:
         assert v == 10.0  # max(0, 1) = 1
 
 
+class TestScoreVelocity:
+    def test_basic_score_velocity(self):
+        item = _make_reddit_item(score=240)
+        assert compute_score_velocity(item, hours_since_publish=24.0) == 10.0
+
+
 class TestDiscussionDepth:
     def test_high_ratio(self):
         item = _make_reddit_item(comments=100, upvote_ratio=0.95)
@@ -190,6 +207,11 @@ class TestNovelty:
         item = _make_reddit_item(title="brand new topic")
         tokens = set(item.title.lower().split())
         assert compute_novelty(item, set(), tokens) == 1.0
+
+    def test_no_history_is_neutral_not_novel(self):
+        item = _make_reddit_item(title="brand new topic")
+        tokens = set(item.title.lower().split())
+        assert compute_novelty(item, set(), tokens, history_available=False) == 0.5
 
     def test_seen_item(self):
         item = _make_reddit_item(title="old topic here")
@@ -250,3 +272,22 @@ class TestBuildRedditPulseSignals:
         item = _make_reddit_item(title="Show HN: I built an AI agent")
         signals = build_reddit_pulse_signals([item])
         assert signals[0].signal_type == "ai_tools"
+
+    def test_build_uses_story_linkage_pack_and_mainstream_coverage(self):
+        item = _make_reddit_item(item_id="r1", subreddit="ChatGPT")
+        signals = build_reddit_pulse_signals(
+            [item],
+            pack_by_subreddit={"chatgpt": "ai_technology"},
+            story_id_by_item_id={"r1": "story_1"},
+            mainstream_coverage_by_story_id={"story_1": 2},
+        )
+
+        assert signals[0].pack_id == "ai_technology"
+        assert signals[0].linked_story_id == "story_1"
+        assert signals[0].mainstream_coverage_count == 2
+
+    def test_build_neutralizes_novelty_when_history_missing(self):
+        item = _make_reddit_item(item_id="r1", title="Completely new phrase")
+        signals = build_reddit_pulse_signals([item], history_available=False)
+
+        assert signals[0].novelty == 0.5

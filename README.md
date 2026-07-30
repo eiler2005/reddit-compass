@@ -289,6 +289,7 @@ Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
 | **News** | `/news` | Сырой inbox опубликованного Data Release: материалы, источники, sections, связанный story |
 | **Stories** | `/stories` | Конкретные события с evidence items; не raw news и не тренды |
 | **Trends** | `/trends` | Повторяющиеся паттерны поверх нескольких stories |
+| **Pulse** | `/pulse` | Reddit-native community signals: percentile внутри саба, velocity, discussion depth, gaps |
 | **Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: landscape, shelves, coverage, project panels |
 | **Project Lens** | `/projects/rbc`, `/projects/book` | Книга/РБК/business поверх опубликованных stories/trends |
 | **Explore** | `/explore` | Legacy/compat search по старой projection |
@@ -319,6 +320,11 @@ reddit-compass engine stories propose \
   --dense-top-k 24 \
   --dense-threshold 0.55
 reddit-compass engine stories inspect --story-release STORY_ID
+reddit-compass engine reddit-pulse propose \
+  --release RELEASE_ID \
+  --date 2026-07-29 \
+  --profile broad \
+  --story-release STORY_ID
 reddit-compass engine experiments compare --facet-release FACET_ID --limit 300
 reddit-compass engine trends propose --story-release STORY_ID
 reddit-compass engine publish --story-release STORY_ID --trend-release TREND_ID --channel shadow

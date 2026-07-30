@@ -1810,26 +1810,30 @@ def _engine_pulse_signals(
         where += " AND LOWER(cs.subreddit) = ?"
         params.append(subreddit.lower())
 
-    # Resolve data_release_id for JOIN with release_items
+    # Resolve data_release_id for JOIN with release_items.
     if not data_release_id:
-        dr_row = conn.execute(
-            "SELECT data_release_id FROM signal_releases WHERE signal_release_id = ?",
-            (signal_release_id,),
-        ).fetchone()
+        try:
+            dr_row = conn.execute(
+                "SELECT data_release_id FROM signal_releases WHERE signal_release_id = ?",
+                (signal_release_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return [], 0
         data_release_id = str(dr_row[0]) if dr_row else ""
 
-    join_clause = ""
-    if data_release_id:
-        join_clause = " LEFT JOIN release_items ri ON ri.item_id = cs.item_id AND ri.release_id = ?"
-        # Insert data_release_id as first param after signal_release_id
-        params = [params[0], data_release_id, *params[1:]]
+    join_clause = " LEFT JOIN release_items ri ON ri.item_id = cs.item_id AND ri.release_id = ?"
+    # JOIN placeholder appears before WHERE placeholders in the SQL text.
+    params = [data_release_id or "", *params]
 
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM community_signals cs WHERE {where}",
-        [signal_release_id]
-        + ([signal_type] if signal_type else [])
-        + ([subreddit.lower()] if subreddit else []),
-    ).fetchone()[0]
+    try:
+        total = conn.execute(
+            f"SELECT COUNT(*) FROM community_signals cs WHERE {where}",
+            [signal_release_id]
+            + ([signal_type] if signal_type else [])
+            + ([subreddit.lower()] if subreddit else []),
+        ).fetchone()[0]
+    except sqlite3.OperationalError:
+        return [], 0
 
     sort_map = {
         "pulse": "cs.pulse_score DESC",
@@ -1853,11 +1857,14 @@ def _engine_pulse_signals(
         "COALESCE(json_extract(ri.metadata, '$.link_flair_text'), '') as link_flair_text"
     )
 
-    rows = conn.execute(
-        f"SELECT {select_cols} FROM community_signals cs{join_clause} "
-        f"WHERE {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
-        (*params, limit, offset),
-    ).fetchall()
+    try:
+        rows = conn.execute(
+            f"SELECT {select_cols} FROM community_signals cs{join_clause} "
+            f"WHERE {where} ORDER BY {order_by} LIMIT ? OFFSET ?",
+            (*params, limit, offset),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return [], 0
 
     items = []
     for r in rows:
@@ -1868,8 +1875,8 @@ def _engine_pulse_signals(
                 "subreddit": r["subreddit"],
                 "signal_type": r["signal_type"],
                 "title": r["title"],
-                "discussion_url": r["discussion_url"],
-                "target_url": r["target_url"],
+                "discussion_url": _safe_url(r["discussion_url"]),
+                "target_url": _safe_url(r["target_url"]),
                 "pulse_score": r["pulse_score"],
                 "subreddit_percentile": r["subreddit_percentile"],
                 "comment_velocity": r["comment_velocity"],
@@ -1889,16 +1896,37 @@ def _engine_pulse_signals(
     return items, total
 
 
-def _latest_signal_release(conn: sqlite3.Connection) -> str | None:
-    row = conn.execute(
-        "SELECT signal_release_id FROM signal_releases ORDER BY created_at DESC LIMIT 1"
-    ).fetchone()
+def _latest_signal_release(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str | None = None,
+    date: str | None = None,
+) -> str | None:
+    where = ["status = 'finalized'"]
+    params: list[Any] = []
+    if data_release_id:
+        where.append("data_release_id = ?")
+        params.append(data_release_id)
+    if date:
+        where.append("date = ?")
+        params.append(date)
+    try:
+        row = conn.execute(
+            "SELECT signal_release_id FROM signal_releases "
+            f"WHERE {' AND '.join(where)} "
+            "ORDER BY created_at DESC LIMIT 1",
+            params,
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return None
     return str(row["signal_release_id"]) if row else None
 
 
 @router.get("/reddit-pulse", response_model=PulseListOut)
 def list_reddit_pulse(
     signal_release: str | None = None,
+    data_release: str | None = None,
+    date: str | None = None,
     signal_type: str | None = None,
     subreddit: str | None = None,
     sort: str = Query(default="pulse", pattern="^(pulse|score|comments|velocity|ratio)$"),
@@ -1908,7 +1936,11 @@ def list_reddit_pulse(
 ) -> PulseListOut:
     """List Reddit Pulse signals with optional filters and sort."""
     conn = _require_engine(engine_conn)
-    sig_id = signal_release or _latest_signal_release(conn)
+    sig_id = signal_release or _latest_signal_release(
+        conn,
+        data_release_id=data_release,
+        date=date,
+    )
     if not sig_id:
         return PulseListOut(signal_release_id="", total=0, items=[])
     offset = (page - 1) * page_size
@@ -1931,11 +1963,17 @@ def list_reddit_pulse(
 @router.get("/reddit-pulse/summary", response_model=PulseSummaryOut)
 def reddit_pulse_summary(
     signal_release: str | None = None,
+    data_release: str | None = None,
+    date: str | None = None,
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
 ) -> PulseSummaryOut:
     """Reddit Pulse summary: top signals by category."""
     conn = _require_engine(engine_conn)
-    sig_id = signal_release or _latest_signal_release(conn)
+    sig_id = signal_release or _latest_signal_release(
+        conn,
+        data_release_id=data_release,
+        date=date,
+    )
     if not sig_id:
         return PulseSummaryOut(
             signal_release_id="",
@@ -1977,8 +2015,8 @@ def reddit_pulse_summary(
                 subreddit=r["subreddit"],
                 signal_type=r["signal_type"],
                 title=r["title"],
-                discussion_url=r["discussion_url"],
-                target_url=r["target_url"],
+                discussion_url=_safe_url(r["discussion_url"]),
+                target_url=_safe_url(r["target_url"]),
                 pulse_score=r["pulse_score"],
                 subreddit_percentile=r["subreddit_percentile"],
                 comment_velocity=r["comment_velocity"],
@@ -2007,11 +2045,17 @@ def reddit_pulse_summary(
 def get_reddit_pulse_signal(
     signal_id: str,
     signal_release: str | None = None,
+    data_release: str | None = None,
+    date: str | None = None,
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
 ) -> PulseSignalOut:
     """Get a single Reddit Pulse signal by ID."""
     conn = _require_engine(engine_conn)
-    sig_id = signal_release or _latest_signal_release(conn)
+    sig_id = signal_release or _latest_signal_release(
+        conn,
+        data_release_id=data_release,
+        date=date,
+    )
     if not sig_id:
         raise HTTPException(404, "No signal release found")
     row = conn.execute(
@@ -2032,8 +2076,8 @@ def get_reddit_pulse_signal(
         subreddit=row["subreddit"],
         signal_type=row["signal_type"],
         title=row["title"],
-        discussion_url=row["discussion_url"],
-        target_url=row["target_url"],
+        discussion_url=_safe_url(row["discussion_url"]),
+        target_url=_safe_url(row["target_url"]),
         pulse_score=row["pulse_score"],
         subreddit_percentile=row["subreddit_percentile"],
         comment_velocity=row["comment_velocity"],

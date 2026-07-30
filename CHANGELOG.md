@@ -38,6 +38,9 @@
 - **Story Engine A/B experiments**: `engine experiments compare` runs baseline, MinHash/SimHash
   near-duplicate, guarded semantic-dedup and combined variants on the same frozen FacetRelease,
   returning release IDs, metric deltas, merge reasons and cross-source samples without publishing.
+- **Reddit Pulse hardening**: `signal_releases` store method, params hash, metrics and git SHA;
+  `reddit-pulse propose` can link Reddit signals to an existing StoryRelease and compute mainstream
+  coverage from frozen rows without running a new network collection.
 - **Cluster Lab sandbox**: отдельный `cluster_lab.db` для immutable data releases,
   experiments, story proposals и trend proposals без mutation production `stories`.
   CLI: `lab release create/list`, `lab experiment create`, `lab propose`, `lab compare/eval`.
@@ -120,6 +123,8 @@
   briefing или LLM; `run` временно остаётся compatibility alias.
 - Radar и Today читают только текущий immutable publication pointer. Если новая версия не
   опубликована, UI сохраняет предыдущую проверенную публикацию и показывает предупреждение.
+- Reddit Pulse novelty is neutral when no prior finalized DataRelease exists; same-provider URL
+  duplicates are labelled `same_provider_duplicate`, not `cross_source_url`.
 - `cluster_lab.db` и `lab` CLI deprecated на один переходный релиз; безопасный импорт разрешён
   только при точном совпадении checksum исходного корпуса.
 - `reddit-compass run --analyze` теперь создаёт `item_signals` для каждого item
@@ -169,6 +174,9 @@
 
 ### Fixed
 
+- Radar Pulse block no longer uses a closed read-only engine DB connection and now filters
+  `signal_releases` by the published `data_release_id` and date.
+- Pulse API sanitizes external URLs and fixes the `release_items` join parameter order.
 - Signals на VPS падал с "Snapshot не найден: posts.jsonl" при отсутствии Reddit-данных
   (RSS/HN/Ladder/PH собираются автоматически, Reddit — вручную с Mac).
 

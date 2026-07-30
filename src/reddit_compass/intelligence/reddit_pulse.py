@@ -12,6 +12,7 @@ import math
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import Literal
 
 from .models import ContentItem
@@ -63,6 +64,7 @@ _MEME_PATTERNS = re.compile(
     r"\b(meme|lol|lmao|haha|funny|joke|satire|parody|shitpost)\b",
     re.IGNORECASE,
 )
+_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'_-]*", re.IGNORECASE)
 
 _CAREER_SUBS = {
     "cscareerquestions",
@@ -110,7 +112,7 @@ def classify_signal_type(item: ContentItem) -> SignalType:
         return "news_link"
 
     # Default
-    if item.is_self if hasattr(item, "is_self") else False:
+    if bool(item.metadata.get("is_self")):
         return "discussion"
     return "other"
 
@@ -128,6 +130,13 @@ def compute_subreddit_percentile(
     item_score = _raw_score(item)
     rank = sum(1 for s in scores if s <= item_score)
     return (rank / len(scores)) * 100.0
+
+
+def compute_score_velocity(item: ContentItem, hours_since_publish: float = 24.0) -> float:
+    """Score per hour, normalized by item age."""
+    score = _raw_score(item)
+    hours = max(hours_since_publish, 1.0)
+    return score / hours
 
 
 def compute_comment_velocity(item: ContentItem, hours_since_publish: float = 24.0) -> float:
@@ -171,7 +180,7 @@ def compute_cross_subreddit_repetition(
         other_sub = other.source_section.lower()
         if other_sub == own_sub:
             continue
-        other_tokens = set(other.title.lower().split())
+        other_tokens = tokenize_title(other.title)
         overlap = len(title_tokens & other_tokens) / max(len(title_tokens | other_tokens), 1)
         if overlap >= 0.5:
             similar_subs.add(other_sub)
@@ -184,8 +193,12 @@ def compute_novelty(
     item: ContentItem,
     seen_titles_last_7d: set[str],
     title_tokens: set[str],
+    *,
+    history_available: bool = True,
 ) -> float:
     """1 - seen_similar_in_last_7d."""
+    if not history_available:
+        return 0.5
     if not title_tokens:
         return 0.5
     for seen_entry in seen_titles_last_7d:
@@ -220,6 +233,37 @@ def _raw_score(item: ContentItem) -> float:
     return item.raw_engagement.get("score", 0)
 
 
+def tokenize_title(title: str) -> set[str]:
+    """Stable lightweight tokenization for Reddit repetition and novelty."""
+    return {token.lower() for token in _TOKEN_RE.findall(title) if len(token) > 1}
+
+
+def compute_hours_since_publish(item: ContentItem) -> float:
+    """Best-effort item age in hours from frozen release timestamps."""
+    if not item.published_at:
+        return 24.0
+    observed = item.observed_at or item.snapshot_date
+    try:
+        published_dt = _parse_datetime(item.published_at)
+        observed_dt = _parse_datetime(observed)
+    except ValueError:
+        return 24.0
+    hours = (observed_dt - published_dt).total_seconds() / 3600.0
+    return max(hours, 1.0)
+
+
+def _parse_datetime(value: str) -> datetime:
+    normalized = value.strip()
+    if len(normalized) == 10:
+        normalized = f"{normalized}T23:59:59Z"
+    if normalized.endswith("Z"):
+        normalized = normalized[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 @dataclass
 class CommunitySignal:
     """Reddit-native community signal."""
@@ -252,9 +296,18 @@ class CommunitySignal:
 def build_reddit_pulse_signals(
     items: list[ContentItem],
     seen_titles_last_7d: set[str] | None = None,
+    *,
+    pack_by_subreddit: dict[str, str] | None = None,
+    story_id_by_item_id: dict[str, str] | None = None,
+    mainstream_coverage_by_story_id: dict[str, int] | None = None,
+    history_available: bool | None = None,
 ) -> list[CommunitySignal]:
     """Build CommunitySignal for all Reddit items in a release."""
     seen = seen_titles_last_7d or set()
+    has_history = bool(seen) if history_available is None else history_available
+    pack_by_sub = {k.lower(): v for k, v in (pack_by_subreddit or {}).items()}
+    story_by_item = story_id_by_item_id or {}
+    mainstream_by_story = mainstream_coverage_by_story_id or {}
 
     # Group items by subreddit for percentile computation
     by_sub: dict[str, list[ContentItem]] = defaultdict(list)
@@ -264,29 +317,38 @@ def build_reddit_pulse_signals(
 
     signals: list[CommunitySignal] = []
     for item in reddit_items:
-        title_tokens = set(item.title.lower().split())
+        title_tokens = tokenize_title(item.title)
+        hours_since_publish = compute_hours_since_publish(item)
         percentile = compute_subreddit_percentile(item, by_sub)
-        velocity = compute_comment_velocity(item)
+        score_velocity = compute_score_velocity(item, hours_since_publish)
+        velocity = compute_comment_velocity(item, hours_since_publish)
         depth = compute_discussion_depth(item)
         ratio = compute_comment_score_ratio(item)
         cross_sub = compute_cross_subreddit_repetition(item, reddit_items, title_tokens)
-        novelty = compute_novelty(item, seen, title_tokens)
+        novelty = compute_novelty(
+            item,
+            seen,
+            title_tokens,
+            history_available=has_history,
+        )
         pulse = compute_pulse_score(percentile, velocity, depth, cross_sub, novelty)
         signal_type = classify_signal_type(item)
+        linked_story_id = story_by_item.get(item.item_id)
 
         signals.append(
             CommunitySignal(
                 signal_id=f"pulse_{item.item_id}",
                 item_id=item.item_id,
                 subreddit=item.source_section,
-                pack_id=item.metadata.get("pack_id", ""),
+                pack_id=item.metadata.get("pack_id", "")
+                or pack_by_sub.get(item.source_section.lower(), ""),
                 signal_type=signal_type,
                 title=item.title,
                 discussion_url=item.discussion_url or item.canonical_url,
                 target_url=item.target_url,
                 pulse_score=round(pulse, 2),
                 subreddit_percentile=round(percentile, 2),
-                score_velocity=round(velocity, 2),
+                score_velocity=round(score_velocity, 2),
                 comment_velocity=round(velocity, 2),
                 discussion_depth=round(depth, 2),
                 comment_score_ratio=round(ratio, 2),
@@ -296,6 +358,8 @@ def build_reddit_pulse_signals(
                 theme_ids=list(item.metadata.get("theme_ids", [])),
                 pain_points=list(item.metadata.get("pain_points", [])),
                 project_scores=dict(item.metadata.get("project_scores", {})),
+                linked_story_id=linked_story_id,
+                mainstream_coverage_count=mainstream_by_story.get(linked_story_id or "", 0),
             )
         )
 

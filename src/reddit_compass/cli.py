@@ -587,6 +587,9 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
 
     from .intelligence.engine import (
         DEFAULT_ENGINE_DB_PATH,
+        _git_sha,
+        _hash_json,
+        _stable_id,
         cache_release_embeddings,
         compare_engine_versions,
         compare_story_engine_variants,
@@ -927,15 +930,19 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 return
         if args.engine_group == "reddit-pulse":
             if args.pulse_action == "propose":
-                from .intelligence.reddit_pulse import build_reddit_pulse_signals
+                from .intelligence.reddit_pulse import (
+                    build_reddit_pulse_signals,
+                    tokenize_title,
+                )
 
                 # Load items from the data release
                 rows = engine_conn.execute(
                     """
                     SELECT item_id, provider, source_cluster, external_id,
-                           source_section, title, excerpt, canonical_url,
-                           discussion_url, target_url, domain_ids,
-                           metadata, raw_engagement, snapshot_date
+                            source_section, title, excerpt, canonical_url,
+                            discussion_url, target_url, domain_ids,
+                            metadata, raw_engagement, snapshot_date,
+                            published_at, observed_at
                     FROM release_items
                     WHERE release_id = ? AND snapshot_date = ? AND provider = 'reddit'
                     ORDER BY json_extract(raw_engagement, '$.score') DESC
@@ -953,15 +960,13 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         )
                     )
                     return
-                import json as _json
-
                 from .intelligence.models import ContentItem
 
                 items: list[ContentItem] = []
                 for r in rows:
-                    meta = _json.loads(r["metadata"] or "{}")
-                    eng = _json.loads(r["raw_engagement"] or "{}")
-                    domain_ids = _json.loads(r["domain_ids"] or '["other"]')
+                    meta = json.loads(r["metadata"] or "{}")
+                    eng = json.loads(r["raw_engagement"] or "{}")
+                    domain_ids = json.loads(r["domain_ids"] or '["other"]')
                     items.append(
                         ContentItem(
                             item_id=r["item_id"],
@@ -978,26 +983,158 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                             metadata=meta,
                             raw_engagement=eng,
                             snapshot_date=r["snapshot_date"],
+                            observed_at=r["observed_at"] or "",
+                            published_at=r["published_at"] or None,
                         )
                     )
-                signals = build_reddit_pulse_signals(items)
+                config = _load_config(args)
+                pack_by_subreddit = {
+                    subreddit.lower(): pack_id
+                    for pack_id, subreddits in config.subreddits.items()
+                    for subreddit in subreddits
+                }
+                history_rows = engine_conn.execute(
+                    """
+                    SELECT ri.title
+                    FROM release_items ri
+                    JOIN data_releases dr ON dr.release_id = ri.release_id
+                    WHERE dr.status = 'finalized'
+                      AND dr.profile = (
+                        SELECT profile FROM data_releases WHERE release_id = ?
+                      )
+                      AND ri.provider = 'reddit'
+                      AND ri.snapshot_date < ?
+                      AND date(ri.snapshot_date) >= date(?, '-' || ? || ' days')
+                    """,
+                    (args.release, args.date, args.date, args.history_window_days),
+                ).fetchall()
+                seen_titles = {
+                    " ".join(sorted(tokenize_title(str(row["title"])))) for row in history_rows
+                }
+                story_id_by_item_id: dict[str, str] = {}
+                mainstream_coverage_by_story_id: dict[str, int] = {}
+                facet_release_id = args.facet_release or ""
+                if args.story_release:
+                    release_row = engine_conn.execute(
+                        """
+                        SELECT sr.facet_release_id, fr.data_release_id
+                        FROM story_releases sr
+                        JOIN facet_releases fr
+                          ON fr.facet_release_id = sr.facet_release_id
+                        WHERE sr.story_release_id = ?
+                        """,
+                        (args.story_release,),
+                    ).fetchone()
+                    if release_row is None:
+                        raise ValueError(f"Story release not found: {args.story_release}")
+                    if str(release_row["data_release_id"]) != args.release:
+                        raise ValueError(
+                            "Story release belongs to a different data release: "
+                            f"{release_row['data_release_id']} != {args.release}"
+                        )
+                    facet_release_id = str(release_row["facet_release_id"])
+                    story_rows = engine_conn.execute(
+                        """
+                        SELECT item_id, story_id
+                        FROM engine_story_items
+                        WHERE story_release_id = ?
+                        """,
+                        (args.story_release,),
+                    ).fetchall()
+                    story_id_by_item_id = {
+                        str(row["item_id"]): str(row["story_id"]) for row in story_rows
+                    }
+                    coverage_rows = engine_conn.execute(
+                        """
+                        SELECT esi.story_id,
+                               COUNT(DISTINCT ri.provider || ':' ||
+                                     COALESCE(NULLIF(ri.source_section, ''), ri.source_cluster))
+                               AS mainstream_coverage
+                        FROM engine_story_items esi
+                        JOIN release_items ri
+                          ON ri.release_id = ?
+                         AND ri.item_id = esi.item_id
+                        WHERE esi.story_release_id = ?
+                          AND ri.provider != 'reddit'
+                          AND ri.source_cluster IN ('mainstream', 'business', 'tech_culture')
+                        GROUP BY esi.story_id
+                        """,
+                        (args.release, args.story_release),
+                    ).fetchall()
+                    mainstream_coverage_by_story_id = {
+                        str(row["story_id"]): int(row["mainstream_coverage"] or 0)
+                        for row in coverage_rows
+                    }
+                signals = build_reddit_pulse_signals(
+                    items,
+                    seen_titles,
+                    pack_by_subreddit=pack_by_subreddit,
+                    story_id_by_item_id=story_id_by_item_id,
+                    mainstream_coverage_by_story_id=mainstream_coverage_by_story_id,
+                    history_available=bool(history_rows),
+                )
                 # Store in DB
                 import datetime
-                import hashlib
 
-                signal_release_id = (
-                    "signals_"
-                    + hashlib.sha256(
-                        f"{args.release}:{args.date}:{args.profile}".encode()
-                    ).hexdigest()[:20]
+                method = args.method_version
+                pulse_params = {
+                    "method": method,
+                    "profile": args.profile,
+                    "date": args.date,
+                    "history_window_days": args.history_window_days,
+                    "story_release_id": args.story_release or "",
+                    "facet_release_id": facet_release_id,
+                    "history_item_count": len(history_rows),
+                    "pack_count": len(pack_by_subreddit),
+                }
+                params_hash = _hash_json(pulse_params)
+                signal_release_id = args.signal_release_id or _stable_id(
+                    "signals",
+                    args.release,
+                    args.date,
+                    args.profile,
+                    method,
+                    params_hash,
+                    datetime.datetime.now(datetime.UTC).isoformat(),
                 )
                 now = datetime.datetime.now(datetime.UTC).isoformat()
+                metrics = {
+                    "schema_version": 2,
+                    "signal_count": len(signals),
+                    "history_item_count": len(history_rows),
+                    "history_available": bool(history_rows),
+                    "linked_story_count": len(
+                        {s.linked_story_id for s in signals if s.linked_story_id}
+                    ),
+                    "mainstream_covered_signal_count": sum(
+                        1 for s in signals if s.mainstream_coverage_count > 0
+                    ),
+                    "neutral_novelty": not bool(history_rows),
+                }
                 engine_conn.execute(
                     """INSERT OR REPLACE INTO signal_releases
-                       (signal_release_id, data_release_id, facet_release_id,
-                        story_release_id, date, status, signal_count, created_at)
-                       VALUES (?, ?, '', NULL, ?, 'finalized', ?, ?)""",
-                    (signal_release_id, args.release, args.date, len(signals), now),
+                        (signal_release_id, data_release_id, facet_release_id,
+                         story_release_id, date, method, params_hash, metrics_json,
+                         git_sha, status, signal_count, created_at, finalized_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'finalized', ?, ?, ?)""",
+                    (
+                        signal_release_id,
+                        args.release,
+                        facet_release_id,
+                        args.story_release,
+                        args.date,
+                        method,
+                        params_hash,
+                        json.dumps(metrics, ensure_ascii=False, sort_keys=True),
+                        _git_sha(),
+                        len(signals),
+                        now,
+                        now,
+                    ),
+                )
+                engine_conn.execute(
+                    "DELETE FROM community_signals WHERE signal_release_id = ?",
+                    (signal_release_id,),
                 )
                 for s in signals:
                     engine_conn.execute(
@@ -1006,10 +1143,10 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                             signal_type, title, discussion_url, target_url,
                             pulse_score, subreddit_percentile, score_velocity,
                             comment_velocity, discussion_depth, comment_score_ratio,
-                            cross_subreddit_repetition, novelty,
-                            domain_ids_json, theme_ids_json, pain_points_json,
-                            project_scores_json, linked_story_id,
-                            mainstream_coverage_count, perspective_gap)
+                             cross_subreddit_repetition, novelty,
+                             domain_ids_json, theme_ids_json, pain_points_json,
+                             project_scores_json, linked_story_id,
+                             mainstream_coverage_count, perspective_gap)
                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (
                             signal_release_id,
@@ -1029,10 +1166,10 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                             s.comment_score_ratio,
                             s.cross_subreddit_repetition,
                             s.novelty,
-                            _json.dumps(s.domain_ids),
-                            _json.dumps(s.theme_ids),
-                            _json.dumps(s.pain_points),
-                            _json.dumps(s.project_scores),
+                            json.dumps(s.domain_ids, ensure_ascii=False),
+                            json.dumps(s.theme_ids, ensure_ascii=False),
+                            json.dumps(s.pain_points, ensure_ascii=False),
+                            json.dumps(s.project_scores, ensure_ascii=False),
                             s.linked_story_id,
                             s.mainstream_coverage_count,
                             s.perspective_gap,
@@ -1049,6 +1186,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         {
                             "signal_release_id": signal_release_id,
                             "total_signals": len(signals),
+                            "metrics": metrics,
                             "by_type": by_type,
                             "top5": [
                                 {
@@ -1072,7 +1210,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     where += " AND signal_type = ?"
                     params.append(args.signal_type)
                 if args.subreddit:
-                    where += " AND subreddit = ?"
+                    where += " AND LOWER(subreddit) = ?"
                     params.append(args.subreddit.lower())
                 rows = engine_conn.execute(
                     f"""SELECT signal_id, subreddit, signal_type, title,
@@ -1608,6 +1746,23 @@ def build_parser() -> argparse.ArgumentParser:
     engine_pulse_propose.add_argument("--release", required=True)
     engine_pulse_propose.add_argument("--date", required=True)
     engine_pulse_propose.add_argument("--profile", default="broad")
+    engine_pulse_propose.add_argument(
+        "--story-release",
+        default=None,
+        help="Optional StoryRelease for linked_story_id and mainstream coverage.",
+    )
+    engine_pulse_propose.add_argument(
+        "--facet-release",
+        default=None,
+        help="Optional FacetRelease metadata when no story release is provided.",
+    )
+    engine_pulse_propose.add_argument("--history-window-days", type=int, default=7)
+    engine_pulse_propose.add_argument("--method-version", default="reddit_pulse_v2")
+    engine_pulse_propose.add_argument(
+        "--signal-release-id",
+        default=None,
+        help="Optional explicit ID for deterministic tests/backfills.",
+    )
     engine_pulse_inspect = engine_pulse_sub.add_parser("inspect")
     engine_pulse_inspect.add_argument("--signal-release", required=True)
     engine_pulse_inspect.add_argument("--limit", type=int, default=50)
