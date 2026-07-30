@@ -64,6 +64,17 @@ _MEME_PATTERNS = re.compile(
     r"\b(meme|lol|lmao|haha|funny|joke|satire|parody|shitpost)\b",
     re.IGNORECASE,
 )
+_COMPLAINT_PATTERNS = re.compile(
+    r"\b(complaint|refund|overcharged|billing|customer service|outage|down for me|"
+    r"scammed|charged twice|no response|cancelled my|won't let me)\b",
+    re.IGNORECASE,
+)
+_PRODUCT_REQUEST_PATTERNS = re.compile(
+    r"\b(wish there was|someone should build|why is there no|alternative to|"
+    r"looking for (an? )?(app|tool|service)|is there a tool|feature request|"
+    r"recommend( me)? (an? )?(app|tool|library))\b",
+    re.IGNORECASE,
+)
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'_-]*", re.IGNORECASE)
 
 _CAREER_SUBS = {
@@ -96,8 +107,12 @@ def classify_signal_type(item: ContentItem) -> SignalType:
     # Pattern-based classification
     if _QUESTION_PATTERNS.search(text):
         return "question"
+    if _PRODUCT_REQUEST_PATTERNS.search(text):
+        return "product_request"
     if _PAIN_PATTERNS.search(text):
         return "pain_point"
+    if _COMPLAINT_PATTERNS.search(text):
+        return "complaint"
     if _AI_RISK_PATTERNS.search(text):
         return "ai_risk"
     if _AI_CAPABILITY_PATTERNS.search(text):
@@ -111,10 +126,41 @@ def classify_signal_type(item: ContentItem) -> SignalType:
     if item.canonical_url and not item.canonical_url.startswith("https://www.reddit.com"):
         return "news_link"
 
-    # Default
+    # Default: self-post без тематического паттерна — это обсуждение, а не «other».
     if bool(item.metadata.get("is_self")):
         return "discussion"
     return "other"
+
+
+def perspective_gap_available(
+    items: list[ContentItem],
+    *,
+    min_mainstream: int = 100,
+    min_ratio: float = 0.2,
+) -> bool:
+    """Достаточно ли сбалансирован релиз для измерения разрыва перспективы.
+
+    Разрыв имеет смысл, когда Reddit (voices) и mainstream представлены в сопоставимых
+    объёмах. Релиз вроде ai-native (1600 reddit / 126 mainstream) — неизмерим.
+    """
+
+    voices = sum(1 for item in items if item.source_cluster == "voices")
+    mainstream = sum(1 for item in items if item.source_cluster == "mainstream")
+    if voices == 0 or mainstream < min_mainstream:
+        return False
+    return mainstream >= min_ratio * voices
+
+
+def compute_signal_perspective_gap(pulse_score: float, mainstream_coverage_count: int) -> float:
+    """Разрыв перспективы сигнала: высокий Reddit-пульс при низком покрытии СМИ.
+
+    0..1: тем выше, чем сильнее обсуждение в Reddit и чем меньше mainstream-источников
+    осветили связанную историю. Насыщение mainstream на 5 источниках → разрыв 0.
+    """
+
+    reddit_weight = max(0.0, min(pulse_score, 100.0)) / 100.0
+    mainstream_saturation = min(max(mainstream_coverage_count, 0), 5) / 5.0
+    return round(reddit_weight * (1.0 - mainstream_saturation), 4)
 
 
 def compute_subreddit_percentile(
@@ -301,10 +347,17 @@ def build_reddit_pulse_signals(
     story_id_by_item_id: dict[str, str] | None = None,
     mainstream_coverage_by_story_id: dict[str, int] | None = None,
     history_available: bool | None = None,
+    gap_available: bool | None = None,
 ) -> list[CommunitySignal]:
-    """Build CommunitySignal for all Reddit items in a release."""
+    """Build CommunitySignal for all Reddit items in a release.
+
+    ``gap_available=None`` вычисляет доступность разрыва перспективы из баланса релиза;
+    на несбалансированном релизе ``perspective_gap`` не считается (остаётся 0.0), чтобы
+    не выдавать отсутствие mainstream-данных за нулевой разрыв.
+    """
     seen = seen_titles_last_7d or set()
     has_history = bool(seen) if history_available is None else history_available
+    gap_ok = perspective_gap_available(items) if gap_available is None else gap_available
     pack_by_sub = {k.lower(): v for k, v in (pack_by_subreddit or {}).items()}
     story_by_item = story_id_by_item_id or {}
     mainstream_by_story = mainstream_coverage_by_story_id or {}
@@ -334,6 +387,8 @@ def build_reddit_pulse_signals(
         pulse = compute_pulse_score(percentile, velocity, depth, cross_sub, novelty)
         signal_type = classify_signal_type(item)
         linked_story_id = story_by_item.get(item.item_id)
+        mainstream_coverage = mainstream_by_story.get(linked_story_id or "", 0)
+        gap = compute_signal_perspective_gap(pulse, mainstream_coverage) if gap_ok else 0.0
 
         signals.append(
             CommunitySignal(
@@ -359,7 +414,8 @@ def build_reddit_pulse_signals(
                 pain_points=list(item.metadata.get("pain_points", [])),
                 project_scores=dict(item.metadata.get("project_scores", {})),
                 linked_story_id=linked_story_id,
-                mainstream_coverage_count=mainstream_by_story.get(linked_story_id or "", 0),
+                mainstream_coverage_count=mainstream_coverage,
+                perspective_gap=gap,
             )
         )
 

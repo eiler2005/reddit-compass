@@ -13,7 +13,9 @@ from reddit_compass.intelligence.reddit_pulse import (
     compute_novelty,
     compute_pulse_score,
     compute_score_velocity,
+    compute_signal_perspective_gap,
     compute_subreddit_percentile,
+    perspective_gap_available,
 )
 
 
@@ -291,3 +293,74 @@ class TestBuildRedditPulseSignals:
         signals = build_reddit_pulse_signals([item], history_available=False)
 
         assert signals[0].novelty == 0.5
+
+
+class TestPerspectiveGap:
+    def test_high_pulse_no_mainstream_is_high_gap(self):
+        assert compute_signal_perspective_gap(100.0, 0) == 1.0
+
+    def test_mainstream_saturation_zeroes_gap(self):
+        assert compute_signal_perspective_gap(100.0, 5) == 0.0
+        assert compute_signal_perspective_gap(100.0, 99) == 0.0
+
+    def test_partial_mainstream_reduces_gap(self):
+        gap = compute_signal_perspective_gap(80.0, 2)
+        assert 0.0 < gap < 0.8
+
+    def test_available_when_balanced(self):
+        items = [_make_reddit_item(item_id=f"r{i}") for i in range(200)] + [
+            ContentItem(
+                item_id=f"m{i}",
+                provider="reuters",
+                source_cluster="mainstream",
+                external_id=f"m{i}",
+                canonical_url=f"https://reuters.example/{i}",
+                title="Mainstream article",
+            )
+            for i in range(150)
+        ]
+        assert perspective_gap_available(items) is True
+
+    def test_unavailable_when_mainstream_too_low(self):
+        items = [_make_reddit_item(item_id=f"r{i}") for i in range(200)] + [
+            ContentItem(
+                item_id=f"m{i}",
+                provider="reuters",
+                source_cluster="mainstream",
+                external_id=f"m{i}",
+                canonical_url=f"https://reuters.example/{i}",
+                title="Mainstream article",
+            )
+            for i in range(20)
+        ]
+        assert perspective_gap_available(items) is False
+
+    def test_unavailable_without_voices(self):
+        assert perspective_gap_available([]) is False
+
+    def test_build_computes_gap_only_when_available(self):
+        item = _make_reddit_item(item_id="r1", score=500, comments=200, upvote_ratio=0.95)
+        available = build_reddit_pulse_signals(
+            [item],
+            story_id_by_item_id={"r1": "story_1"},
+            mainstream_coverage_by_story_id={"story_1": 0},
+            gap_available=True,
+        )
+        assert available[0].perspective_gap > 0.0
+        unavailable = build_reddit_pulse_signals(
+            [item],
+            story_id_by_item_id={"r1": "story_1"},
+            mainstream_coverage_by_story_id={"story_1": 0},
+            gap_available=False,
+        )
+        assert unavailable[0].perspective_gap == 0.0
+
+
+class TestExtendedClassification:
+    def test_complaint_pattern(self):
+        item = _make_reddit_item(title="Got overcharged and customer service ignored me")
+        assert classify_signal_type(item) == "complaint"
+
+    def test_product_request_pattern(self):
+        item = _make_reddit_item(title="Why is there no good alternative to Notion?")
+        assert classify_signal_type(item) == "product_request"
