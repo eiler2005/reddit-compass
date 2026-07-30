@@ -306,6 +306,8 @@ def discover_trends(
     min_stories: int = 3,
     min_dates: int = 2,
     cluster_threshold: float = 0.55,
+    max_cluster_ratio: float = 0.25,
+    max_cluster_abs: int = 100,
 ) -> list[dict[str, Any]]:
     """Строит тренды поверх историй. Каждый элемент — тренд + список memberships."""
 
@@ -339,9 +341,17 @@ def discover_trends(
     # Дедупликация кластеров по пересечению множеств историй (Jaccard ≥ 0.5).
     clusters = _dedupe_clusters(clusters)
 
+    # Тренд ≠ весь корпус: кластер считается темой/«blob» и отбрасывается, только если
+    # он одновременно велик по доле корпуса И по абсолютному размеру (иначе в маленьком
+    # корпусе «весь корпус = одна тема» ложно выглядел бы как blob). Защищает и от
+    # вырожденного хэш-fallback без плотных эмбеддингов.
+    ratio_cap = max(int(len(stories) * max_cluster_ratio), min_stories)
+
     trends: list[dict[str, Any]] = []
     for cluster in clusters:
         if len(cluster) < min_stories:
+            continue
+        if len(cluster) > ratio_cap and len(cluster) > max_cluster_abs:
             continue
         member_stories = [stories[i] for i in cluster]
         dates = sorted({_date_key(str(s.get("first_seen") or "")) for s in member_stories})

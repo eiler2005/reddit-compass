@@ -16,6 +16,7 @@ from reddit_compass.intelligence.reddit_pulse import (
     compute_signal_perspective_gap,
     compute_subreddit_percentile,
     perspective_gap_available,
+    perspective_gap_available_counts,
 )
 
 
@@ -337,6 +338,12 @@ class TestPerspectiveGap:
 
     def test_unavailable_without_voices(self):
         assert perspective_gap_available([]) is False
+
+    def test_counts_guard_matches_release_balance(self):
+        # broad-подобный релиз: разрыв измерим.
+        assert perspective_gap_available_counts(2603, 1041) is True
+        # ai-native-подобный: mainstream слишком мало.
+        assert perspective_gap_available_counts(1600, 126) is False
 
     def test_build_computes_gap_only_when_available(self):
         item = _make_reddit_item(item_id="r1", score=500, comments=200, upvote_ratio=0.95)

@@ -94,6 +94,28 @@ def test_is_specific_name_rejects_bare_verbs_and_generic() -> None:
     assert _is_specific_name("openai quantum agent") is True
 
 
+def test_blob_cluster_is_rejected() -> None:
+    # 20 историй с одним заголовком сливаются в один кластер — это тема, не тренд.
+    dates = ["2026-07-25"] * 6 + ["2026-07-27"] * 6 + ["2026-07-29"] * 8
+    stories = [
+        _story(f"s{i}", "OpenAI quantum agent launch expands platform", dates[i]) for i in range(20)
+    ]
+    item_ids_by_story, provider_by_item = _providers(
+        {f"s{i}": ["reuters", "reddit"] for i in range(20)}
+    )
+    # abs-порог понижен, чтобы 20-историйный blob попал под оба условия guard.
+    assert discover_trends(stories, item_ids_by_story, provider_by_item, max_cluster_abs=10) == []
+    # С отключённым лимитом кластер проходит (доказательство, что режет именно guard).
+    trends = discover_trends(
+        stories,
+        item_ids_by_story,
+        provider_by_item,
+        max_cluster_ratio=1.0,
+        max_cluster_abs=10,
+    )
+    assert len(trends) == 1
+
+
 def test_ctfidf_name_prefers_distinctive_terms() -> None:
     cluster = [
         "OpenAI launches quantum AI agent",

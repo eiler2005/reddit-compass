@@ -993,7 +993,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             if args.pulse_action == "propose":
                 from .intelligence.reddit_pulse import (
                     build_reddit_pulse_signals,
-                    perspective_gap_available,
+                    perspective_gap_available_counts,
                     tokenize_title,
                 )
 
@@ -1127,6 +1127,19 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         str(row["story_id"]): int(row["mainstream_coverage"] or 0)
                         for row in coverage_rows
                     }
+                # Баланс для разрыва перспективы считаем по ВСЕМУ релизу, а не по
+                # reddit-only выборке (иначе guard всегда триггерит — баг Фазы 4).
+                balance_rows = engine_conn.execute(
+                    """SELECT source_cluster, COUNT(*) AS n
+                       FROM release_items WHERE release_id = ?
+                       GROUP BY source_cluster""",
+                    (args.release,),
+                ).fetchall()
+                cluster_counts = {str(r["source_cluster"]): int(r["n"]) for r in balance_rows}
+                gap_available = perspective_gap_available_counts(
+                    cluster_counts.get("voices", 0),
+                    cluster_counts.get("mainstream", 0),
+                )
                 signals = build_reddit_pulse_signals(
                     items,
                     seen_titles,
@@ -1134,6 +1147,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     story_id_by_item_id=story_id_by_item_id,
                     mainstream_coverage_by_story_id=mainstream_coverage_by_story_id,
                     history_available=bool(history_rows),
+                    gap_available=gap_available,
                 )
                 # Store in DB
                 import datetime
@@ -1160,7 +1174,6 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     datetime.datetime.now(datetime.UTC).isoformat(),
                 )
                 now = datetime.datetime.now(datetime.UTC).isoformat()
-                gap_available = perspective_gap_available(items)
                 metrics = {
                     "schema_version": 2,
                     "signal_count": len(signals),

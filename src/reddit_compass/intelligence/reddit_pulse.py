@@ -132,23 +132,37 @@ def classify_signal_type(item: ContentItem) -> SignalType:
     return "other"
 
 
+def perspective_gap_available_counts(
+    voices: int,
+    mainstream: int,
+    *,
+    min_mainstream: int = 100,
+    min_ratio: float = 0.2,
+) -> bool:
+    """Достаточно ли голосов и mainstream для измерения разрыва (по счётчикам).
+
+    Разрыв имеет смысл, когда Reddit (voices) и mainstream представлены в сопоставимых
+    объёмах. Релиз вроде ai-native (1600 reddit / 126 mainstream) — неизмерим.
+    """
+
+    if voices == 0 or mainstream < min_mainstream:
+        return False
+    return mainstream >= min_ratio * voices
+
+
 def perspective_gap_available(
     items: list[ContentItem],
     *,
     min_mainstream: int = 100,
     min_ratio: float = 0.2,
 ) -> bool:
-    """Достаточно ли сбалансирован релиз для измерения разрыва перспективы.
-
-    Разрыв имеет смысл, когда Reddit (voices) и mainstream представлены в сопоставимых
-    объёмах. Релиз вроде ai-native (1600 reddit / 126 mainstream) — неизмерим.
-    """
+    """Достаточно ли сбалансирован релиз для измерения разрыва перспективы."""
 
     voices = sum(1 for item in items if item.source_cluster == "voices")
     mainstream = sum(1 for item in items if item.source_cluster == "mainstream")
-    if voices == 0 or mainstream < min_mainstream:
-        return False
-    return mainstream >= min_ratio * voices
+    return perspective_gap_available_counts(
+        voices, mainstream, min_mainstream=min_mainstream, min_ratio=min_ratio
+    )
 
 
 def compute_signal_perspective_gap(pulse_score: float, mainstream_coverage_count: int) -> float:
