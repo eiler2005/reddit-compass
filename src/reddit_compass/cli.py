@@ -1384,7 +1384,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 data_release = data_release or str(pub["data_release_id"])
                 story_release = story_release or str(pub["story_release_id"])
                 trend_release = trend_release or str(pub["trend_release_id"])
-                if signal_release is None:
+                if not signal_release:
                     sr = engine_conn.execute(
                         """SELECT signal_release_id FROM signal_releases
                            WHERE data_release_id = ? ORDER BY created_at DESC LIMIT 1""",
@@ -1455,6 +1455,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     theme_catalog=theme_catalog,
                     pack_by_subreddit=pack_by_subreddit,
                     trend_method=args.trend_method,
+                    embed_model=args.embed_model,
                     review_model=args.review_model,
                     review_limit=int(args.review_limit),
                     review_runner=review_runner,
@@ -2117,7 +2118,12 @@ def build_parser() -> argparse.ArgumentParser:
     engine_cycle.add_argument("--profile", default="broad")
     engine_cycle.add_argument("--window", type=int, default=7)
     engine_cycle.add_argument(
-        "--trend-method", default="story_graph_v1", choices=["story_graph_v1", "embedding_v2"]
+        "--trend-method", default="embedding_v2", choices=["story_graph_v1", "embedding_v2"]
+    )
+    engine_cycle.add_argument(
+        "--embed-model",
+        default="minishlab/potion-base-8M",
+        help="Embedding model for embedding_v2 (model2vec, torch-free). Empty = no embeddings.",
     )
     engine_cycle.add_argument("--review-model", default="qwen3.6-flash")
     engine_cycle.add_argument(

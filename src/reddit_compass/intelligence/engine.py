@@ -32,7 +32,12 @@ from .clustering import (
     is_low_signal_title,
     normalize_title,
 )
-from .embeddings import DEFAULT_EMBEDDING_MODEL, encode_passages, top_k_cosine_pairs
+from .embeddings import (
+    DEFAULT_EMBEDDING_MODEL,
+    MODEL2VEC_DEFAULT,
+    encode_passages,
+    top_k_cosine_pairs,
+)
 from .engine_reviews import (
     STORY_REVIEW_PROMPT_VERSION,
     TREND_REVIEW_PROMPT_VERSION,
@@ -5281,7 +5286,8 @@ async def run_engine_cycle(
     window: int = 7,
     theme_catalog: dict[str, list[str]] | None = None,
     pack_by_subreddit: dict[str, str] | None = None,
-    trend_method: str = "story_graph_v1",
+    trend_method: str = "embedding_v2",
+    embed_model: str = MODEL2VEC_DEFAULT,
     review_model: str = "qwen3.6-flash",
     review_limit: int = 0,
     review_runner: Callable[[str, str], Awaitable[str]] | None = None,
@@ -5307,12 +5313,32 @@ async def run_engine_cycle(
     facets = create_facet_release(
         conn, data_release_id=data.release_id, theme_catalog=theme_catalog or {}
     )
+    # Кэш эмбеддингов для embedding_v2 (torch-free model2vec). При любой ошибке
+    # (пакет не установлен, нет сети для загрузки модели) — graceful fallback:
+    # stories/trends строятся без плотных векторов (trend_method → story_graph_v1).
+    embed_ok = False
+    if embed_model:
+        try:
+            cache_release_embeddings(conn, data_release_id=data.release_id, model_name=embed_model)
+            embed_ok = True
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "embedding cache failed (%s); falling back to story_graph_v1 trends", exc
+            )
+    story_params: dict[str, Any] = {"review_model": review_model}
+    if embed_ok:
+        story_params["embedding_model"] = embed_model
+    use_trend_method = (
+        trend_method if (trend_method != "embedding_v2" or embed_ok) else "story_graph_v1"
+    )
     stories = create_story_release(
         conn,
         facet_release_id=facets.facet_release_id,
         # review_model должен совпадать с моделью Qwen-разметки ниже, иначе кэш
         # llm_reviews не попадёт в apply_cached_story_reviews при следующем цикле.
-        params={"review_model": review_model},
+        params=story_params,
     )
     auto = auto_label_story_pairs(conn, stories.story_release_id)
     reviewed = 0
@@ -5353,7 +5379,7 @@ async def run_engine_cycle(
         trained = {}
         label_source = "skipped"
     trends = create_trend_release(
-        conn, story_release_id=stories.story_release_id, method=trend_method
+        conn, story_release_id=stories.story_release_id, method=use_trend_method
     )
     pulse_result: dict[str, Any] | None = None
     if pulse:
@@ -5393,6 +5419,8 @@ async def run_engine_cycle(
         "facet_release_id": facets.facet_release_id,
         "story_release_id": stories.story_release_id,
         "trend_release_id": trends.trend_release_id,
+        "trend_method": use_trend_method,
+        "embed_model": embed_model if embed_ok else "",
         "auto_labels": auto.get("added", 0),
         "reviewed_pairs": reviewed,
         "label_source": label_source,

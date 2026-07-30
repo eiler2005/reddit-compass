@@ -17,6 +17,10 @@ from typing import Any
 
 DEFAULT_EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
 LEXICAL_HASH_EMBEDDING_MODEL = "lexical-hash-v1"
+# Лёгкий torch-free бэкенд (статические дистиллированные эмбеддинги). Модели model2vec
+# лежат на HF под префиксом ``minishlab/``; используем их для embedding_v2 без torch.
+MODEL2VEC_DEFAULT = "minishlab/potion-base-8M"
+_MODEL2VEC_PREFIX = "minishlab/"
 _LEXICAL_DIMENSIONS = 384
 _TOKEN_PATTERN = re.compile(r"[\w$€£%.-]+", re.UNICODE)
 
@@ -30,6 +34,17 @@ def encode_passages(
     """Encode passages locally, failing clearly when the optional extra is absent."""
     if model_name == LEXICAL_HASH_EMBEDDING_MODEL:
         return [_lexical_hash_vector(text) for text in texts]
+
+    if model_name.startswith(_MODEL2VEC_PREFIX):
+        try:
+            m2v = importlib.import_module("model2vec")
+        except ImportError as exc:
+            raise RuntimeError(
+                "model2vec embeddings require the optional dependency: "
+                "install reddit-compass[embed] (or `pip install model2vec`)"
+            ) from exc
+        model = m2v.StaticModel.from_pretrained(model_name)
+        return [[float(value) for value in vector] for vector in model.encode(texts)]
 
     try:
         module = importlib.import_module("sentence_transformers")

@@ -26,6 +26,11 @@ engine = [
   "sentence-transformers>=4,<6",
   "spacy>=3.8,<4",
 ]
+# Лёгкий torch-free бэкенд эмбеддингов для embedding_v2 (статические model2vec).
+embed = [
+  "numpy>=2,<3",
+  "model2vec>=0.3,<1",
+]
 
 [project.scripts]
 reddit-compass = "reddit_compass.cli:main"

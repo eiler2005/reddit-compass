@@ -7,6 +7,18 @@
 
 ### Added
 
+- **Quality gates (допустимый уровень качества + защита от регрессий)**: `intelligence/quality.py`
+  считает метрики по immutable-релизу (overmerge, баланс рубрик новой таксономии, качество
+  имён трендов, доля `other` в Pulse) и проверяет их против абсолютных полов `QUALITY_FLOORS`
+  и baseline-снимка. CLI `engine quality report|check|snapshot` (`check` выходит с ненулевым
+  кодом при провале пола или регрессии → основа для CI/отката). `tests/test_quality.py`
+  кодирует те же полы как синтетические CI-инварианты. Эталон: `config/quality_baselines.json`.
+  Документация: `docs/QUALITY_GATES.md`.
+- **Trends v2 на проде через model2vec (torch-free)**: `embeddings.py` получил бэкенд
+  `model2vec` (модели `minishlab/*`, без torch/sentence-transformers); новый optional-extra
+  `embed`. `engine cycle` по умолчанию кэширует эмбеддинги и строит тренды методом
+  `embedding_v2` (c-TF-IDF имена, дедуп, производная); при отсутствии пакета/сети —
+  graceful fallback на `story_graph_v1`. Collector-образ ставит `.[embed]`.
 - **Learned story merge scoring (Фаза 3)**: dependency-light логистическая регрессия
   (`intelligence/story_scoring.py`, numpy) поверх `features_json`. Детерминированная
   авто-разметка `engine label auto` (без человека), обучение `engine label train`
@@ -179,6 +191,8 @@
   (1243/1257 сигналов с ненулевым gap).
 - **Trends v2 схлопывал корпус в один «тренд»** при отсутствии кэша плотных эмбеддингов:
   добавлен max-cluster guard (большая доля корпуса **и** большой абсолютный размер).
+- **`engine quality snapshot` не подтягивал Pulse**: дефолтный пустой `--signal-release`
+  блокировал авто-резолв signal_release (проверка `is None` вместо `not signal_release`).
 
 ### Validated on real frozen data (`2026-07-23_2026-07-29-broad-r1`, 4957 items)
 

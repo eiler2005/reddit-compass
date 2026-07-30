@@ -1,7 +1,10 @@
 """Deterministic dense retrieval without all-pairs persistence."""
 
+import pytest
+
 from reddit_compass.intelligence.embeddings import (
     LEXICAL_HASH_EMBEDDING_MODEL,
+    MODEL2VEC_DEFAULT,
     encode_passages,
     top_k_cosine_pairs,
 )
@@ -61,3 +64,16 @@ def test_top_k_cosine_pairs_is_order_independent() -> None:
     )
 
     assert forward == reverse
+
+
+def test_model2vec_dispatch_fails_clearly_or_encodes() -> None:
+    try:
+        import model2vec  # noqa: F401
+    except ImportError:
+        # Пакет не установлен → понятная ошибка, а не падение импорта модуля.
+        with pytest.raises(RuntimeError, match="model2vec"):
+            encode_passages(["hello world"], model_name=MODEL2VEC_DEFAULT)
+    else:
+        vectors = encode_passages(["hello world", "another text"], model_name=MODEL2VEC_DEFAULT)
+        assert len(vectors) == 2
+        assert all(len(v) > 0 for v in vectors)
