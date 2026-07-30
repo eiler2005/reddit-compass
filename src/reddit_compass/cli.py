@@ -1354,6 +1354,82 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             )
             print(json.dumps({"label_id": label_id}, indent=2))
             return
+        if args.engine_group == "quality":
+            from .intelligence.quality import (
+                compute_quality,
+                evaluate_floors,
+                evaluate_regressions,
+                load_baseline,
+                save_baseline,
+            )
+
+            data_release = args.data_release
+            story_release = args.story_release
+            trend_release = args.trend_release
+            signal_release = args.signal_release
+            if not (data_release and story_release and trend_release):
+                row = engine_conn.execute(
+                    "SELECT current_publication_id FROM published_channels WHERE channel = ?",
+                    (args.channel,),
+                ).fetchone()
+                if row is None:
+                    raise SystemExit(
+                        f"No publication for channel {args.channel}; pass releases explicitly"
+                    )
+                pub = engine_conn.execute(
+                    """SELECT data_release_id, story_release_id, trend_release_id
+                       FROM radar_publications WHERE publication_id = ?""",
+                    (row["current_publication_id"],),
+                ).fetchone()
+                data_release = data_release or str(pub["data_release_id"])
+                story_release = story_release or str(pub["story_release_id"])
+                trend_release = trend_release or str(pub["trend_release_id"])
+                if signal_release is None:
+                    sr = engine_conn.execute(
+                        """SELECT signal_release_id FROM signal_releases
+                           WHERE data_release_id = ? ORDER BY created_at DESC LIMIT 1""",
+                        (data_release,),
+                    ).fetchone()
+                    signal_release = str(sr["signal_release_id"]) if sr else None
+            metrics = compute_quality(
+                engine_conn,
+                data_release_id=data_release,
+                story_release_id=story_release,
+                trend_release_id=trend_release,
+                signal_release_id=signal_release,
+            )
+            floors = evaluate_floors(metrics)
+            if args.quality_action == "snapshot":
+                save_baseline(Path(args.out), metrics)
+                print(
+                    json.dumps(
+                        {"saved": args.out, "metrics": metrics}, ensure_ascii=False, indent=2
+                    )
+                )
+                return
+            if args.quality_action == "report":
+                print(
+                    json.dumps(
+                        {"metrics": metrics, "floors": [asdict(f) for f in floors]},
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return
+            baseline = load_baseline(Path(args.baseline))
+            regressions = evaluate_regressions(metrics, baseline)
+            floor_fail = [asdict(f) for f in floors if not f.passed]
+            reg_fail = [r for r in regressions if r["regressed"]]
+            print(
+                json.dumps(
+                    {"floors_failed": floor_fail, "regressions": reg_fail},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            if floor_fail or reg_fail:
+                raise SystemExit(1)
+            return
         if args.engine_group == "cycle":
             from .signals import call_qwen_json
 
@@ -2057,6 +2133,29 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_cycle.add_argument("--allow-partial", action="store_true")
     engine_cycle.add_argument("--no-pulse", action="store_true", help="Skip Reddit Pulse step.")
+
+    engine_quality = engine_sub.add_parser(
+        "quality",
+        help="Compute quality metrics for a release; report / snapshot / check against baseline",
+    )
+    engine_quality.add_argument("quality_action", choices=["report", "check", "snapshot"])
+    engine_quality.add_argument(
+        "--channel", default="shadow", help="Resolve releases from this channel."
+    )
+    engine_quality.add_argument("--data-release", default="")
+    engine_quality.add_argument("--story-release", default="")
+    engine_quality.add_argument("--trend-release", default="")
+    engine_quality.add_argument("--signal-release", default="")
+    engine_quality.add_argument(
+        "--baseline",
+        default="config/quality_baselines.json",
+        help="Baseline snapshot for `check` (regression detection).",
+    )
+    engine_quality.add_argument(
+        "--out",
+        default="config/quality_baselines.json",
+        help="Where `snapshot` writes the baseline.",
+    )
 
     engine_publish = engine_sub.add_parser("publish", help="Publish immutable Radar version")
     engine_publish.add_argument("--story-release", required=True)

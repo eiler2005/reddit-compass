@@ -386,6 +386,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | 21 sources, 5 clusters |
 | [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) | Text diagrams from source collection to News, Stories, Trends and Radar |
 | [`docs/DATA_FLOW_DIAGRAMS.md`](docs/DATA_FLOW_DIAGRAMS.md) | Mermaid-схемы: Reddit → stories → trends → Reddit Pulse → публикации |
+| [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) | Полы качества + регрессионный harness (`engine quality report/check/snapshot`) |
 | [`docs/ENGINE_REVIEW_V3.md`](docs/ENGINE_REVIEW_V3.md) | Ревью Engine v3 + план фаз 1–8 со статусом реализации |
 | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) | Canonical immutable Engine workflow, gates and rollback |
 | [`docs/CLUSTER_LAB.md`](docs/CLUSTER_LAB.md) | Deprecated Cluster Lab compatibility guide |

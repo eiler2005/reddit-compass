@@ -1,0 +1,326 @@
+"""Quality gates for the Story / Trend / Reddit-Pulse layers (Фаза «100%» / шаг 4).
+
+Зачем: при изменении настроек слияния/таксономии/трендов нужен способ *количественно*
+понять, стало ли хуже, и при необходимости откатить изменение. Этот модуль считает
+набор метрик по immutable-релизу и сравнивает их с двумя вещами:
+
+* **QUALITY_FLOORS** — абсолютный «допустимый уровень качества» (например, overmerge
+  одно-провайдерных историй == 0, ни одной пустой рубрики, ни одного тренда-дубля).
+  Релиз либо проходит полы, либо нет — это сигнал «у нас проблема».
+* **baseline snapshot** — снимок метрик эталонного релиза (``config/quality_baselines.json``);
+  ``check`` дополнительно ловит *регрессии* относительно снимка (метрика ухудшилась
+  сильнее допуска). Это позволяет «вернуть тесты назад»: прогнал изменение →
+  ``engine quality check`` красный → откат.
+
+Метрики считаются по замороженному релизу, таксономия пересчитывается по новой схеме
+прямо из текстов item'ов (stored domain_ids отражают старую таксономию на момент freeze).
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, cast
+
+from .taxonomy import RUBRICS, classify_domains, rubric_for_domains
+
+# Голые глаголы / generic-фразы, которые НЕ являются валидным именем тренда.
+_BARE_VERBS = frozenset(
+    {
+        "fall",
+        "rise",
+        "raise",
+        "warn",
+        "approve",
+        "launch",
+        "layoff",
+        "sue",
+        "ban",
+        "drop",
+        "grow",
+        "cut",
+        "release",
+        "buy",
+        "sell",
+        "hire",
+        "delay",
+        "reject",
+        "block",
+        "leak",
+        "strike",
+        "tumble",
+        "crash",
+    }
+)
+_GENERIC_PHRASES = frozenset(
+    {
+        "ai agent",
+        "artificial intelligence",
+        "machine learning",
+        "open source",
+        "social media",
+        "united states",
+        "white house",
+        "regulatory friction",
+        "legal risk",
+        "security breach",
+    }
+)
+
+
+def _trend_value(name: str) -> str:
+    # graph-имена имеют вид "Паттерн: X" / "Боль: X"; v2-имена — сырые фразы.
+    for prefix in ("Паттерн: ", "Боль: ", "Тема: "):
+        if name.startswith(prefix):
+            return name[len(prefix) :].strip().lower()
+    return name.strip().lower()
+
+
+def is_bad_trend_name(name: str) -> bool:
+    """Имя тренда неприемлемо: один токен, голый глагол или generic-фраза."""
+
+    value = _trend_value(name)
+    if not value:
+        return True
+    if len(value.split()) == 1 and (value in _BARE_VERBS or len(value) <= 3):
+        return True
+    return value in _BARE_VERBS or value in _GENERIC_PHRASES
+
+
+# Абсолютный допустимый уровень качества. ``op`` = "max" (value <= floor) / "min".
+QUALITY_FLOORS: dict[str, dict[str, Any]] = {
+    "stories_overmerge_ge5": {
+        "op": "max",
+        "value": 0,
+        "desc": "single-provider stories with >=5 items",
+    },
+    "stories_overmerge_ge8": {
+        "op": "max",
+        "value": 0,
+        "desc": "single-provider stories with >=8 items",
+    },
+    "taxonomy_ai_tech_share": {
+        "op": "max",
+        "value": 50.0,
+        "desc": "ai_technology share of items, %",
+    },
+    "taxonomy_other_share": {"op": "max", "value": 40.0, "desc": "unclassified (other) share, %"},
+    "taxonomy_max_rubric_share": {
+        "op": "max",
+        "value": 50.0,
+        "desc": "largest top-level rubric share, %",
+    },
+    "taxonomy_empty_rubrics": {
+        "op": "max",
+        "value": 0,
+        "desc": "top-level rubrics with zero items",
+    },
+    "trends_bad_name_count": {
+        "op": "max",
+        "value": 0,
+        "desc": "trends with single-token/bare-verb/generic name",
+    },
+    "trends_duplicate_name_count": {"op": "max", "value": 0, "desc": "duplicate trend names"},
+    "pulse_other_share": {
+        "op": "max",
+        "value": 35.0,
+        "desc": "Pulse signals classified as other, %",
+    },
+}
+
+
+@dataclass(frozen=True)
+class FloorResult:
+    metric: str
+    value: float
+    floor: float
+    op: str
+    passed: bool
+    desc: str
+
+
+def compute_quality(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    story_release_id: str,
+    trend_release_id: str,
+    signal_release_id: str | None = None,
+) -> dict[str, Any]:
+    """Считает метрики качества по immutable-релизу."""
+
+    def q(sql: str, *args: Any) -> list[sqlite3.Row]:
+        return cast(list[sqlite3.Row], conn.execute(sql, args).fetchall())
+
+    stories = q(
+        "SELECT source_count, item_count FROM engine_stories WHERE story_release_id = ?",
+        story_release_id,
+    )
+    total = len(stories)
+    single = sum(1 for s in stories if s["item_count"] == 1)
+    multi = sum(1 for s in stories if s["item_count"] > 1)
+    cross = sum(1 for s in stories if s["source_count"] > 1)
+    overmerge_ge5 = sum(1 for s in stories if s["source_count"] == 1 and s["item_count"] >= 5)
+    overmerge_ge8 = sum(1 for s in stories if s["source_count"] == 1 and s["item_count"] >= 8)
+
+    items = q(
+        "SELECT title, excerpt, provider, source_section FROM release_items WHERE release_id = ?",
+        data_release_id,
+    )
+    n = len(items)
+    dom: Counter[str] = Counter()
+    rub: Counter[str] = Counter()
+    ai_only = 0
+    for r in items:
+        d = classify_domains(r["title"], r["excerpt"] or "", r["provider"], r["source_section"])
+        dom.update(d)
+        rub[rubric_for_domains(d)] += 1
+        if d == ["ai_technology"]:
+            ai_only += 1
+    # Полы по рубрикам считаем по каноническому набору RUBRICS (catch-all "other" — отдельно).
+    rubric_ids = [rb.rubric_id for rb in RUBRICS]
+    max_rubric = max((rub.get(rid, 0) for rid in rubric_ids), default=0)
+    empty_rubrics = sum(1 for rid in rubric_ids if rub.get(rid, 0) == 0)
+
+    trends = q("SELECT name_ru FROM engine_trends WHERE trend_release_id = ?", trend_release_id)
+    names = [r["name_ru"] for r in trends]
+    bad_names = sum(1 for nm in names if is_bad_trend_name(nm))
+    dup_names = sum(cnt - 1 for cnt in Counter(names).values() if cnt > 1)
+
+    metrics: dict[str, Any] = {
+        "data_release_id": data_release_id,
+        "story_release_id": story_release_id,
+        "trend_release_id": trend_release_id,
+        "signal_release_id": signal_release_id or "",
+        "stories_total": total,
+        "stories_single": single,
+        "stories_multi": multi,
+        "stories_cross_source": cross,
+        "stories_overmerge_ge5": overmerge_ge5,
+        "stories_overmerge_ge8": overmerge_ge8,
+        "stories_compression": round(total / n, 4) if n else 0.0,
+        "taxonomy_items": n,
+        "taxonomy_ai_tech_share": round(100 * dom.get("ai_technology", 0) / n, 2) if n else 0.0,
+        "taxonomy_other_share": round(100 * dom.get("other", 0) / n, 2) if n else 0.0,
+        "taxonomy_ai_only_share": round(100 * ai_only / n, 2) if n else 0.0,
+        "taxonomy_max_rubric_share": round(100 * max_rubric / n, 2) if n else 0.0,
+        "taxonomy_empty_rubrics": empty_rubrics,
+        "taxonomy_rubric_dist": dict(rub.most_common()),
+        "trends_count": len(names),
+        "trends_bad_name_count": bad_names,
+        "trends_duplicate_name_count": dup_names,
+    }
+
+    if signal_release_id:
+        tot = q(
+            "SELECT COUNT(*) x FROM community_signals WHERE signal_release_id = ?",
+            signal_release_id,
+        )[0]["x"]
+        if tot:
+            oth = q(
+                "SELECT COUNT(*) x FROM community_signals "
+                "WHERE signal_release_id = ? AND signal_type = 'other'",
+                signal_release_id,
+            )[0]["x"]
+            gnz = q(
+                "SELECT COUNT(*) x FROM community_signals "
+                "WHERE signal_release_id = ? AND perspective_gap > 0",
+                signal_release_id,
+            )[0]["x"]
+            mc = q(
+                "SELECT COUNT(*) x FROM community_signals "
+                "WHERE signal_release_id = ? AND mainstream_coverage_count > 0",
+                signal_release_id,
+            )[0]["x"]
+            mrow = q(
+                "SELECT metrics_json FROM signal_releases WHERE signal_release_id = ?",
+                signal_release_id,
+            )[0]
+            sm = json.loads(mrow["metrics_json"])
+            metrics.update(
+                {
+                    "pulse_total": tot,
+                    "pulse_other_share": round(100 * oth / tot, 2),
+                    "pulse_gap_nonzero_share": round(100 * gnz / tot, 2),
+                    "pulse_mainstream_covered_share": round(100 * mc / tot, 2),
+                    "pulse_gap_available": bool(sm.get("perspective_gap_available")),
+                }
+            )
+    return metrics
+
+
+def evaluate_floors(metrics: dict[str, Any]) -> list[FloorResult]:
+    """Проверяет метрики против абсолютных полов качества."""
+
+    results: list[FloorResult] = []
+    for metric, spec in QUALITY_FLOORS.items():
+        if metric not in metrics:
+            continue  # напр. pulse_* отсутствуют, если нет signal_release
+        value = float(metrics[metric])
+        floor = float(spec["value"])
+        passed = value <= floor if spec["op"] == "max" else value >= floor
+        results.append(
+            FloorResult(
+                metric=metric,
+                value=value,
+                floor=floor,
+                op=spec["op"],
+                passed=passed,
+                desc=spec["desc"],
+            )
+        )
+    return results
+
+
+# Метрики, по которым ловим регрессию относительно baseline-снимка, и допуск (в единицах метрики).
+REGRESSION_METRICS: dict[str, float] = {
+    "stories_overmerge_ge5": 0,
+    "stories_overmerge_ge8": 0,
+    "stories_cross_source": 10,  # падение кросс-источниковых историй сверх допуска
+    "taxonomy_ai_tech_share": 5,
+    "taxonomy_other_share": 5,
+    "trends_bad_name_count": 0,
+    "trends_duplicate_name_count": 0,
+}
+
+
+def evaluate_regressions(metrics: dict[str, Any], baseline: dict[str, Any]) -> list[dict[str, Any]]:
+    """Сравнивает метрики со снимком: для 'меньше=лучше' рост сверх допуска = регрессия;
+    для cross_source — падение сверх допуска."""
+
+    out: list[dict[str, Any]] = []
+    for metric, tol in REGRESSION_METRICS.items():
+        if metric not in metrics or metric not in baseline:
+            continue
+        cur = float(metrics[metric])
+        base = float(baseline[metric])
+        if metric == "stories_cross_source":
+            regressed = cur < base - tol
+            delta = round(cur - base, 3)
+        else:
+            regressed = cur > base + tol
+            delta = round(cur - base, 3)
+        out.append(
+            {
+                "metric": metric,
+                "current": cur,
+                "baseline": base,
+                "delta": delta,
+                "regressed": regressed,
+            }
+        )
+    return out
+
+
+def load_baseline(path: Path) -> dict[str, Any]:
+    data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
+    return data
+
+
+def save_baseline(path: Path, metrics: dict[str, Any]) -> None:
+    path.write_text(
+        json.dumps(metrics, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8"
+    )
