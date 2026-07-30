@@ -24,6 +24,15 @@
     </div>
 
     {% if pulse_summary %}
+    {% if not pulse_summary.perspective_gap_available %}
+    <section class="section">
+        <p class="section-note" style="color: var(--warning);">
+            ⚠️ Разрыв перспективы не измерим на этом релизе: Reddit и mainstream представлены
+            несбалансированно. Блок «разрыв» ниже пуст не потому, что его нет, а потому что
+            сравнивать не с чем.
+        </p>
+    </section>
+    {% endif %}
     <section class="section">
         <div class="kpi-grid">
             <div class="kpi-card">
@@ -147,6 +156,9 @@
                 <header class="pulse-card-header">
                     <span class="signal-type-badge signal-type-gap">gap</span>
                     <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
+                    {% if s.perspective_gap %}
+                    <span class="scope-badge scope-community_only" title="Разрыв перспективы">разрыв {{ "%.2f"|format(s.perspective_gap) }}</span>
+                    {% endif %}
                 </header>
                 <h3 class="pulse-title">
                     <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>

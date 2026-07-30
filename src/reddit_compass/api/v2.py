@@ -1827,6 +1827,7 @@ class PulseSignalOut(BaseModel):
     is_self: bool = False
     link_flair_text: str = ""
     mainstream_coverage_count: int = 0
+    perspective_gap: float = 0
 
 
 class PulseListOut(BaseModel):
@@ -1843,6 +1844,7 @@ class PulseSummaryOut(BaseModel):
     top_pain: list[PulseSignalOut]
     top_ai: list[PulseSignalOut]
     mainstream_gap: list[PulseSignalOut]
+    perspective_gap_available: bool = False
 
 
 def _engine_pulse_signals(
@@ -1905,7 +1907,7 @@ def _engine_pulse_signals(
         "cs.subreddit_percentile, cs.comment_velocity, "
         "cs.discussion_depth, cs.cross_subreddit_repetition, cs.novelty, "
         "cs.domain_ids_json, cs.theme_ids_json, cs.pain_points_json, "
-        "cs.mainstream_coverage_count, "
+        "cs.mainstream_coverage_count, cs.perspective_gap, "
         "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) as reddit_score, "
         "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) as reddit_comments, "
         "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) as upvote_ratio, "
@@ -1943,6 +1945,7 @@ def _engine_pulse_signals(
                 "theme_ids": json.loads(r["theme_ids_json"] or "[]"),
                 "pain_points": json.loads(r["pain_points_json"] or "[]"),
                 "mainstream_coverage_count": r["mainstream_coverage_count"],
+                "perspective_gap": r["perspective_gap"],
                 "reddit_score": r["reddit_score"],
                 "reddit_comments": r["reddit_comments"],
                 "upvote_ratio": r["upvote_ratio"],
@@ -2053,6 +2056,13 @@ def reddit_pulse_summary(
     ).fetchall()
     by_type = {r["signal_type"]: r["cnt"] for r in type_rows}
 
+    metrics_row = conn.execute(
+        "SELECT metrics_json FROM signal_releases WHERE signal_release_id = ?",
+        (sig_id,),
+    ).fetchone()
+    metrics = json.loads(metrics_row["metrics_json"] or "{}") if metrics_row else {}
+    gap_available = bool(metrics.get("perspective_gap_available", False))
+
     def _top(signal_type: str | None = None, lim: int = 10) -> list[PulseSignalOut]:
         items, _ = _engine_pulse_signals(
             conn,
@@ -2076,16 +2086,21 @@ def reddit_pulse_summary(
         top_pulse=_top(),
         top_pain=_top_many(["pain_point", "complaint"]),
         top_ai=_top_many(["ai_capability", "ai_risk", "ai_tools"]),
-        mainstream_gap=[
-            PulseSignalOut(**item)
-            for item in _engine_pulse_signals(
-                conn,
-                sig_id,
-                limit=50,
-                data_release_id=data_release,
-            )[0]
-            if item.get("pulse_score", 0) >= 60 and item.get("mainstream_coverage_count", 0) < 2
-        ][:10],
+        mainstream_gap=sorted(
+            (
+                PulseSignalOut(**item)
+                for item in _engine_pulse_signals(
+                    conn,
+                    sig_id,
+                    limit=50,
+                    data_release_id=data_release,
+                )[0]
+                if item.get("pulse_score", 0) >= 60 and item.get("mainstream_coverage_count", 0) < 2
+            ),
+            key=lambda item: item.perspective_gap,
+            reverse=True,
+        )[:10],
+        perspective_gap_available=gap_available,
     )
 
 

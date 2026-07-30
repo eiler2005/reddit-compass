@@ -3722,9 +3722,10 @@ def create_trend_release(
             story_release=story_release,
             params=params,
         )
-        history_status = "pending"
     else:
-        trends, history_status = _discover_trends_graph(
+        # history_status из графа игнорируем: авторитетный статус считается ниже по
+        # числу finalized-релизов (мёртвый код из ревью v3 §3.5).
+        trends, _ = _discover_trends_graph(
             stories,
             story_items,
             facets,
