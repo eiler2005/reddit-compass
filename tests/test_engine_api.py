@@ -12,9 +12,10 @@ from fastapi.testclient import TestClient
 from reddit_compass.api.app import create_app
 from reddit_compass.api.ui import _build_today_reading_list, _today_change_candidates
 from reddit_compass.db import get_db
-from reddit_compass.intelligence.engine import engine_db
+from reddit_compass.intelligence.engine import engine_db, store_quality_report
 from reddit_compass.intelligence.migrations import migrate
 from reddit_compass.intelligence.models import SourceHealth
+from reddit_compass.intelligence.quality import FloorResult
 from reddit_compass.intelligence.repository import save_source_health, upsert_run
 
 
@@ -605,6 +606,29 @@ def test_runs_page_exposes_collection_to_publication_stages(engine_client: TestC
     corpus.commit()
     corpus.close()
 
+    engine = engine_db(Path(os.environ["RC_ENGINE_DB_PATH"]))
+    try:
+        store_quality_report(
+            engine,
+            data_release_id="data_test",
+            story_release_id="story_test",
+            trend_release_id="trend_test",
+            signal_release_id="signals_test",
+            metrics={"stories_total": 1},
+            floors=[
+                FloorResult(
+                    metric="stories_overmerge_ge5",
+                    value=0,
+                    floor=0,
+                    op="max",
+                    passed=True,
+                    desc="fixture floor",
+                )
+            ],
+        )
+    finally:
+        engine.close()
+
     response = engine_client.get("/runs")
 
     assert response.status_code == 200
@@ -614,6 +638,8 @@ def test_runs_page_exposes_collection_to_publication_stages(engine_client: TestC
     assert "Quality gate" in response.text
     assert "Publication" in response.text
     assert "publication_test" in response.text
+    assert "все абсолютные полы пройдены" in response.text
+    assert "результат не записан для этой версии" not in response.text
 
 
 def test_reddit_pulse_api_filters_by_release_date_and_sanitizes_url(

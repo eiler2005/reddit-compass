@@ -1198,6 +1198,10 @@ a.story-card {
     background: #d99b32;
 }
 
+.pipeline-stage-failed .pipeline-dot {
+    background: #e05a5a;
+}
+
 .pipeline-stage-running .pipeline-dot,
 .pipeline-stage-building .pipeline-dot {
     background: #5794ff;

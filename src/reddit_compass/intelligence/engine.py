@@ -54,7 +54,7 @@ from .story_scoring import MergeModel, auto_label_pair, extract_feature_vector, 
 from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
-ENGINE_SCHEMA_VERSION = 5
+ENGINE_SCHEMA_VERSION = 6
 DEFAULT_STORY_METHOD = "hybrid_v2"
 DEFAULT_TREND_METHOD = "story_graph_v1"
 
@@ -297,6 +297,21 @@ CREATE TABLE IF NOT EXISTS llm_reviews (
     valid             INTEGER NOT NULL DEFAULT 0,
     created_at        TEXT NOT NULL,
     UNIQUE(model, prompt_version, input_hash)
+);
+
+-- Quality is derived from immutable releases but stored separately, so the
+-- operational Run journal never has to recompute expensive taxonomy metrics
+-- for every historical release during an HTTP request.
+CREATE TABLE IF NOT EXISTS engine_quality_reports (
+    data_release_id   TEXT NOT NULL,
+    story_release_id  TEXT NOT NULL,
+    trend_release_id  TEXT NOT NULL,
+    signal_release_id TEXT NOT NULL DEFAULT '',
+    metrics_json      TEXT NOT NULL DEFAULT '{}',
+    floors_json       TEXT NOT NULL DEFAULT '[]',
+    passed            INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL,
+    PRIMARY KEY (data_release_id, story_release_id, trend_release_id)
 );
 
 CREATE TABLE IF NOT EXISTS embedding_vectors (
@@ -684,6 +699,52 @@ def _ensure_engine_column(
     columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+
+
+def store_quality_report(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    story_release_id: str,
+    trend_release_id: str,
+    signal_release_id: str | None,
+    metrics: dict[str, Any],
+    floors: list[Any],
+) -> dict[str, Any]:
+    """Persist an immutable-release quality result for fast operational reads."""
+    floor_payloads = [asdict(floor) for floor in floors]
+    passed = bool(floor_payloads) and all(bool(floor["passed"]) for floor in floor_payloads)
+    report = {
+        "passed": passed,
+        "failed": [str(floor["metric"]) for floor in floor_payloads if not floor["passed"]],
+        "metrics": metrics,
+        "floors": floor_payloads,
+    }
+    with conn:
+        conn.execute(
+            """INSERT INTO engine_quality_reports (
+                   data_release_id, story_release_id, trend_release_id, signal_release_id,
+                   metrics_json, floors_json, passed, created_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(data_release_id, story_release_id, trend_release_id)
+               DO UPDATE SET
+                   signal_release_id = excluded.signal_release_id,
+                   metrics_json = excluded.metrics_json,
+                   floors_json = excluded.floors_json,
+                   passed = excluded.passed,
+                   created_at = excluded.created_at""",
+            (
+                data_release_id,
+                story_release_id,
+                trend_release_id,
+                signal_release_id or "",
+                json.dumps(metrics, ensure_ascii=False, sort_keys=True),
+                json.dumps(floor_payloads, ensure_ascii=False, sort_keys=True),
+                int(passed),
+                now_iso(),
+            ),
+        )
+    return report
 
 
 def open_corpus_readonly(path: Path) -> sqlite3.Connection:
@@ -5581,7 +5642,16 @@ async def run_engine_cycle(
         signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
     )
     quality_floors = evaluate_floors(quality_metrics)
-    quality_passed = bool(quality_floors) and all(floor.passed for floor in quality_floors)
+    quality_report = store_quality_report(
+        conn,
+        data_release_id=data.release_id,
+        story_release_id=stories.story_release_id,
+        trend_release_id=trends.trend_release_id,
+        signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
+        metrics=quality_metrics,
+        floors=quality_floors,
+    )
+    quality_passed = bool(quality_report["passed"])
     publication_id = ""
     publication_blocked_reason = ""
     if publish_channel:
@@ -5631,9 +5701,7 @@ async def run_engine_cycle(
         "publication_id": publication_id,
         "publication_blocked_reason": publication_blocked_reason,
         "quality": {
-            "passed": quality_passed,
-            "metrics": quality_metrics,
-            "floors": [asdict(floor) for floor in quality_floors],
+            **quality_report,
             "story_evaluation": story_evaluation,
             "trend_evaluation": trend_evaluation,
         },

@@ -1729,35 +1729,52 @@ def runs_page(
                         str(publication["data_release_id"]), dict(publication)
                     )
 
-                from ..intelligence.quality import compute_quality, evaluate_floors
-
                 quality_by_data: dict[str, dict[str, object]] = {}
-                for data_release_id in data_by_release:
+                # ``engine_quality_reports`` is written by ``engine cycle`` and
+                # ``engine quality``.  The run journal is a read model: it must
+                # never recompute taxonomy and clustering metrics for every
+                # historical release while serving an HTTP request.
+                try:
+                    quality_rows = engine_conn.execute(
+                        f"""SELECT data_release_id, story_release_id, trend_release_id,
+                                   floors_json, passed, created_at
+                            FROM engine_quality_reports
+                            WHERE data_release_id IN ({placeholders})
+                            ORDER BY created_at DESC""",
+                        release_ids,
+                    ).fetchall()
+                except sqlite3.Error:
+                    # Older Engine DBs are still readable during a rolling
+                    # deploy.  Missing persisted reports are shown as such;
+                    # source and release facts must remain available.
+                    quality_rows = []
+
+                for quality_row in quality_rows:
+                    data_release_id = str(quality_row["data_release_id"])
+                    if data_release_id in quality_by_data:
+                        continue
                     facet = facets_by_data.get(data_release_id)
                     story = stories_by_facet.get(str(facet["facet_release_id"])) if facet else None
                     trend = trends_by_story.get(str(story["story_release_id"])) if story else None
                     if not story or not trend:
                         continue
+                    if str(quality_row["story_release_id"]) != str(
+                        story["story_release_id"]
+                    ) or str(quality_row["trend_release_id"]) != str(trend["trend_release_id"]):
+                        continue
                     try:
-                        metrics = compute_quality(
-                            engine_conn,
-                            data_release_id=data_release_id,
-                            story_release_id=str(story["story_release_id"]),
-                            trend_release_id=str(trend["trend_release_id"]),
-                        )
-                        floors = evaluate_floors(metrics)
-                    except (sqlite3.Error, ValueError):
-                        # The run ledger remains useful even while an older
-                        # experiment lacks one of the newer quality inputs.
-                        quality_by_data[data_release_id] = {
-                            "passed": False,
-                            "failed": ["quality_unavailable"],
-                        }
-                    else:
-                        quality_by_data[data_release_id] = {
-                            "passed": bool(floors) and all(floor.passed for floor in floors),
-                            "failed": [floor.metric for floor in floors if not floor.passed],
-                        }
+                        floors = json.loads(str(quality_row["floors_json"]))
+                    except (TypeError, ValueError, json.JSONDecodeError):
+                        floors = []
+                    quality_by_data[data_release_id] = {
+                        "passed": bool(quality_row["passed"]),
+                        "failed": [
+                            str(floor.get("metric", "quality_invalid"))
+                            for floor in floors
+                            if isinstance(floor, dict) and not bool(floor.get("passed"))
+                        ],
+                        "created_at": str(quality_row["created_at"]),
+                    }
 
                 for release_record in releases_by_run.values():
                     data_release_id = str(release_record["release_id"])
@@ -1844,14 +1861,20 @@ def runs_page(
             },
             {
                 "name": "Quality gate",
-                "status": "passed" if quality and quality.get("passed") else "pending",
+                "status": (
+                    "passed"
+                    if quality and quality.get("passed")
+                    else "failed"
+                    if quality
+                    else "pending"
+                ),
                 "detail": (
                     "все абсолютные полы пройдены"
                     if quality and quality.get("passed")
                     else (
                         "не пройдены: " + ", ".join(cast(list[str], quality.get("failed", [])))
                         if quality
-                        else "не рассчитан"
+                        else "результат ещё не записан для этой версии"
                     )
                 ),
             },

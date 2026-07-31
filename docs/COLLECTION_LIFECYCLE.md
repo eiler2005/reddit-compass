@@ -182,6 +182,14 @@ Quality gate считает overmerge, coverage, разнообразие руб
 регрессии относительно baseline. Публикация не запускается при failed floor, partial input или
 отсутствии production gate. Последняя хорошая publication продолжает обслуживать GUI.
 
+Результат этой проверки сохраняется в `trend_engine.db.engine_quality_reports` с ключом
+`DataRelease + StoryRelease + TrendRelease`. Это часть versioned Engine, а не кэш живой страницы:
+повторная проверка той же тройки обновляет её audit-запись, а другой Story/Trend attempt получает
+свою. Поэтому `/runs` только читает уже записанный outcome и не пересчитывает всю taxonomy для
+каждого исторического run во время HTTP-запроса. У старого release может не быть этой записи:
+интерфейс показывает «результат ещё не записан для этой версии», а не подменяет отсутствие
+проверки зелёным статусом.
+
 ## 4. Run journal в интерфейсе
 
 `/runs` — не дашборд трендов, а раскрываемый журнал операций. Каждая строка раскрывается и
@@ -195,6 +203,11 @@ Quality gate считает overmerge, coverage, разнообразие руб
 5. Quality gate             passed или конкретные непрошедшие floors
 6. Publication              channel, current pointer и input status
 ```
+
+Строка запуска раскрывается нативным `<details>` и показывает source-level health, IDs
+immutable версий и шесть стадий. Цвет — лишь дополнительный сигнал: текст стадии всегда
+различает `passed`, `failed`, `pending`, `partial` и `published`. Раскрытие полностью
+read-only: оно не запускает адаптеры, Qwen или publication.
 
 Раскрытие не является кнопкой «запустить»: web UI намеренно read-only. Оно объясняет, почему
 Today/Radar показывает предыдущую версию, preview или недостаточную историю. На коротком Today

@@ -43,12 +43,14 @@ from reddit_compass.intelligence.engine import (
     publish_radar,
     rollback_publication,
     run_engine_cycle,
+    store_quality_report,
     store_story_review_response,
     train_story_merge_model,
     verify_data_release,
 )
 from reddit_compass.intelligence.migrations import migrate
 from reddit_compass.intelligence.models import ContentItem, Observation, SourceHealth
+from reddit_compass.intelligence.quality import FloorResult
 from reddit_compass.intelligence.repository import (
     save_source_health,
     upsert_items,
@@ -62,6 +64,51 @@ def test_engine_db_uses_wal_for_concurrent_api_reads(tmp_path: Path) -> None:
 
     assert str(engine.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal"
     assert int(engine.execute("PRAGMA busy_timeout").fetchone()[0]) == 10000
+
+
+def test_quality_report_is_persisted_by_immutable_release_identity(tmp_path: Path) -> None:
+    engine = engine_db(tmp_path / "trend_engine.db")
+    floor = FloorResult(
+        metric="stories_overmerge_ge5",
+        value=0,
+        floor=0,
+        op="max",
+        passed=True,
+        desc="no overmerged stories",
+    )
+
+    first = store_quality_report(
+        engine,
+        data_release_id="data_test",
+        story_release_id="stories_test",
+        trend_release_id="trends_test",
+        signal_release_id=None,
+        metrics={"stories_total": 12},
+        floors=[floor],
+    )
+    second = store_quality_report(
+        engine,
+        data_release_id="data_test",
+        story_release_id="stories_test",
+        trend_release_id="trends_test",
+        signal_release_id="signals_test",
+        metrics={"stories_total": 13},
+        floors=[floor],
+    )
+    row = engine.execute(
+        """SELECT signal_release_id, metrics_json, floors_json, passed
+           FROM engine_quality_reports
+           WHERE data_release_id = ? AND story_release_id = ? AND trend_release_id = ?""",
+        ("data_test", "stories_test", "trends_test"),
+    ).fetchone()
+
+    assert first["passed"] is True
+    assert second["passed"] is True
+    assert row is not None
+    assert row["signal_release_id"] == "signals_test"
+    assert json.loads(str(row["metrics_json"]))["stories_total"] == 13
+    assert json.loads(str(row["floors_json"]))[0]["metric"] == "stories_overmerge_ge5"
+    assert row["passed"] == 1
 
 
 def test_data_release_is_frozen_and_checksum_verified(tmp_path: Path) -> None:

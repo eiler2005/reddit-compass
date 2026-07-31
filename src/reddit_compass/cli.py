@@ -688,6 +688,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         publish_radar,
         rollback_publication,
         run_engine_cycle,
+        store_quality_report,
         store_story_review_response,
         store_trend_review_response,
         train_story_merge_model,
@@ -1458,6 +1459,15 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 signal_release_id=signal_release,
             )
             floors = evaluate_floors(metrics)
+            report = store_quality_report(
+                engine_conn,
+                data_release_id=data_release,
+                story_release_id=story_release,
+                trend_release_id=trend_release,
+                signal_release_id=signal_release,
+                metrics=metrics,
+                floors=floors,
+            )
             if args.quality_action == "snapshot":
                 save_baseline(Path(args.out), metrics)
                 print(
@@ -1469,7 +1479,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             if args.quality_action == "report":
                 print(
                     json.dumps(
-                        {"metrics": metrics, "floors": [asdict(f) for f in floors]},
+                        report,
                         ensure_ascii=False,
                         indent=2,
                     )

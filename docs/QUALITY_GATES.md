@@ -6,6 +6,12 @@
 > [`src/reddit_compass/intelligence/quality.py`](../src/reddit_compass/intelligence/quality.py),
 > CLI: `reddit-compass engine quality {report|check|snapshot}`.
 
+После `report`, `check` или полного `engine cycle` результат quality gate сохраняется в
+`trend_engine.db.engine_quality_reports` для точной тройки `DataRelease + StoryRelease +
+TrendRelease`. Это делает outcome воспроизводимой частью Engine audit trail и позволяет `/runs`
+показывать этап без повторного тяжёлого пересчёта исторических релизов. Отсутствующая запись
+означает только «этот legacy/старый attempt ещё не был проверен», а не успешный gate.
+
 ## Две идеи
 
 1. **Полы качества (`QUALITY_FLOORS`)** — абсолютный «допустимый уровень». Релиз либо

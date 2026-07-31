@@ -72,7 +72,7 @@
                             <dt>Data Release</dt><dd><code>{{ run.release.release_id }}</code> · {{ run.release.input_status }}</dd>
                             <dt>Stories</dt><dd>{% if run.release.story %}<code>{{ run.release.story.story_release_id }}</code>{% else %}ожидает{% endif %}</dd>
                             <dt>Trends</dt><dd>{% if run.release.trend %}<code>{{ run.release.trend.trend_release_id }}</code> · history {{ run.release.trend.history_status }}{% else %}ожидает{% endif %}</dd>
-                            <dt>Quality</dt><dd>{% if run.release.quality %}{% if run.release.quality.passed %}пройден{% else %}ожидает: {{ run.release.quality.failed | join(', ') }}{% endif %}{% else %}не рассчитан{% endif %}</dd>
+                            <dt>Quality</dt><dd>{% if run.release.quality %}{% if run.release.quality.passed %}пройден{% else %}не пройден: {{ run.release.quality.failed | join(', ') }}{% endif %}{% else %}результат не записан для этой версии{% endif %}</dd>
                             <dt>Publication</dt><dd>{% if run.release.publication %}<code>{{ run.release.publication.publication_id }}</code> · {{ run.release.publication.channel }} · {{ run.release.publication.input_status }}{% else %}не опубликован{% endif %}</dd>
                         </dl>
                         {% else %}
