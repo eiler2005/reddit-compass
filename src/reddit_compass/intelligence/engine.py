@@ -615,9 +615,19 @@ def now_iso() -> str:
 
 
 def engine_db(path: Path = DEFAULT_ENGINE_DB_PATH) -> sqlite3.Connection:
+    """Open the mutable Engine store with one writer-friendly SQLite policy.
+
+    The API uses a separate read-only connection.  WAL lets that reader render
+    Radar while a nightly Engine attempt writes a new immutable release;
+    ``busy_timeout`` turns a short lock race into a bounded wait rather than an
+    operational failure.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 10000")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
     conn.execute("PRAGMA foreign_keys = ON")
     migrate_engine(conn)
     return conn
@@ -679,6 +689,7 @@ def _ensure_engine_column(
 def open_corpus_readonly(path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA query_only = ON")
     return conn
 
@@ -687,6 +698,7 @@ def open_engine_readonly(path: Path = DEFAULT_ENGINE_DB_PATH) -> sqlite3.Connect
     """Open an existing derived store without creating or migrating it."""
     conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 5000")
     conn.execute("PRAGMA query_only = ON")
     return conn
 
@@ -2789,7 +2801,10 @@ def prepare_story_review_jobs(
             continue
         jobs.append(
             {
-                "target_id": _stable_id("story_pair", *item_ids),
+                # ``engine_labels`` and the learned merge model address a pair
+                # by this canonical key.  Using a different hash here used to
+                # make Qwen labels invisible to training.
+                "target_id": "|".join(_pair_key(*item_ids)),
                 "item_ids": item_ids,
                 "model": model,
                 "prompt_version": prompt_version,
@@ -4636,6 +4651,14 @@ def publish_radar(
     data_release = get_data_release(conn, facet_release.data_release_id)
     if data_release is None or not verify_data_release(conn, data_release.release_id):
         raise ValueError("Data release not found or checksum failed")
+    if data_release.input_status != "complete":
+        if channel in {"broad", "ai-native"}:
+            raise ValueError(
+                "Production channel requires a complete Data Release; "
+                "partial input may be inspected or published only to shadow"
+            )
+        if not allow_partial:
+            raise ValueError("Partial data release requires allow_partial=True")
     if channel in {"broad", "ai-native"} and not _release_passes_publication_gate(
         conn,
         data_release_id=data_release.release_id,
@@ -4646,8 +4669,6 @@ def publish_radar(
             "Production channel requires passed Story/Trend publication gates "
             "or passed Engine quality floors; use a shadow channel while evaluating"
         )
-    if data_release.input_status != "complete" and not allow_partial:
-        raise ValueError("Partial data release requires allow_partial=True")
     current = get_current_publication(conn, channel)
     previous_id = current.publication_id if current else ""
     created_at = now_iso()
@@ -5318,6 +5339,8 @@ async def run_engine_cycle(
     embed_model: str = MODEL2VEC_DEFAULT,
     review_model: str = "qwen3.6-flash",
     review_limit: int = 0,
+    trend_review_model: str = "qwen3.8-max-preview",
+    trend_review_limit: int = 0,
     review_runner: Callable[[str, str], Awaitable[str]] | None = None,
     publish_channel: str | None = None,
     allow_partial: bool = True,
@@ -5361,54 +5384,119 @@ async def run_engine_cycle(
     use_trend_method = (
         trend_method if (trend_method != "embedding_v2" or embed_ok) else "story_graph_v1"
     )
-    stories = create_story_release(
+    provisional_stories = create_story_release(
         conn,
         facet_release_id=facets.facet_release_id,
         # review_model должен совпадать с моделью Qwen-разметки ниже, иначе кэш
         # llm_reviews не попадёт в apply_cached_story_reviews при следующем цикле.
         params=story_params,
     )
-    auto = auto_label_story_pairs(conn, stories.story_release_id)
-    reviewed = 0
+    auto = auto_label_story_pairs(conn, provisional_stories.story_release_id)
+    review_attempted = 0
+    review_valid = 0
+    review_invalid = 0
+    review_errors: list[str] = []
     if review_limit > 0 and review_runner is not None:
         jobs = prepare_story_review_jobs(
-            conn, stories.story_release_id, limit=review_limit, model=review_model
+            conn, provisional_stories.story_release_id, limit=review_limit, model=review_model
         )
         for job in jobs:
-            raw = await review_runner(str(job["prompt"]), review_model)
-            result = store_story_review_response(
-                conn,
-                target_id=str(job["target_id"]),
-                input_hash=str(job["input_hash"]),
-                raw_response=raw,
-                allowed_item_ids={str(i) for i in job["item_ids"]},
-                model=review_model,
-                prompt_version=str(job["prompt_version"]),
-            )
-            if result.get("valid") and result.get("decision") in (
-                "same_story",
-                "different_story",
-            ):
-                label_engine_target(
+            review_attempted += 1
+            try:
+                raw = await review_runner(str(job["prompt"]), review_model)
+                result = store_story_review_response(
                     conn,
-                    target_kind="story_pair",
                     target_id=str(job["target_id"]),
-                    release_id=stories.story_release_id,
-                    label=str(result["decision"]),  # type: ignore[arg-type]
-                    note="qwen_review",
+                    input_hash=str(job["input_hash"]),
+                    raw_response=raw,
+                    allowed_item_ids={str(i) for i in job["item_ids"]},
+                    model=review_model,
+                    prompt_version=str(job["prompt_version"]),
                 )
-            reviewed += 1
+            except Exception as exc:  # Qwen must not lose a frozen nightly attempt.
+                review_errors.append(exc.__class__.__name__)
+                continue
+            if result.get("valid"):
+                review_valid += 1
+                if result.get("decision") in ("same_story", "different_story"):
+                    label_engine_target(
+                        conn,
+                        target_kind="story_pair",
+                        target_id=str(job["target_id"]),
+                        release_id=provisional_stories.story_release_id,
+                        label=str(result["decision"]),  # type: ignore[arg-type]
+                        note="qwen_review",
+                    )
+            else:
+                review_invalid += 1
     # Обучение не должно валить ночной цикл: вырожденный набор меток (один класс) —
     # пропускаем, модель предыдущего цикла продолжит жить в metrics.
     try:
-        trained = train_story_merge_model(conn, stories.story_release_id)
+        trained = train_story_merge_model(conn, provisional_stories.story_release_id)
         label_source = str(trained.get("label_source", "auto"))
     except ValueError:
         trained = {}
         label_source = "skipped"
+    # A review is an input to clustering, not a decorative side report.  Build
+    # a second immutable attempt after valid Qwen answers so cached decisions
+    # and the calibrated merge model affect the *same* nightly publication.
+    stories = provisional_stories
+    if review_valid:
+        reviewed_story_params = {
+            **story_params,
+            "reviewed_from_story_release": provisional_stories.story_release_id,
+        }
+        trained_model = trained.get("model")
+        if isinstance(trained_model, dict):
+            reviewed_story_params["merge_model"] = trained_model
+        stories = create_story_release(
+            conn,
+            facet_release_id=facets.facet_release_id,
+            params=reviewed_story_params,
+        )
+        auto_label_story_pairs(conn, stories.story_release_id)
     trends = create_trend_release(
         conn, story_release_id=stories.story_release_id, method=use_trend_method
     )
+    trend_review_attempted = 0
+    trend_review_valid = 0
+    trend_review_invalid = 0
+    trend_review_errors: list[str] = []
+    if trend_review_limit > 0 and review_runner is not None:
+        trend_jobs = prepare_trend_review_jobs(
+            conn,
+            trends.trend_release_id,
+            limit=trend_review_limit,
+            model=trend_review_model,
+        )
+        for job in trend_jobs:
+            trend_review_attempted += 1
+            try:
+                raw = await review_runner(str(job["prompt"]), trend_review_model)
+                result = store_trend_review_response(
+                    conn,
+                    target_id=str(job["target_id"]),
+                    input_hash=str(job["input_hash"]),
+                    raw_response=raw,
+                    allowed_story_ids={str(story_id) for story_id in job["story_ids"]},
+                    model=trend_review_model,
+                    prompt_version=str(job["prompt_version"]),
+                )
+            except Exception as exc:  # Keep the deterministic candidate release inspectable.
+                trend_review_errors.append(exc.__class__.__name__)
+                continue
+            if result.get("valid"):
+                trend_review_valid += 1
+            else:
+                trend_review_invalid += 1
+        # Re-materialize so cached decisions become confirmed/rejected status
+        # on the release that is inspected and potentially published.
+        if trend_review_valid:
+            trends = create_trend_release(
+                conn,
+                story_release_id=stories.story_release_id,
+                method=use_trend_method,
+            )
     pulse_result: dict[str, Any] | None = None
     if pulse:
         date_row = conn.execute(
@@ -5432,16 +5520,35 @@ async def run_engine_cycle(
                 date=pulse_date,
                 history_window_days=history_window_days,
             )
+    story_evaluation = evaluate_story_release(conn, stories.story_release_id)
+    trend_evaluation = evaluate_trend_release(conn, trends.trend_release_id)
+    from .quality import compute_quality, evaluate_floors
+
+    quality_metrics = compute_quality(
+        conn,
+        data_release_id=data.release_id,
+        story_release_id=stories.story_release_id,
+        trend_release_id=trends.trend_release_id,
+        signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
+    )
+    quality_floors = evaluate_floors(quality_metrics)
+    quality_passed = bool(quality_floors) and all(floor.passed for floor in quality_floors)
     publication_id = ""
+    publication_blocked_reason = ""
     if publish_channel:
-        publication = publish_radar(
-            conn,
-            story_release_id=stories.story_release_id,
-            trend_release_id=trends.trend_release_id,
-            channel=publish_channel,
-            allow_partial=allow_partial,
-        )
-        publication_id = publication.publication_id
+        if data.input_status != "complete":
+            publication_blocked_reason = "input_partial"
+        elif not quality_passed:
+            publication_blocked_reason = "quality_floors_failed"
+        else:
+            publication = publish_radar(
+                conn,
+                story_release_id=stories.story_release_id,
+                trend_release_id=trends.trend_release_id,
+                channel=publish_channel,
+                allow_partial=allow_partial,
+            )
+            publication_id = publication.publication_id
     return {
         "data_release_id": data.release_id,
         "facet_release_id": facets.facet_release_id,
@@ -5450,13 +5557,30 @@ async def run_engine_cycle(
         "trend_method": use_trend_method,
         "embed_model": embed_model if embed_ok else "",
         "auto_labels": auto.get("added", 0),
-        "reviewed_pairs": reviewed,
+        "provisional_story_release_id": provisional_stories.story_release_id,
+        "reviewed_pairs": review_attempted,
+        "valid_reviewed_pairs": review_valid,
+        "invalid_reviewed_pairs": review_invalid,
+        "review_errors": review_errors,
+        "reviewed_story_rebuilt": bool(review_valid),
+        "reviewed_trends": trend_review_attempted,
+        "valid_reviewed_trends": trend_review_valid,
+        "invalid_reviewed_trends": trend_review_invalid,
+        "trend_review_errors": trend_review_errors,
         "label_source": label_source,
         "signal_release_id": (pulse_result or {}).get("signal_release_id", ""),
         "perspective_gap_available": bool(
             (pulse_result or {}).get("metrics", {}).get("perspective_gap_available")
         ),
         "publication_id": publication_id,
+        "publication_blocked_reason": publication_blocked_reason,
+        "quality": {
+            "passed": quality_passed,
+            "metrics": quality_metrics,
+            "floors": [asdict(floor) for floor in quality_floors],
+            "story_evaluation": story_evaluation,
+            "trend_evaluation": trend_evaluation,
+        },
     }
 
 

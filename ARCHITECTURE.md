@@ -108,9 +108,27 @@ Default collection profile: `config/profiles/broad.json`.
 
 ## 4. Поток данных
 
-Collection и analysis являются независимыми jobs. Текущий nightly остаётся переходным
-оркестратором; целевой cron сначала завершает `collect`, затем создаёт Data Release и запускает
-Engine в shadow-канале. Отсутствие LLM не меняет collection status.
+Collection и analysis являются независимыми jobs. Канонический host-cron сначала записывает
+все snapshot-артефакты, затем запускает `collect --from-snapshots`, а после этого — Engine
+в shadow-канале. Отсутствие LLM не меняет collection status.
+
+### Текущий production flow
+
+```text
+Mac: Reddit posts.jsonl ──atomic Docker-volume handoff──┐
+VPS: rss / hn / ladder / ph snapshots ──────────────────┤
+                                                        ▼
+14:45 UTC: collect --from-snapshots → one raw run in compass.db
+                                                        │ read-only snapshot
+16:00 UTC: engine cycle → DataRelease → facets → stories → Qwen → trends → quality → shadow
+                                                        │
+manual: complete + gated publication → published_channels["broad"] → Today/Radar
+```
+
+`/runs` раскрывает эти стадии для каждого `run_id`. Полный operational contract, статусы и
+rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
+
+### Legacy compatibility artifact layout (not the scheduler)
 
 ```
   03:17 (Mac, launchd)                    04:00 (VPS, host-cron)

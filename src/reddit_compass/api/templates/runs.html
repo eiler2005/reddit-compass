@@ -3,40 +3,98 @@
 {% block title %}Запуски — reddit-compass{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container runs-ledger">
     <h1>Запуски</h1>
+    <p class="section-note">
+        Каждый пункт — прослеживаемый путь одного набора данных: источники → immutable release →
+        сюжеты → тренды/Qwen → quality gate → публикация. Раскройте строку, чтобы увидеть, где
+        именно выпуск остановился или почему он не попал в Broad Radar.
+    </p>
 
     {% if runs %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Дата</th>
-                <th>Профиль</th>
-                <th>Статус</th>
-                <th>Материалов</th>
-                <th>Кандидатов</th>
-                <th>Склеено</th>
-                <th>Cross-src</th>
-                <th>Начало</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for run in runs %}
-            <tr>
-                <td><a href="/runs/{{ run.date }}/radar?profile={{ run.profile }}">{{ run.date }}</a></td>
-                <td>{{ run.profile }}</td>
-                <td><span class="status-badge status-{{ run.status }}">{{ run.status_label }}</span></td>
-                <td>{{ run.item_count }}</td>
-                <td>{{ run.story_count }}</td>
-                <td>{{ run.multi_item_count | default('—') }}</td>
-                <td>{{ run.cross_source_count | default('—') }}</td>
-                <td>{{ run.started_at[:16] if run.started_at else '—' }}</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+    <div class="run-list">
+        {% for run in runs %}
+        <details class="run-record" {% if loop.first %}open{% endif %}>
+            <summary class="run-summary">
+                <div class="run-summary-primary">
+                    <strong>{{ run.date }}</strong>
+                    <span>{{ run.profile }}</span>
+                    <span class="status-badge status-{{ run.status }}">{{ run.status_label }}</span>
+                </div>
+                <div class="run-summary-metrics">
+                    <span><b>{{ run.item_count }}</b> материалов</span>
+                    <span><b>{{ run.source_ready }}/{{ run.source_total }}</b> источников</span>
+                    {% if run.release and run.release.story %}
+                    <span>Engine готов</span>
+                    {% endif %}
+                    <span>{{ run.started_at[:16] if run.started_at else '—' }}</span>
+                </div>
+                <span class="run-disclosure" aria-hidden="true">Раскрыть</span>
+            </summary>
+
+            <div class="run-body">
+                <ol class="pipeline-stages" aria-label="Стадии запуска {{ run.date }}">
+                    {% for stage in run.stages %}
+                    <li class="pipeline-stage pipeline-stage-{{ stage.status }}">
+                        <span class="pipeline-dot" aria-hidden="true"></span>
+                        <div>
+                            <strong>{{ stage.name }}</strong>
+                            <span>{{ stage.detail }}</span>
+                        </div>
+                    </li>
+                    {% endfor %}
+                </ol>
+
+                <div class="run-detail-grid">
+                    <section>
+                        <h3>Источники</h3>
+                        {% if run.source_health %}
+                        <ul class="source-stage-list">
+                            {% for source in run.source_health %}
+                            <li>
+                                <span class="status-badge status-{{ source.status }}">{{ source.status }}</span>
+                                <strong>{{ source.source_id }}</strong>
+                                <span>{{ source.count }} материалов</span>
+                                {% if source.message %}<small>{{ source.message }}</small>{% endif %}
+                                {% if source.error_code %}<small>{{ source.error_code }}</small>{% endif %}
+                            </li>
+                            {% endfor %}
+                        </ul>
+                        {% else %}
+                        <p class="section-note">Для этого legacy-run нет source health. Следующий запуск через <code>collect --from-snapshots</code> запишет её.</p>
+                        {% endif %}
+                    </section>
+
+                    <section>
+                        <h3>Версия анализа</h3>
+                        {% if run.release %}
+                        <dl class="release-facts">
+                            <dt>Data Release</dt><dd><code>{{ run.release.release_id }}</code> · {{ run.release.input_status }}</dd>
+                            <dt>Stories</dt><dd>{% if run.release.story %}<code>{{ run.release.story.story_release_id }}</code>{% else %}ожидает{% endif %}</dd>
+                            <dt>Trends</dt><dd>{% if run.release.trend %}<code>{{ run.release.trend.trend_release_id }}</code> · history {{ run.release.trend.history_status }}{% else %}ожидает{% endif %}</dd>
+                            <dt>Quality</dt><dd>{% if run.release.quality %}{% if run.release.quality.passed %}пройден{% else %}ожидает: {{ run.release.quality.failed | join(', ') }}{% endif %}{% else %}не рассчитан{% endif %}</dd>
+                            <dt>Publication</dt><dd>{% if run.release.publication %}<code>{{ run.release.publication.publication_id }}</code> · {{ run.release.publication.channel }} · {{ run.release.publication.input_status }}{% else %}не опубликован{% endif %}</dd>
+                        </dl>
+                        {% else %}
+                        <p class="section-note">Frozen Data Release для этого raw run ещё не создавался.</p>
+                        {% endif %}
+                    </section>
+                </div>
+
+                <div class="run-links">
+                    <a href="/news?channel=broad">News</a>
+                    <a href="/stories?channel=broad">Stories</a>
+                    <a href="/trends?channel=broad">Trends</a>
+                    {% if run.release %}
+                    <a href="/runs/{{ run.date }}/radar?channel=broad">Открыть Radar</a>
+                    {% endif %}
+                </div>
+            </div>
+        </details>
+        {% endfor %}
+    </div>
     {% else %}
-    <p>Нет запусков. Выполните <code>reddit-compass run</code>.</p>
+    <p>Нет запусков. Выполните <code>reddit-compass collect</code>.</p>
     {% endif %}
 </div>
 {% endblock %}

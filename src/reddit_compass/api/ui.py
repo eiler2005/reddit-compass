@@ -11,6 +11,7 @@ import secrets
 import sqlite3
 from collections.abc import Generator
 from dataclasses import asdict
+from functools import lru_cache
 from math import log1p
 from pathlib import Path
 from typing import Any, cast
@@ -521,6 +522,34 @@ def _build_today_reading_list(
     return selected
 
 
+@lru_cache(maxsize=24)
+def _cached_today_reading_list(
+    engine_path_value: str,
+    *,
+    publication_id: str,
+    data_release_id: str,
+    story_release_id: str,
+    date: str,
+    profile: str,
+) -> tuple[dict[str, object], ...]:
+    """Compute the compact reading queue once per immutable publication.
+
+    Today loads two small pages to stay under the proxy response cap.  Without
+    this cache each page rescored the entire release on FastAPI's async event
+    loop, leaving both panels in the loading state for a long time.
+    """
+
+    del publication_id, data_release_id, story_release_id  # Cache identity, not query inputs.
+    engine_conn = open_engine_readonly(Path(engine_path_value))
+    try:
+        radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
+        if radar is None:
+            return ()
+        return tuple(_build_today_reading_list(engine_conn, radar.model_dump(), limit=20))
+    finally:
+        engine_conn.close()
+
+
 def _load_today_engine_radar(
     conn: sqlite3.Connection, *, date: str | None, profile: str
 ) -> Any | None:
@@ -810,7 +839,7 @@ async def today_page(
 
 
 @router.get("/ui/today-changes")
-async def today_changes_feed(
+def today_changes_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
 ) -> dict[str, object]:
@@ -827,14 +856,14 @@ async def today_changes_feed(
             "date": radar.date,
             "items": _today_change_candidates(radar, _analysis_query("broad", None)),
         }
-    except HTTPException:
+    except (HTTPException, OSError, sqlite3.Error):
         return {"date": date or "", "items": []}
     finally:
         engine_conn.close()
 
 
 @router.get("/ui/today-reading")
-async def today_reading_feed(
+def today_reading_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
     offset: int = 0,
@@ -854,12 +883,19 @@ async def today_reading_feed(
         # the client requests two deterministic pages for the complete top-20.
         page_size = min(max(limit, 1), 10)
         start = max(offset, 0)
-        items = _build_today_reading_list(engine_conn, radar_payload, limit=20)
+        items = _cached_today_reading_list(
+            str(engine_path),
+            publication_id=str(radar_payload.get("publication_id") or "preview"),
+            data_release_id=str(radar_payload.get("data_release_id") or ""),
+            story_release_id=str(radar_payload.get("story_release_id") or ""),
+            date=str(radar_payload["date"]),
+            profile=profile,
+        )
         return {
             "date": radar_payload["date"],
-            "items": items[start : start + page_size],
+            "items": list(items[start : start + page_size]),
         }
-    except HTTPException:
+    except (HTTPException, OSError, sqlite3.Error):
         # Today itself can still render its publication/preview state.  Do not
         # turn an unavailable optional reading feed into a broken dashboard.
         return {"date": date or "", "items": []}
@@ -1551,56 +1587,274 @@ async def explore_page(
 
 
 @router.get("/runs", response_class=HTMLResponse)
-async def runs_page(
+def runs_page(
     request: Request,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
-    """Список runs."""
+    """Operational ledger: collection facts plus derived Engine stages."""
     rows = conn.execute("SELECT * FROM runs ORDER BY snapshot_date DESC LIMIT 30").fetchall()
 
-    from .view_models import RunView, status_label
+    from .view_models import status_label
 
-    runs = []
+    source_health_by_run: dict[str, list[dict[str, object]]] = {}
+    if rows:
+        run_ids = [str(row["run_id"]) for row in rows]
+        placeholders = ", ".join("?" for _ in run_ids)
+        health_rows = conn.execute(
+            f"""SELECT run_id, source_id, provider, cluster, status, count,
+                       duration_sec, error_code, message
+                FROM source_health
+                WHERE run_id IN ({placeholders})
+                ORDER BY run_id, source_id""",
+            run_ids,
+        ).fetchall()
+        for health in health_rows:
+            # Provider×section rows complement but do not replace the adapter
+            # stage.  The latter is what determines collection completeness.
+            if ":" in str(health["source_id"]):
+                continue
+            source_health_by_run.setdefault(str(health["run_id"]), []).append(dict(health))
+
+    releases_by_run: dict[str, dict[str, object]] = {}
+    engine_path = _engine_path()
+    if engine_path.exists():
+        engine_conn = open_engine_readonly(engine_path)
+        try:
+            data_rows = engine_conn.execute(
+                """SELECT release_id, run_ids_json, input_status, status, item_count,
+                          observation_count, source_coverage_json, created_at, finalized_at
+                   FROM data_releases
+                   WHERE status = 'finalized'
+                   ORDER BY finalized_at DESC, created_at DESC"""
+            ).fetchall()
+            run_id_set = {str(row["run_id"]) for row in rows}
+            data_by_release: dict[str, dict[str, object]] = {}
+            for data in data_rows:
+                try:
+                    release_run_ids = {str(value) for value in json.loads(data["run_ids_json"])}
+                except (TypeError, ValueError, json.JSONDecodeError):
+                    release_run_ids = set()
+                matching_run_ids = run_id_set & release_run_ids
+                if not matching_run_ids:
+                    continue
+                release = dict(data)
+                release_id = str(data["release_id"])
+                data_by_release[release_id] = release
+                for run_id in matching_run_ids:
+                    releases_by_run.setdefault(run_id, release)
+
+            if data_by_release:
+                release_ids = list(data_by_release)
+                placeholders = ", ".join("?" for _ in release_ids)
+                facet_rows = engine_conn.execute(
+                    f"""SELECT facet_release_id, data_release_id, status, created_at
+                        FROM facet_releases
+                        WHERE data_release_id IN ({placeholders})
+                        ORDER BY created_at DESC""",
+                    release_ids,
+                ).fetchall()
+                facets_by_data: dict[str, dict[str, object]] = {}
+                for facet in facet_rows:
+                    facets_by_data.setdefault(str(facet["data_release_id"]), dict(facet))
+                facet_ids = [str(value["facet_release_id"]) for value in facets_by_data.values()]
+                stories_by_facet: dict[str, dict[str, object]] = {}
+                if facet_ids:
+                    placeholders = ", ".join("?" for _ in facet_ids)
+                    story_rows = engine_conn.execute(
+                        f"""SELECT story_release_id, facet_release_id, status,
+                                   metrics_json, created_at
+                            FROM story_releases
+                            WHERE facet_release_id IN ({placeholders})
+                            ORDER BY created_at DESC""",
+                        facet_ids,
+                    ).fetchall()
+                    for story in story_rows:
+                        stories_by_facet.setdefault(str(story["facet_release_id"]), dict(story))
+                story_ids = [str(value["story_release_id"]) for value in stories_by_facet.values()]
+                trends_by_story: dict[str, dict[str, object]] = {}
+                if story_ids:
+                    placeholders = ", ".join("?" for _ in story_ids)
+                    trend_rows = engine_conn.execute(
+                        f"""SELECT trend_release_id, story_release_id, status, history_status,
+                                   metrics_json, created_at
+                            FROM trend_releases
+                            WHERE story_release_id IN ({placeholders})
+                            ORDER BY created_at DESC""",
+                        story_ids,
+                    ).fetchall()
+                    for trend in trend_rows:
+                        trends_by_story.setdefault(str(trend["story_release_id"]), dict(trend))
+                publications = engine_conn.execute(
+                    """SELECT p.publication_id, p.channel, p.data_release_id, p.input_status,
+                               p.allow_partial, p.created_at,
+                               CASE WHEN c.current_publication_id = p.publication_id
+                                    THEN 1 ELSE 0 END
+                                  AS is_current
+                        FROM radar_publications p
+                        LEFT JOIN published_channels c
+                          ON c.current_publication_id = p.publication_id
+                        ORDER BY p.created_at DESC"""
+                ).fetchall()
+                publication_by_data: dict[str, dict[str, object]] = {}
+                for publication in publications:
+                    publication_by_data.setdefault(
+                        str(publication["data_release_id"]), dict(publication)
+                    )
+
+                from ..intelligence.quality import compute_quality, evaluate_floors
+
+                quality_by_data: dict[str, dict[str, object]] = {}
+                for data_release_id in data_by_release:
+                    facet = facets_by_data.get(data_release_id)
+                    story = stories_by_facet.get(str(facet["facet_release_id"])) if facet else None
+                    trend = trends_by_story.get(str(story["story_release_id"])) if story else None
+                    if not story or not trend:
+                        continue
+                    try:
+                        metrics = compute_quality(
+                            engine_conn,
+                            data_release_id=data_release_id,
+                            story_release_id=str(story["story_release_id"]),
+                            trend_release_id=str(trend["trend_release_id"]),
+                        )
+                        floors = evaluate_floors(metrics)
+                    except (sqlite3.Error, ValueError):
+                        # The run ledger remains useful even while an older
+                        # experiment lacks one of the newer quality inputs.
+                        quality_by_data[data_release_id] = {
+                            "passed": False,
+                            "failed": ["quality_unavailable"],
+                        }
+                    else:
+                        quality_by_data[data_release_id] = {
+                            "passed": bool(floors) and all(floor.passed for floor in floors),
+                            "failed": [floor.metric for floor in floors if not floor.passed],
+                        }
+
+                for release_record in releases_by_run.values():
+                    data_release_id = str(release_record["release_id"])
+                    facet = facets_by_data.get(data_release_id)
+                    story = stories_by_facet.get(str(facet["facet_release_id"])) if facet else None
+                    trend = trends_by_story.get(str(story["story_release_id"])) if story else None
+                    release_record["facet"] = facet
+                    release_record["story"] = story
+                    release_record["trend"] = trend
+                    release_record["quality"] = quality_by_data.get(data_release_id)
+                    release_record["publication"] = publication_by_data.get(data_release_id)
+        except sqlite3.Error:
+            # A run ledger must continue to show source truth even if a
+            # read-only Engine file is temporarily unavailable.
+            releases_by_run = {}
+        finally:
+            engine_conn.close()
+
+    runs: list[dict[str, object]] = []
     for row in rows:
-        run_id = row["run_id"]
-        date = row["snapshot_date"]
+        run_id = str(row["run_id"])
+        date = str(row["snapshot_date"])
 
-        # Item count
+        # Observations are per-run facts.  ``items.snapshot_date`` makes a
+        # later re-observation look like it belonged to the wrong collection.
         item_count = conn.execute(
-            "SELECT COUNT(DISTINCT item_id) FROM items WHERE snapshot_date = ?",
-            (date,),
-        ).fetchone()[0]
-
-        # Story count
-        story_count = conn.execute(
-            "SELECT COUNT(*) FROM story_metrics WHERE run_id = ?",
+            "SELECT COUNT(*) FROM observations WHERE run_id = ?",
             (run_id,),
         ).fetchone()[0]
-
-        # Multi-item and cross-source counts
-        multi_item = conn.execute(
-            "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND item_count >= 2",
-            (run_id,),
-        ).fetchone()[0]
-        cross_source = conn.execute(
-            "SELECT COUNT(*) FROM story_metrics WHERE run_id = ? AND source_count >= 2",
-            (run_id,),
-        ).fetchone()[0]
-
+        health = source_health_by_run.get(run_id, [])
+        source_ready = sum(1 for source in health if source.get("status") in {"ok", "empty"})
+        source_total = len(health)
+        run_release = releases_by_run.get(run_id)
+        story = cast(dict[str, object] | None, run_release.get("story")) if run_release else None
+        trend = cast(dict[str, object] | None, run_release.get("trend")) if run_release else None
+        story_metrics = _json_dict_value(story.get("metrics_json") if story else "{}")
+        trend_metrics = _json_dict_value(trend.get("metrics_json") if trend else "{}")
+        quality = (
+            cast(dict[str, object] | None, run_release.get("quality")) if run_release else None
+        )
+        publication = (
+            cast(dict[str, object] | None, run_release.get("publication")) if run_release else None
+        )
+        stages = [
+            {
+                "name": "Сбор источников",
+                "status": str(row["status"]),
+                "detail": (
+                    f"{source_ready}/{source_total} source adapters готовы"
+                    if source_total
+                    else "source health не записан"
+                ),
+            },
+            {
+                "name": "Frozen Data Release",
+                "status": str(run_release.get("status")) if run_release else "pending",
+                "detail": (
+                    f"{run_release.get('item_count', 0)} items · "
+                    f"input {run_release.get('input_status', '')}"
+                    if run_release
+                    else "ещё не создан"
+                ),
+            },
+            {
+                "name": "Stories",
+                "status": str(story.get("status")) if story else "pending",
+                "detail": (
+                    f"{story_metrics.get('story_count', 0)} stories · "
+                    f"{story_metrics.get('cross_source_story_count', 0)} cross-source"
+                    if story
+                    else "ожидает Data Release"
+                ),
+            },
+            {
+                "name": "Trends / Qwen",
+                "status": str(trend.get("status")) if trend else "pending",
+                "detail": (
+                    f"{trend_metrics.get('trend_count', 0)} candidates · "
+                    f"{trend_metrics.get('confirmed_trend_count', 0)} confirmed · "
+                    f"history {trend.get('history_status', '')}"
+                    if trend
+                    else "ожидает Stories"
+                ),
+            },
+            {
+                "name": "Quality gate",
+                "status": "passed" if quality and quality.get("passed") else "pending",
+                "detail": (
+                    "все абсолютные полы пройдены"
+                    if quality and quality.get("passed")
+                    else (
+                        "не пройдены: " + ", ".join(cast(list[str], quality.get("failed", [])))
+                        if quality
+                        else "не рассчитан"
+                    )
+                ),
+            },
+            {
+                "name": "Publication",
+                "status": (
+                    "published" if publication and publication.get("is_current") else "pending"
+                ),
+                "detail": (
+                    f"{publication.get('channel')} · input {publication.get('input_status')}"
+                    if publication
+                    else "не опубликован"
+                ),
+            },
+        ]
         runs.append(
-            RunView(
-                run_id=run_id,
-                date=date,
-                profile=row["profile"],
-                status=row["status"],
-                status_label=status_label(row["status"]),
-                started_at=row["started_at"],
-                finished_at=row["finished_at"],
-                item_count=item_count,
-                story_count=story_count,
-                multi_item_count=multi_item,
-                cross_source_count=cross_source,
-            )
+            {
+                "run_id": run_id,
+                "date": date,
+                "profile": row["profile"],
+                "status": row["status"],
+                "status_label": status_label(row["status"]),
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "item_count": item_count,
+                "source_ready": source_ready,
+                "source_total": source_total,
+                "source_health": health,
+                "release": run_release,
+                "stages": stages,
+            }
         )
 
     return templates.TemplateResponse(

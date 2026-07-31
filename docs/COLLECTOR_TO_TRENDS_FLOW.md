@@ -210,7 +210,8 @@ Release invariants:
 - finalized rows are immutable;
 - checksum is verified before every Facet/Story/Trend attempt;
 - changing `compass.db` after release creation does not change Engine experiments;
-- partial input can be inspected, but default production publish requires explicit override and gates.
+- partial input can be inspected and explicitly published only to `shadow`; production
+  `broad`/`ai-native` always require a complete Data Release and passing gates.
 
 ## FacetRelease
 

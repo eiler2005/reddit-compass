@@ -37,6 +37,7 @@ from reddit_compass.intelligence.engine import (
     label_engine_target,
     load_frozen_items,
     load_release_embeddings,
+    prepare_story_review_jobs,
     publish_radar,
     rollback_publication,
     run_engine_cycle,
@@ -52,6 +53,13 @@ from reddit_compass.intelligence.repository import (
     upsert_observations,
     upsert_run,
 )
+
+
+def test_engine_db_uses_wal_for_concurrent_api_reads(tmp_path: Path) -> None:
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    assert str(engine.execute("PRAGMA journal_mode").fetchone()[0]).lower() == "wal"
+    assert int(engine.execute("PRAGMA busy_timeout").fetchone()[0]) == 10000
 
 
 def test_data_release_is_frozen_and_checksum_verified(tmp_path: Path) -> None:
@@ -659,10 +667,20 @@ def test_partial_release_requires_explicit_publish_override(tmp_path: Path) -> N
     )
     assert publication.input_status == "partial"
 
+    with pytest.raises(ValueError, match="complete Data Release"):
+        publish_radar(
+            engine,
+            story_release_id=stories.story_release_id,
+            trend_release_id=trends.trend_release_id,
+            channel="broad",
+            allow_partial=True,
+        )
+
 
 def test_production_channel_requires_quality_gates(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
+    _add_voice_coverage(corpus)
     engine = engine_db(tmp_path / "trend_engine.db")
     release = create_data_release(
         corpus,
@@ -688,6 +706,7 @@ def test_production_channel_accepts_quality_floors(
 ) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
+    _add_voice_coverage(corpus)
     engine = engine_db(tmp_path / "trend_engine.db")
     release = create_data_release(
         corpus,
@@ -876,6 +895,46 @@ def test_invalid_story_review_cache_can_be_replaced(tmp_path: Path) -> None:
     assert second["valid"] is True
     assert row["decision"] == "same_story"
     assert row["valid"] == 1
+
+
+def test_story_review_jobs_use_the_same_pair_key_as_training(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    engine.execute(
+        """INSERT INTO story_candidate_pairs
+           (story_release_id, item_id_a, item_id_b, score, decision, features_json, reason)
+           VALUES (?, ?, ?, ?, 'review', '{}', 'test review')""",
+        (stories.story_release_id, "event1_reuters", "event1_nyt", 0.5),
+    )
+    engine.commit()
+
+    jobs = prepare_story_review_jobs(engine, stories.story_release_id, limit=1)
+
+    assert len(jobs) == 1
+    assert jobs[0]["target_id"] == "event1_nyt|event1_reuters"
+    label_engine_target(
+        engine,
+        target_kind="story_pair",
+        target_id=str(jobs[0]["target_id"]),
+        release_id=stories.story_release_id,
+        label="same_story",
+        note="qwen_review",
+    )
+    label = engine.execute(
+        """SELECT target_id FROM engine_labels
+           WHERE release_id = ? AND target_kind = 'story_pair'""",
+        (stories.story_release_id,),
+    ).fetchone()
+    assert label["target_id"] == "event1_nyt|event1_reuters"
 
 
 def test_auto_label_and_train_merge_model_persist(tmp_path: Path) -> None:
@@ -1111,6 +1170,31 @@ def _item(item_id: str, provider: str, title: str, date: str) -> ContentItem:
     )
 
 
+def _add_voice_coverage(conn: sqlite3.Connection) -> None:
+    """Make a synthetic broad release complete without weakening its gates."""
+    items: list[ContentItem] = []
+    observations: list[Observation] = []
+    for run_id, date in zip(_run_ids(), ("2026-07-27", "2026-07-28", "2026-07-29"), strict=True):
+        item = ContentItem(
+            item_id=f"reddit_{date}",
+            provider="reddit",
+            source_cluster="voices",
+            external_id=f"reddit_{date}",
+            canonical_url=f"https://reddit.example/{date}",
+            title=f"Reddit discussion for {date}",
+            observed_at=f"{date}T07:00:00Z",
+            snapshot_date=date,
+            content_scope="excerpt",
+        )
+        items.append(item)
+        observations.append(
+            Observation(run_id=run_id, item_id=item.item_id, observed_at=item.observed_at)
+        )
+    upsert_items(conn, items)
+    upsert_observations(conn, observations)
+    conn.commit()
+
+
 def _frozen_item(
     item_id: str,
     canonical_url: str,
@@ -1240,3 +1324,66 @@ def test_run_engine_cycle_builds_all_layers(tmp_path: Path) -> None:
     # На вырожденном синтетическом корпусе обучение корректно пропускается;
     # на реальных данных (с LLM-фасетами) обе категории присутствуют.
     assert result["label_source"] in {"auto", "qwen", "human", "skipped"}
+
+
+def test_run_engine_cycle_rebuilds_stories_after_valid_qwen_pair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A valid bounded review must affect this cycle, not wait until tomorrow."""
+    import reddit_compass.intelligence.engine as engine_module
+
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_cycle_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    item_ids = ["a_reddit_2026-07-28", "a_reuters_2026-07-28"]
+    job = {
+        "target_id": "|".join(sorted(item_ids)),
+        "item_ids": item_ids,
+        "model": "qwen-test",
+        "prompt_version": engine_module.STORY_REVIEW_PROMPT_VERSION,
+        "input_hash": "test-review-input",
+        "prompt": "test pair",
+    }
+    monkeypatch.setattr(engine_module, "prepare_story_review_jobs", lambda *_args, **_kwargs: [job])
+
+    async def review_runner(_prompt: str, _model: str) -> str:
+        return json.dumps(
+            {
+                "decision": "same_story",
+                "event_frame": {
+                    "actors": ["OpenAI"],
+                    "action": "launches",
+                    "object": "quantum agent",
+                    "geography": [],
+                    "event_date": "2026-07-28",
+                },
+                "evidence_item_ids": item_ids,
+                "conflicts": [],
+                "confidence": 0.91,
+                "reason": "Same launch",
+            }
+        )
+
+    try:
+        result = asyncio.run(
+            run_engine_cycle(
+                corpus,
+                engine,
+                corpus_path=corpus_path,
+                profile="broad",
+                window=2,
+                embed_model="",
+                review_model="qwen-test",
+                review_limit=1,
+                review_runner=review_runner,
+                publish_channel=None,
+                pulse=False,
+            )
+        )
+    finally:
+        corpus.close()
+        engine.close()
+
+    assert result["valid_reviewed_pairs"] == 1
+    assert result["reviewed_story_rebuilt"] is True
+    assert result["story_release_id"] != result["provisional_story_release_id"]

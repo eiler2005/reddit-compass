@@ -5,6 +5,8 @@ Research background lives in
 [`STORY_TREND_CLUSTERING_RESEARCH.md`](STORY_TREND_CLUSTERING_RESEARCH.md).
 End-to-end source-to-trend lineage with text diagrams lives in
 [`COLLECTOR_TO_TRENDS_FLOW.md`](COLLECTOR_TO_TRENDS_FLOW.md).
+Completion states, Mac/VPS handoff, host-cron and the Run journal are specified in
+[`COLLECTION_LIFECYCLE.md`](COLLECTION_LIFECYCLE.md).
 
 ## 1. Runtime boundary
 

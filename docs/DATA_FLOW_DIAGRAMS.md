@@ -90,7 +90,9 @@ flowchart TD
 **Фаза 3 (обучаемый скоринг):**
 - `story_scoring.py` — dependency-light логистическая регрессия (numpy).
 - Авто-разметка `auto_label_story_pairs` (детерминированная, без человека) →
-  `engine_labels`; человеческие метки имеют приоритет.
+  `engine_labels`; Qwen и человеческие метки используют тот же canonical `item_id_a|item_id_b`
+  key и имеют приоритет. После валидной bounded Qwen-порции cycle materializes второй
+  immutable StoryRelease, поэтому review влияет на текущий выпуск.
 - `train_story_merge_model` обучает модель, калибрует порог под precision ≥ 0.95,
   сохраняет веса + хэш в `metrics_json.merge_model` (воспроизводимо).
 - Жёсткие правила остаются детерминированными; модель решает **только серую зону**.

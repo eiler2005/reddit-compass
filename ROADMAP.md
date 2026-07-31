@@ -52,7 +52,7 @@ reddit-compass растёт от автономного коллектора т�
   story до current-run items перед ranking.
 - 271 тест проходит; ruff, format-check, mypy зелёные.
 
-## v0.5 — Versioned Story/Trend Engine (реализовано локально, shadow rollout pending)
+## v0.5 — Versioned Story/Trend Engine (реализовано; controlled shadow/broad operation)
 
 - Collector отделён от анализа: `collect` пишет только raw facts в `compass.db`.
 - `trend_engine.db`: frozen Data Releases и независимые Facet/Story/Trend attempts.
@@ -65,14 +65,15 @@ reddit-compass растёт от автономного коллектора т�
 - `/engine`, Engine API, publication-backed `/news`, `/stories`, `/trends`, `/projects/{id}`,
   `/radar` и `/today`.
 - Publish/rollback переключают immutable pointer; `lab` остаётся deprecated alias.
-- Следующий gate: 50/100/300 real-item проверки, полный локальный release и семь shadow days.
+- Следующий gate: continuous Golden Set review, семь successive shadow days и только затем
+  ручное продвижение нового алгоритма в `broad`.
 
 ## Phase 2 — планировщик на VPS (HostKey «Hermes»)
 
 - App-owned compose-стек `/opt/reddit-compass`, изолированный от прочих стеков (своя сеть + volume).
 - Batch-job: без публичного порта; resource limits, `no-new-privileges`, ротация логов.
-- Целевое расписание — независимые host-cron jobs `collect` и `engine`; до shadow rollout
-  существующий nightly остаётся compatibility orchestrator.
+- Каноническое расписание — независимые host-cron jobs для snapshots, `collect --from-snapshots`
+  и `engine cycle`; legacy `signals`/`radar` jobs не обновляют production Radar.
 - Регистрация владельца/контейнера/volume/backup в `vps_management`.
 - Скелет: [deploy/hostkey/](deploy/hostkey/). Включение — по подтверждению, со сверкой живого HostKey.
 - **Docker CI/CD:** GitHub Actions → build & push образа в GHCR; VPS тянет из registry.

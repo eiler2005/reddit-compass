@@ -7,6 +7,19 @@
 
 ### Added
 
+- **Операционный completion contract**: `collect --from-snapshots` превращает уже собранные
+  JSONL в один factual raw run без сети и LLM. Добавлены `docs/COLLECTION_LIFECYCLE.md`,
+  version-controlled host-cron и безопасный Reddit-only Mac→VPS handoff: локальный
+  `compass.db` больше не может перезаписать VPS corpus.
+- **Run journal**: `/runs` раскрывает для каждого запуска source health, Frozen Data Release,
+  Stories, Trends/Qwen, quality gate и current publication. Счётчик материалов берётся из
+  observations, а не из изменяемой даты item.
+- **Reliable Today feeds**: тяжёлый reading selection вынесен из async event loop, кэшируется по
+  immutable publication и грузится постранично; Engine SQLite использует WAL + busy timeout.
+- **Same-cycle reviewed Engine**: валидные bounded Qwen pair reviews создают второй immutable
+  StoryRelease в том же cycle; bounded trend review materializes финальный TrendRelease. Qwen
+  pair labels используют тот же canonical pair key, что обучающий merge scorer.
+
 - **Today: ежедневная лента и рабочие рубрики**: `/today` теперь показывает до 20 материалов
   для ежедневного чтения с прямыми безопасными ссылками. Отбор учитывает свежесть, профиль
   РБК/книги, качество источника и ограниченные within-channel engagement-сигналы, а квоты

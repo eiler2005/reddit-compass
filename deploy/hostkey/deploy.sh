@@ -11,7 +11,7 @@
 #   1. Копирует compose + Caddyfile + .env.secrets на VPS
 #   2. Создаёт /opt/reddit-compass/
 #   3. Запускает api + caddy
-#   4. (Опционально) добавляет host-cron для nightly
+#   4. (Опционально) устанавливает version-controlled host-cron
 
 set -euo pipefail
 
@@ -39,6 +39,8 @@ ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/src ${REMOTE_DIR}/config"
 scp "${SCRIPT_DIR}/docker-compose.yml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/Caddyfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/Dockerfile.api" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp "${SCRIPT_DIR}/reddit-compass.cron" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp "${SCRIPT_DIR}/install-cron.sh" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/.env.secrets" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.env"
 # Build context для Docker
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -46,7 +48,9 @@ scp "${PROJECT_ROOT}/Dockerfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/README.md" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp -r "${PROJECT_ROOT}/src/reddit_compass" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/src/"
-scp -r "${PROJECT_ROOT}/config/profiles" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/config/"
+# Dockerfile copies the complete config directory: profiles plus quality baselines
+# must travel together or a freshly rebuilt collector cannot evaluate a release.
+scp -r "${PROJECT_ROOT}/config/." "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/config/"
 
 # 3. Собираем образы (api slim + collector с Chromium) и запускаем сервисы.
 # Теги разнесены (reddit-compass-api / reddit-compass-collector): раньше оба
@@ -62,6 +66,11 @@ ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api cadd
 echo "🔄 Рестарт Caddy (Docker DNS refresh)..."
 ssh "${VPS_USER}@${VPS_HOST}" "docker restart rc-caddy"
 
+if [[ "${INSTALL_CRON:-0}" == "1" ]]; then
+    echo "⏱️  Устанавливаю managed host-cron..."
+    ssh "${VPS_USER}@${VPS_HOST}" "chmod +x ${REMOTE_DIR}/install-cron.sh && ${REMOTE_DIR}/install-cron.sh"
+fi
+
 # 4. Проверяем health
 echo "🏥 Проверяю health..."
 sleep 3
@@ -73,6 +82,5 @@ echo "   API: http://${VPS_HOST}:8900 (loopback)"
 echo "   Dashboard: http://${VPS_HOST}:8900/dashboard"
 echo "   Docs: http://${VPS_HOST}:8900/docs"
 echo ""
-echo "📋 Для nightly cron (на VPS):"
-echo "   crontab -e → добавить:"
-echo "   17 3 * * * cd ${REMOTE_DIR} && docker compose run --rm reddit-compass nightly >> /var/log/reddit-compass/nightly.log 2>&1"
+echo "📋 Для version-controlled nightly cron:"
+echo "   INSTALL_CRON=1 ./deploy/hostkey/deploy.sh"

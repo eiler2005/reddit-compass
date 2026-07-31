@@ -1,0 +1,14 @@
+# BEGIN reddit-compass managed pipeline
+# All timestamps are UTC.  Collection and Engine are independent processes.
+# Mac supplies only /data/snapshots/YYYY-MM-DD/posts.jsonl (Reddit) before 14:45.
+0 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1
+10 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1
+20 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1
+30 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1
+
+# No network and no LLM: make exactly one truthful raw run from completed artifacts.
+45 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1
+
+# Frozen Engine workflow.  A partial run may be inspected, but cannot publish broad.
+0 16 * * * cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --review-limit 80 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1
+# END reddit-compass managed pipeline

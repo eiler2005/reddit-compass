@@ -72,22 +72,7 @@ do_fetch() {
     echo "============================================================"
     uv run reddit-compass fetch --stealth
     echo ""
-    echo "📡 [$(date +%H:%M:%S)] Hacker News..."
-    uv run reddit-compass hn
-    echo ""
-    echo "📡 [$(date +%H:%M:%S)] RSS (BBC, Guardian, TechCrunch, Verge, Ars)..."
-    uv run reddit-compass rss
-    echo ""
-
-    # LLM-анализ (если есть ключ)
-    if [[ -n "${DASHSCOPE_API_KEY:-}" ]]; then
-        echo "🤖 [$(date +%H:%M:%S)] LLM-анализ (Qwen API)..."
-        uv run reddit-compass signals || echo "⚠️ signals failed (non-critical)"
-    fi
-
-    echo ""
-    echo "✅ [$(date +%H:%M:%S)] Fetch завершён: ${DATA_DIR}/snapshots/${TODAY}/"
-    ls -la "${DATA_DIR}/snapshots/${TODAY}/" 2>/dev/null || true
+    echo "✅ [$(date +%H:%M:%S)] Reddit snapshot готов: ${DATA_DIR}/snapshots/${TODAY}/posts.jsonl"
 }
 
 # ── Sync на VPS ────────────────────────────────────────────────────────────
@@ -95,21 +80,23 @@ do_fetch() {
 do_sync() {
     echo ""
     echo "📦 [$(date +%H:%M:%S)] Синхронизация данных на VPS..."
-    echo "   ${DATA_DIR}/snapshots/${TODAY}/ → ${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/data/snapshots/${TODAY}/"
-
-    # Создаём каталог на VPS
-    ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/data/snapshots/${TODAY}"
-
-    # Копируем snapshot
-    scp -r "${DATA_DIR}/snapshots/${TODAY}/" \
-        "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/data/snapshots/${TODAY}/"
-
-    # Копируем SQLite (если есть)
-    if [[ -f "${DATA_DIR}/compass.db" ]]; then
-        scp "${DATA_DIR}/compass.db" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/data/compass.db"
+    local local_snapshot="${DATA_DIR}/snapshots/${TODAY}/posts.jsonl"
+    local remote_tmp="/tmp/rc-reddit-${TODAY}.jsonl"
+    if [[ ! -s "${local_snapshot}" ]]; then
+        echo "❌ Не найден непустой Reddit snapshot: ${local_snapshot}" >&2
+        return 1
     fi
 
-    echo "✅ Sync завершён. API на VPS видит новые данные."
+    echo "   Reddit JSONL → ${VPS_USER}@${VPS_HOST}:${remote_tmp} → Docker volume /data/snapshots/${TODAY}/"
+    scp "${local_snapshot}" "${VPS_USER}@${VPS_HOST}:${remote_tmp}"
+    ssh "${VPS_USER}@${VPS_HOST}" \
+        "docker exec rc-api mkdir -p /data/snapshots/${TODAY} && \
+         docker cp ${remote_tmp} rc-api:/data/snapshots/${TODAY}/posts.jsonl && \
+         rm -f ${remote_tmp}"
+
+    # Never copy a local compass.db: the VPS owns its raw corpus and combines
+    # this Reddit artifact with the VPS adapters through `collect --from-snapshots`.
+    echo "✅ Reddit artifact synced. VPS finalizer will create the unified raw run."
 }
 
 # ── Main ───────────────────────────────────────────────────────────────────

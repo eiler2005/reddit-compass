@@ -13,6 +13,8 @@ from reddit_compass.api.ui import _build_today_reading_list
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.engine import engine_db
 from reddit_compass.intelligence.migrations import migrate
+from reddit_compass.intelligence.models import SourceHealth
+from reddit_compass.intelligence.repository import save_source_health, upsert_run
 
 
 @pytest.fixture
@@ -537,6 +539,44 @@ def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
     assert today_page.status_code == 200
     assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
     assert "publication_test" in today_page.text
+
+
+def test_runs_page_exposes_collection_to_publication_stages(engine_client: TestClient) -> None:
+    corpus = get_db(Path(os.environ["RC_DB_PATH"]))
+    upsert_run(
+        corpus,
+        run_id="run_test",
+        snapshot_date="2026-07-29",
+        profile="broad",
+        status="complete",
+        started_at="2026-07-29T09:00:00Z",
+        finished_at="2026-07-29T10:00:00Z",
+    )
+    save_source_health(
+        corpus,
+        "run_test",
+        [
+            SourceHealth(
+                source_id="rss",
+                provider="rss",
+                cluster="mainstream",
+                status="ok",
+                count=1,
+            )
+        ],
+    )
+    corpus.commit()
+    corpus.close()
+
+    response = engine_client.get("/runs")
+
+    assert response.status_code == 200
+    assert "Сбор источников" in response.text
+    assert "Frozen Data Release" in response.text
+    assert "Trends / Qwen" in response.text
+    assert "Quality gate" in response.text
+    assert "Publication" in response.text
+    assert "publication_test" in response.text
 
 
 def test_reddit_pulse_api_filters_by_release_date_and_sanitizes_url(

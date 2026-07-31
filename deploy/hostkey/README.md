@@ -8,12 +8,10 @@
 ┌─── VPS HostKey (204.168.239.217) — автоматически, cron ──────────────┐
 │  Скидка Qwen 17:00–03:00 МСК = 14:00–00:00 UTC                        │
 │                                                                        │
-│  14:00 UTC  reddit-compass rss       → 227 статей (BBC, Guardian...)  │
-│  14:10 UTC  reddit-compass hn        → 197 stories (HN, 7 дней)       │
-│  14:20 UTC  reddit-compass ladder    → 183 статьи (NYT, WaPo, FT...)  │
-│  14:30 UTC  reddit-compass ph        → 30 продуктов (ProductHunt)     │
-│  15:00 UTC  reddit-compass signals   → LLM-анализ (qwen3.8-max)       │
-│  15:30 UTC  reddit-compass radar     → отчёт с ссылками + темами      │
+│  14:00 UTC  rss / hn / ladder / ph snapshots                          │
+│  14:45 UTC  collect --from-snapshots → один raw run                   │
+│  16:00 UTC  Engine → stories → Qwen → trends → quality → shadow       │
+│  вручную    complete gated publication → broad                          │
 │                                                                        │
 │  rc-api     (FastAPI :8900, 24/7)                                      │
 │  rc-caddy   (reverse proxy, loopback)                                  │
@@ -59,21 +57,29 @@
 
 ## Host-cron (скидка Qwen 17:00–03:00 МСК = 14:00–00:00 UTC)
 
-LLM-анализ (signals) запускается в окне скидки на qwen3.8-max-preview.
-Весь nightly заканчивается до 03:00 МСК (00:00 UTC).
+Collector и Engine запускаются раздельно. LLM не влияет на статус raw collection;
+он оценивает лишь ограниченную серую зону Story/Trend Engine. Broad не обновляется от
+partial Data Release или failed quality gate.
 
 ```cron
-# Сбор данных (без LLM, бесплатно)
+# Snapshots (source adapters)
 0  14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1
 10 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1
 20 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1
 30 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1
-# LLM-анализ (в окне скидки 17:00-03:00 МСК)
-0  15 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass signals >> /tmp/rc-signals.log 2>&1
-30 15 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass radar >> /tmp/rc-radar.log 2>&1
+45 14 * * * cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1
+0 16 * * * cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --review-limit 80 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1
 ```
 
-> Reddit fetch — вручную с Mac (residential IP), sync через чат. С VPS Reddit блокирует (403).
+Установка block идемпотентна и сохраняет cron других стеков:
+
+```bash
+INSTALL_CRON=1 ./deploy/hostkey/deploy.sh
+```
+
+Reddit поступает с Mac (residential IP) как `posts.jsonl` в Docker volume. Локальный
+`compass.db` никогда не копируется на VPS. Полный completion/publish contract:
+[`docs/COLLECTION_LIFECYCLE.md`](../../docs/COLLECTION_LIFECYCLE.md).
 
 ## Модельная пирамида (цена/качество)
 

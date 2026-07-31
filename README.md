@@ -33,8 +33,9 @@ analysis uses the cheaper off-peak rate.
 | 14:10 / 17:10 | 197 stories from Hacker News (Algolia API, last 7 days) | What developers are building and arguing about |
 | 14:20 / 17:20 | 183 articles from NYT, WaPo, FT, Wired, Medium + 7 more (Ladder paywall proxy) | The *real* analysis behind the paywall |
 | 14:30 / 17:30 | 30 products from ProductHunt (GraphQL) | What's launching right now |
-| independent | Collector finalizes raw facts in `compass.db` | Collection status does not depend on LLM |
-| manual/shadow | Versioned Engine runs facets → stories → trends | Repeat analysis without re-collecting |
+| 14:45 / 17:45 | Snapshot finalizer creates one raw run in `compass.db` | Completion is factual and does not depend on LLM |
+| 16:00 / 19:00 | Versioned Engine runs facets → stories → bounded Qwen → trends → quality → shadow | Repeat analysis without re-collecting |
+| manual | Operator inspects and publishes a complete gated version to `broad` | Radar never silently replaces a good version with a partial one |
 
 > Reddit (737 posts, 18 subreddits) is collected manually from a residential IP
 > (Reddit blocks datacenter IPs) and synced to the VPS.
@@ -56,6 +57,7 @@ You wake up to a report that says:
 
 ```bash
 reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
+reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date YYYY-MM-DD
 reddit-compass engine release create --run RUN_ID
 reddit-compass engine facets --release RELEASE_ID --profile broad
 reddit-compass engine stories propose --facet-release FACET_ID --limit 50
@@ -193,8 +195,10 @@ configuration or `REDDIT_COMPASS_PROXIES`.
 
 ### Nightly automation
 
-**VPS** (RSS, HN, Ladder, PH, LLM, radar) — host-cron in the Qwen discount window
-(14:00–15:30 UTC = 17:00–18:30 MSK). See [`deploy/hostkey/README.md`](deploy/hostkey/README.md).
+**VPS** collects RSS, HN, Ladder and ProductHunt, then finalizes one raw snapshot run at 14:45 UTC
+and runs the Engine in shadow at 16:00 UTC. The exact version-controlled schedule is in
+[`deploy/hostkey/README.md`](deploy/hostkey/README.md); the completion and publication rules are
+in [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 
 **Reddit** (residential IP) — collected from Mac (Reddit blocks datacenter IPs),
 then synced to the VPS. Nightly `scripts/fetch-and-sync.sh` (launchd, 03:17) alternates
@@ -384,6 +388,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full system architecture with diagrams |
 | [`ROADMAP.md`](ROADMAP.md) | Phases 2–6, status |
 | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | 21 sources, 5 clusters |
+| [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md) | Completion contract, Mac/VPS handoff, run stages, shadow/publish/rollback |
 | [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) | Text diagrams from source collection to News, Stories, Trends and Radar |
 | [`docs/DATA_FLOW_DIAGRAMS.md`](docs/DATA_FLOW_DIAGRAMS.md) | Mermaid-схемы: Reddit → stories → trends → Reddit Pulse → публикации |
 | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) | Полы качества + регрессионный harness (`engine quality report/check/snapshot`) |

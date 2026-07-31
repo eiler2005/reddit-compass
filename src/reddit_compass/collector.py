@@ -6,6 +6,7 @@ does not import clustering, ranking, briefing, item-signal or LLM modules.
 
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import time
@@ -129,6 +130,110 @@ async def collect_sources(
     return CollectionResult(
         run_id=run_id,
         date=snapshot_date,
+        profile=profile,
+        status=status,
+        source_results=source_results,
+        items=all_items,
+        started_at=started_at,
+        finished_at=finished_at,
+    )
+
+
+def finalize_snapshot_collection(
+    config: MonitorConfig,
+    snapshots_dir: Path,
+    db_path: Path,
+    *,
+    sources: list[str] | None = None,
+    profile: str = DEFAULT_PROFILE,
+    snapshot_date: str | None = None,
+) -> CollectionResult:
+    """Persist an already collected snapshot as one truthful collection run.
+
+    Source adapters are intentionally *not* invoked here.  This is the hand-off
+    used when Reddit has been fetched from the Mac and the remaining adapters
+    have written their JSONL artifacts on the VPS.  A missing artifact is an
+    explicit error and therefore makes the resulting run ``partial``; stale or
+    absent input can never silently turn into a completed collection.
+    """
+
+    del config  # Kept in the public signature alongside ``collect_sources``.
+    date = snapshot_date or datetime.now(UTC).strftime("%Y-%m-%d")
+    try:
+        datetime.strptime(date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("snapshot_date must use YYYY-MM-DD") from exc
+    run_id = f"{date}:{profile}"
+    started_at = now_iso()
+    snap_dir = snapshots_dir / date
+    selected = [
+        _ALIASES.get(source.strip(), source.strip()) for source in (sources or DEFAULT_SOURCES)
+    ]
+
+    source_results: list[SourceResult] = []
+    all_items: list[ContentItem] = []
+    for source_id in selected:
+        filename = _FILE_MAP.get(source_id, f"{source_id}.jsonl")
+        path = snap_dir / filename
+        if not path.exists():
+            source_results.append(
+                SourceResult(
+                    source_id=source_id,
+                    status="error",
+                    error_code="snapshot_missing",
+                    message=f"Missing snapshot artifact: {filename}",
+                )
+            )
+            continue
+        try:
+            items, _ = load_legacy_jsonl(path, filename, started_at)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            source_results.append(
+                SourceResult(
+                    source_id=source_id,
+                    status="error",
+                    error_code="snapshot_invalid",
+                    message=f"Cannot read {filename}: {exc.__class__.__name__}",
+                )
+            )
+            continue
+        all_items.extend(items)
+        source_results.append(
+            SourceResult(
+                source_id=source_id,
+                status="ok" if items else "empty",
+                count=len(items),
+                message=f"Finalized existing snapshot artifact: {filename}",
+            )
+        )
+
+    finished_at = now_iso()
+    status = (
+        "complete"
+        if source_results and all(result.status in {"ok", "empty"} for result in source_results)
+        else "partial"
+    )
+    from .db import get_db
+
+    conn = get_db(db_path)
+    try:
+        migrate(conn)
+        persist_collection(
+            conn,
+            run_id=run_id,
+            snapshot_date=date,
+            profile=profile,
+            status=status,
+            started_at=started_at,
+            finished_at=finished_at,
+            items=all_items,
+            source_results=source_results,
+        )
+    finally:
+        conn.close()
+    return CollectionResult(
+        run_id=run_id,
+        date=date,
         profile=profile,
         status=status,
         source_results=source_results,

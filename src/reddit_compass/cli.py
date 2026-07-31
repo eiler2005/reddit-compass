@@ -485,7 +485,7 @@ async def _cmd_ph(args: argparse.Namespace) -> None:
 
 
 async def _execute_collection(args: argparse.Namespace) -> object:
-    from .collector import collect_sources
+    from .collector import collect_sources, finalize_snapshot_collection
 
     config = _load_config(args)
     snapshots_dir = _snapshots_dir(args)
@@ -498,6 +498,20 @@ async def _execute_collection(args: argparse.Namespace) -> object:
     if args.sources:
         sources = [s.strip() for s in args.sources.split(",")]
     profile = getattr(args, "profile", DEFAULT_PROFILE)
+    snapshot_date = getattr(args, "date", None)
+    if getattr(args, "from_snapshots", False):
+        print(
+            "📦 Finalize snapshot collection: "
+            f"sources={sources or 'all'}, profile={profile}, date={snapshot_date or 'today'}"
+        )
+        return finalize_snapshot_collection(
+            config=config,
+            snapshots_dir=snapshots_dir,
+            db_path=db_path,
+            sources=sources,
+            profile=profile,
+            snapshot_date=snapshot_date,
+        )
     print(f"🔄 Collect: sources={sources or 'all'}, profile={profile}")
     return await collect_sources(
         config=config,
@@ -1458,6 +1472,8 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     embed_model=args.embed_model,
                     review_model=args.review_model,
                     review_limit=int(args.review_limit),
+                    trend_review_model=args.trend_review_model,
+                    trend_review_limit=int(args.trend_review_limit),
                     review_runner=review_runner,
                     publish_channel=args.publish_channel or None,
                     allow_partial=args.allow_partial,
@@ -1780,6 +1796,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Источники через запятую: reddit,hn,rss,ladder,ph",
     )
     collect_p.add_argument("--profile", type=str, default=DEFAULT_PROFILE, help="Профиль")
+    collect_p.add_argument(
+        "--from-snapshots",
+        action="store_true",
+        help=(
+            "Не ходить в сеть: собрать единый raw run из уже записанных JSONL "
+            "артефактов snapshots/YYYY-MM-DD"
+        ),
+    )
+    collect_p.add_argument(
+        "--date",
+        type=str,
+        default=None,
+        help="Дата snapshot для --from-snapshots (YYYY-MM-DD; по умолчанию UTC today)",
+    )
 
     engine_p = sub.add_parser(
         "engine",
@@ -2131,6 +2161,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=0,
         help="Qwen-adjudicate up to N gray-zone pairs (0 = skip, deterministic only).",
+    )
+    engine_cycle.add_argument(
+        "--trend-review-limit",
+        type=int,
+        default=0,
+        help="Qwen-review up to N trend candidates and materialize confirmed status (0 = skip).",
+    )
+    engine_cycle.add_argument(
+        "--trend-review-model",
+        default="qwen3.8-max-preview",
+        help="Qwen model for final bounded trend review.",
     )
     engine_cycle.add_argument(
         "--publish-channel",

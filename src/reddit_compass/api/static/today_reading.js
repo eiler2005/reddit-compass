@@ -44,10 +44,17 @@
         return link;
     };
 
-    const fetchItems = (endpoint) =>
-        fetch(endpoint, { headers: { Accept: "application/json" } })
+    const fetchItems = (endpoint) => {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 30000);
+        return fetch(endpoint, {
+            headers: { Accept: "application/json" },
+            signal: controller.signal,
+        })
             .then((response) => (response.ok ? response.json() : Promise.reject(response)))
-            .then((payload) => (Array.isArray(payload.items) ? payload.items : []));
+            .then((payload) => (Array.isArray(payload.items) ? payload.items : []))
+            .finally(() => window.clearTimeout(timer));
+    };
 
     const renderChange = (trend) => {
         const card = document.createElement("a");
@@ -167,11 +174,12 @@
         return fetchItems(url);
     };
 
-    Promise.all([fetchReadingPage(0), fetchReadingPage(10)])
-        .then((pages) => {
-            const items = pages.flat();
+    // The first page is valuable by itself.  Load it before the second page so
+    // a reader does not stare at an empty dashboard while 20 items are ranked.
+    fetchReadingPage(0)
+        .then((firstPage) => {
             feed.replaceChildren();
-            if (!items.length) {
+            if (!firstPage.length) {
                 appendText(
                     feed,
                     "p",
@@ -180,15 +188,36 @@
                 );
                 return;
             }
-            items.forEach((item, index) => feed.append(renderReadingItem(item, index)));
+            firstPage.forEach((item, index) => feed.append(renderReadingItem(item, index)));
+            appendText(feed, "p", "Подгружаю ещё 10 материалов…", "section-note");
+            return fetchReadingPage(10).then((secondPage) => ({ firstPage, secondPage }));
+        })
+        .then((pages) => {
+            if (!pages) return;
+            const loading = feed.querySelector(".section-note");
+            if (loading) loading.remove();
+            pages.secondPage.forEach((item, index) =>
+                feed.append(renderReadingItem(item, pages.firstPage.length + index))
+            );
         })
         .catch(() => {
-            feed.replaceChildren();
-            appendText(
-                feed,
-                "p",
-                "Не удалось загрузить ленту. Откройте News, чтобы посмотреть материалы выпуска.",
-                "section-note"
-            );
+            const loading = feed.querySelector(".section-note");
+            if (loading) loading.remove();
+            if (feed.querySelector(".reading-item")) {
+                appendText(
+                    feed,
+                    "p",
+                    "Остальные материалы пока недоступны. Уже загруженные можно открыть; полный выпуск — в News.",
+                    "section-note"
+                );
+            } else {
+                feed.replaceChildren();
+                appendText(
+                    feed,
+                    "p",
+                    "Не удалось загрузить ленту. Откройте News, чтобы посмотреть материалы выпуска.",
+                    "section-note"
+                );
+            }
         });
 })();
