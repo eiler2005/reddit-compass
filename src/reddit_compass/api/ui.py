@@ -33,6 +33,7 @@ from ..intelligence.engine import (
     list_publications,
     open_engine_readonly,
 )
+from ..intelligence.quality import is_bad_trend_name
 from ..intelligence.repository import (
     get_briefing,
     get_research_state,
@@ -585,8 +586,17 @@ def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, 
         "insufficient_history",
         "fading",
     )
+    # Today is an editorial brief, not a diagnostics surface.  An embedding
+    # cluster with a token-bag name (for example ``my ai job me``) is useful in
+    # the Engine lab but actively misleading in a reader-facing card.  Surface
+    # only trends that passed the bounded review and have a usable name; all
+    # candidates remain available in Trends/Engine for inspection.
     changes = [
-        trend for lifecycle in lifecycle_order for trend in radar.shelves.get(lifecycle, [])
+        trend
+        for lifecycle in lifecycle_order
+        for trend in radar.shelves.get(lifecycle, [])
+        if str(trend.get("review_status") or "pending") == "confirmed"
+        and not is_bad_trend_name(str(trend.get("title") or trend.get("name_ru") or ""))
     ][:5]
     cards: list[dict[str, object]] = []
     for trend in changes:
@@ -746,6 +756,23 @@ async def today_page(
             analysis_query = _analysis_query("broad", None)
             radar_payload = published_radar.model_dump()
             decorated_changes = _today_change_candidates(published_radar, analysis_query)
+            # Render the first page on the server.  The browser may then append
+            # the remaining ten records, but a cached/failed static JavaScript
+            # asset can never leave the primary daily reading list as a
+            # permanent "Подбираю…" placeholder.
+            try:
+                initial_reading = list(
+                    _cached_today_reading_list(
+                        str(engine_path),
+                        publication_id=str(radar_payload.get("publication_id") or "preview"),
+                        data_release_id=str(radar_payload.get("data_release_id") or ""),
+                        story_release_id=str(radar_payload.get("story_release_id") or ""),
+                        date=str(radar_payload["date"]),
+                        profile=profile,
+                    )[:10]
+                )
+            except (HTTPException, OSError, sqlite3.Error):
+                initial_reading = []
             return templates.TemplateResponse(
                 request=request,
                 name="engine_today.html",
@@ -757,6 +784,7 @@ async def today_page(
                         decorated_changes,
                         analysis_query,
                     ),
+                    "initial_reading": initial_reading,
                     "reading_endpoint": "/ui/today-reading?"
                     + urlencode({"date": radar_payload["date"], "profile": profile}),
                     "changes_endpoint": "/ui/today-changes?"

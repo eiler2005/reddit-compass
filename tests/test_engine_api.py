@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
 from reddit_compass.api.app import create_app
-from reddit_compass.api.ui import _build_today_reading_list
+from reddit_compass.api.ui import _build_today_reading_list, _today_change_candidates
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.engine import engine_db
 from reddit_compass.intelligence.migrations import migrate
@@ -453,7 +454,10 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert "Куда идти дальше" in response.text
     assert 'href="/news?channel=broad"' in response.text
     assert 'href="/stories?channel=broad&amp;domain=world_geopolitics"' in response.text
-    assert 'src="/static/today_reading.js"' in response.text
+    assert 'src="/static/today_reading.js?v=20260731.2"' in response.text
+    assert 'data-server-rendered="true"' in response.text
+    assert "data-reading-item" in response.text
+    assert 'href="https://example.com/story"' in response.text
     assert reading_response.json()["items"][0]["primary_url"] == "https://example.com/story"
     assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
     assert "evidence_story_ids" not in changes_response.json()["items"][0]
@@ -471,6 +475,39 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     }
     assert "javascript:alert" not in response.text
     assert "javascript:alert" not in reading_response.text
+
+
+def test_today_hides_unreviewed_or_unusable_trend_candidates() -> None:
+    radar = SimpleNamespace(
+        shelves={
+            "growing": [
+                {
+                    "trend_id": "pending_bad",
+                    "title": "my ai job me",
+                    "review_status": "pending",
+                    "lifecycle": "growing",
+                },
+                {
+                    "trend_id": "confirmed_bad",
+                    "title": "ai agent",
+                    "review_status": "confirmed",
+                    "lifecycle": "growing",
+                },
+                {
+                    "trend_id": "confirmed_good",
+                    "title": "Новая проверяемая тенденция",
+                    "review_status": "confirmed",
+                    "lifecycle": "growing",
+                    "confidence": 0.9,
+                },
+            ]
+        }
+    )
+
+    cards = _today_change_candidates(radar, "channel=broad")
+
+    assert [card["title"] for card in cards] == ["Новая проверяемая тенденция"]
+    assert cards[0]["url"] == "/trends/confirmed_good?channel=broad"
 
 
 def test_today_reading_list_prefers_article_and_dedupes_story(

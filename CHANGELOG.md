@@ -16,6 +16,10 @@
   observations, а не из изменяемой даты item.
 - **Reliable Today feeds**: тяжёлый reading selection вынесен из async event loop, кэшируется по
   immutable publication и грузится постранично; Engine SQLite использует WAL + busy timeout.
+  Первые десять ссылок теперь server-rendered, а статический JS получает cache-busting version и
+  лишь догружает остаток: Today не остаётся на «Подбираю…» при stale asset или сбое вторичного
+  запроса. В «Что изменилось» допускаются только подтверждённые trends с пригодным именем;
+  сырой кластер остаётся диагностикой Engine.
 - **Same-cycle reviewed Engine**: валидные bounded Qwen pair reviews создают второй immutable
   StoryRelease в том же cycle; bounded trend review materializes финальный TrendRelease. Qwen
   pair labels используют тот же canonical pair key, что обучающий merge scorer.

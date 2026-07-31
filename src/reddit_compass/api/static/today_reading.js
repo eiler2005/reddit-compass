@@ -87,7 +87,11 @@
     if (changesSection instanceof HTMLElement) {
         const endpoint = changesSection.dataset.todayChangesUrl;
         const container = changesSection.querySelector("[data-today-changes]");
-        if (endpoint && container instanceof HTMLElement) {
+        // The first cards are rendered with the HTML response.  This keeps
+        // Today readable if a browser has a stale JS asset or a request is
+        // interrupted; there is no reason to replace an already good brief.
+        const serverRendered = container instanceof HTMLElement && container.dataset.serverRendered === "true";
+        if (endpoint && container instanceof HTMLElement && !serverRendered) {
             fetchItems(endpoint)
                 .then((items) => {
                     container.replaceChildren();
@@ -174,10 +178,18 @@
         return fetchItems(url);
     };
 
-    // The first page is valuable by itself.  Load it before the second page so
-    // a reader does not stare at an empty dashboard while 20 items are ranked.
-    fetchReadingPage(0)
-        .then((firstPage) => {
+    const initiallyRendered = feed.querySelectorAll("[data-reading-item]").length;
+    const appendSecondPage = (firstPage, offset) => {
+        appendText(feed, "p", "Подгружаю ещё материалы…", "section-note");
+        return fetchReadingPage(offset).then((secondPage) => ({ firstPage, secondPage }));
+    };
+
+    // The first ten entries are server-rendered in current releases.  Older
+    // HTML still follows the original p0 -> p1 path, so deploys are backwards
+    // compatible while browsers refresh their static assets.
+    const readingPromise = initiallyRendered
+        ? appendSecondPage(Array.from({ length: initiallyRendered }), initiallyRendered)
+        : fetchReadingPage(0).then((firstPage) => {
             feed.replaceChildren();
             if (!firstPage.length) {
                 appendText(
@@ -186,12 +198,13 @@
                     "Лента чтения пока пуста для этого опубликованного release.",
                     "section-note"
                 );
-                return;
+                return null;
             }
             firstPage.forEach((item, index) => feed.append(renderReadingItem(item, index)));
-            appendText(feed, "p", "Подгружаю ещё 10 материалов…", "section-note");
-            return fetchReadingPage(10).then((secondPage) => ({ firstPage, secondPage }));
-        })
+            return appendSecondPage(firstPage, firstPage.length);
+        });
+
+    readingPromise
         .then((pages) => {
             if (!pages) return;
             const loading = feed.querySelector(".section-note");
