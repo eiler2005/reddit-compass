@@ -232,7 +232,11 @@ Today не ждёт JavaScript, чтобы стать полезным: перв
 сообщает об этом и предлагает reading queue; это нормальное промежуточное состояние, а не
 «пустой сбор».
 
-## 5. Каноническое nightly расписание
+## 5. Каноническое расписание (раз в 2 ночи)
+
+Pipeline запускается **каждые 2 ночи** (нечётные дни месяца). Сбор данных дёшев,
+но Engine cycle на VPS с 1 CPU занимает 30-60 минут — ежедневный прогон избыточен
+при 7-дневном окне анализа.
 
 ```text
 00:17 UTC  Mac launchd: public Reddit fetch → posts.jsonl → Docker volume VPS
@@ -245,9 +249,39 @@ Today не ждёт JavaScript, чтобы стать полезным: перв
 manual      inspect `/runs`/`/engine`, then publish complete gated version to `broad`
 ```
 
-Время Mac и VPS — пример; настоящая host-cron конфигурация живёт рядом с deploy runbook.
+Cron-выражение: `*/2` в day-of-month (1, 3, 5, …, 29, 31). Настоящая host-cron
+конфигурация: `deploy/hostkey/reddit-compass.cron`.
+
 Если `posts.jsonl` не пришёл к finalizer, raw run становится `partial`, Engine может дать preview,
 но Broad не меняется. Это безопаснее, чем «зелёный» выпуск без voices.
+
+### 5.1 Полный цикл: от сбора до GUI
+
+Каждый запуск проходит 10 последовательных этапов. Время указано для двух конфигураций:
+**Mac** (Apple M5 Pro, 18 ядер, 64 GB) и **VPS** (1 CPU, 1 GB RAM, residential proxy).
+
+| # | Этап | Команда / процесс | Mac | VPS | Что происходит |
+|---|------|-------------------|-----|-----|----------------|
+| 1 | **Reddit fetch** | `fetch --stealth` (Mac launchd) | ~12 мин | — | Playwright + residential proxy, 19 сабреддитов, jitter 3-6с/запрос |
+| 2 | **СМИ snapshots** | `rss`, `hn`, `ladder`, `ph` (VPS cron) | — | ~5 мин | 4 адаптера последовательно: RSS-ленты, HN Algolia, Ladder proxy, ProductHunt GraphQL |
+| 3 | **Raw run** | `collect --from-snapshots` | ~10с | ~30с | JSONL → `compass.db`, без сети и LLM. Один factual run из всех snapshot-артефактов |
+| 4 | **DataRelease + Facets** | `engine cycle` (внутри) | ~5с | ~15с | Immutable snapshot корпуса + детерминированные facets (домены, сущности, токены) |
+| 5 | **Embedding cache** | `cache_release_embeddings` | ~10с | ~30-60с | model2vec `potion-base-8M`: загрузка модели + encode 5000 items. Кэш переиспользуется между релизами |
+| 6 | **Story clustering** | `create_story_release` | ~1-2 мин | ~5-10 мин | URL/entity/dense top-K retrieval → constrained agglomeration → stable story IDs |
+| 7 | **Auto-label + Qwen review** | `auto_label` + bounded Qwen | ~2-3 мин | ~10-20 мин | Авто-разметка серой зоны + до 80 пар на Qwen review (75с timeout/пара, async) |
+| 8 | **Trend discovery** | `create_trend_release` | ~30с | ~2-5 мин | `embedding_v2`: кластеризация векторов историй, c-TF-IDF имена, дедуп, производная по дням |
+| 9 | **Quality gate** | `compute_quality` + `evaluate_floors` | ~5с | ~10с | 12 полов (overmerge, полнота, таксономия, тренды, Pulse) + регрессии vs baseline |
+| 10 | **Publication** | `publish_radar` (shadow) | ~1с | ~1с | Immutable pointer switch. GUI (`/today`, `/trends`, `/radar`) читает только published pointer |
+| | **Итого engine cycle** | | **~5-8 мин** | **~30-60 мин** | |
+| | **Итого весь pipeline** | | **~20 мин** | **~40-90 мин** | |
+
+После этапа 10 GUI обновляется автоматически — все страницы (`/today`, `/news`, `/trends`,
+`/pulse`, `/radar`) читают immutable publication pointer. Ручная публикация в `broad`
+требует инспекции shadow-версии и явного `engine publish --channel broad`.
+
+**Почему VPS медленнее в 5-10 раз:** 1 CPU против 18 ядер, 1 GB RAM против 64 GB,
+сетевые вызовы через residential proxy (latency + ретраи на 429). Qwen review —
+основной bottleneck на обеих платформах (зависит от API latency, не от CPU).
 
 ## 6. Работа на старых данных без сети
 

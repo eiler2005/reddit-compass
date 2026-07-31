@@ -261,12 +261,15 @@ An optional local proxy for other approved public read-only sources is documente
 only in gitignored operations notes and secret files; never move it into tracked
 configuration or `REDDIT_COMPASS_PROXIES`.
 
-### Nightly automation
+### Automation (every 2 nights)
 
 **VPS** collects RSS, HN, Ladder and ProductHunt, then finalizes one raw snapshot run at 14:45 UTC
-and runs the Engine in shadow at 16:00 UTC. The exact version-controlled schedule is in
-[`deploy/hostkey/README.md`](deploy/hostkey/README.md); the completion and publication rules are
-in [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
+and runs the Engine in shadow at 16:00 UTC. Pipeline runs every 2 nights (odd days, `*/2` in cron) —
+Engine cycle on 1-CPU VPS takes 30-60 min, daily runs are redundant with a 7-day window.
+The exact version-controlled schedule is in
+[`deploy/hostkey/reddit-compass.cron`](deploy/hostkey/reddit-compass.cron); the completion and
+publication rules are in [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
+Full stage-by-stage timing: [`docs/COLLECTION_LIFECYCLE.md` §5.1](docs/COLLECTION_LIFECYCLE.md).
 
 **Reddit** can be collected separately from a local approved route and synced to the VPS as a
 JSONL artifact. Nightly `scripts/fetch-and-sync.sh` (launchd, 03:17) chooses the route from

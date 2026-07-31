@@ -110,7 +110,9 @@ Default collection profile: `config/profiles/broad.json`.
 
 Collection и analysis являются независимыми jobs. Канонический host-cron сначала записывает
 все snapshot-артефакты, затем запускает `collect --from-snapshots`, а после этого — Engine
-в shadow-канале. Отсутствие LLM не меняет collection status.
+в shadow-канале. Отсутствие LLM не меняет collection status. Pipeline запускается
+**раз в 2 ночи** (нечётные дни, `*/2` в cron) — Engine cycle на VPS занимает 30-60 минут,
+ежедневный прогон избыточен при 7-дневном окне.
 
 ### Текущий production flow
 
@@ -124,6 +126,8 @@ VPS: rss / hn / ladder / ph snapshots ──────────────
                                                         │
 manual: complete + gated publication → published_channels["broad"] → Today/Radar
 ```
+
+Полное описание этапов с таймингами: [`docs/COLLECTION_LIFECYCLE.md` §5.1](docs/COLLECTION_LIFECYCLE.md).
 
 `/runs` раскрывает эти стадии для каждого `run_id`. Полный operational contract, статусы и
 rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
