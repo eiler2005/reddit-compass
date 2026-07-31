@@ -1001,3 +1001,19 @@ def test_today_new_reddit_excludes_items_already_in_reading_list() -> None:
     posts = _build_today_reddit_new(conn, "sig", exclude_item_ids={"shown"})
 
     assert [p["item_id"] for p in posts] == ["fresh"]
+
+
+def test_signal_type_labels_cover_every_canonical_type() -> None:
+    """Каждый тип сигнала обязан иметь человекочитаемое название.
+
+    Незакрытый тип уезжает в интерфейс сырым. На проде так вылезла крупнейшая
+    тематика «news link» (494 сигнала): в локальных данных этого типа не было,
+    и пропуск заметили только на живом релизе.
+    """
+    from typing import get_args
+
+    from reddit_compass.api.ui import _SIGNAL_TYPE_LABELS
+    from reddit_compass.intelligence.reddit_pulse import SignalType
+
+    missing = set(get_args(SignalType)) - set(_SIGNAL_TYPE_LABELS)
+    assert not missing, f"нет названий для типов: {sorted(missing)}"

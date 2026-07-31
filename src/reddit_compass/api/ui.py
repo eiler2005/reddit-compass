@@ -183,6 +183,9 @@ _READING_PROVIDER_WEIGHTS = {
 # Человекочитаемые названия типов сигналов Pulse. Сырые `policy_politics` и
 # `career_labor` в интерфейсе не читаются, а тип — единственная рабочая тематическая ось
 # сигналов: `domain_ids_json` у них практически всегда `other`.
+# Покрывает весь ``reddit_pulse.SignalType`` — полнота проверяется тестом.
+# Незакрытый тип попадает в интерфейс сырым: на проде так вылезла крупнейшая
+# тематика «news link» (494 сигнала) вместо «Ссылки на новости».
 _SIGNAL_TYPE_LABELS = {
     "ai_capability": "Возможности AI",
     "ai_risk": "Риски AI",
@@ -192,6 +195,7 @@ _SIGNAL_TYPE_LABELS = {
     "discussion": "Дискуссии",
     "market_investing": "Рынки и инвестиции",
     "meme_culture": "Мемы и культура",
+    "news_link": "Ссылки на новости",
     "pain_point": "Боли",
     "policy_politics": "Политика и регулирование",
     "product_request": "Запросы на продукт",
