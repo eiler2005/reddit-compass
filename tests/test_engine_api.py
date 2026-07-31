@@ -454,6 +454,19 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert 'src="/static/today_reading.js"' in response.text
     assert reading_response.json()["items"][0]["primary_url"] == "https://example.com/story"
     assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
+    assert "evidence_story_ids" not in changes_response.json()["items"][0]
+    assert set(changes_response.json()["items"][0]) == {
+        "url",
+        "title",
+        "pattern",
+        "lifecycle_label",
+        "source_scope_label",
+        "source_scope",
+        "review_label",
+        "confidence_pct",
+        "source_count",
+        "story_count",
+    }
     assert "javascript:alert" not in response.text
     assert "javascript:alert" not in reading_response.text
 

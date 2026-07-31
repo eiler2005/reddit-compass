@@ -278,6 +278,17 @@ def _numeric_dict_value(raw: dict[str, Any], key: str) -> float:
     return 0.0
 
 
+def _as_int(value: object) -> int:
+    if isinstance(value, int | float):
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(float(value))
+        except ValueError:
+            return 0
+    return 0
+
+
 def _is_low_signal_reading_title(title: str) -> bool:
     """Keep recurring community housekeeping out of the human reading queue."""
     title_lower = title.lower()
@@ -548,7 +559,27 @@ def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, 
     changes = [
         trend for lifecycle in lifecycle_order for trend in radar.shelves.get(lifecycle, [])
     ][:5]
-    return [_decorate_today_trend(dict(trend), analysis_query) for trend in changes]
+    cards: list[dict[str, object]] = []
+    for trend in changes:
+        decorated = _decorate_today_trend(dict(trend), analysis_query)
+        # Shelves contain evidence and provenance for Radar. Today needs only
+        # a small card contract; returning the full object defeated progressive
+        # loading on reverse proxies with a small response limit.
+        cards.append(
+            {
+                "url": str(decorated.get("url") or ""),
+                "title": str(decorated.get("title") or "")[:240],
+                "pattern": str(decorated.get("pattern") or "")[:360],
+                "lifecycle_label": str(decorated.get("lifecycle_label") or ""),
+                "source_scope_label": str(decorated.get("source_scope_label") or ""),
+                "source_scope": str(decorated.get("source_scope") or ""),
+                "review_label": str(decorated.get("review_label") or ""),
+                "confidence_pct": _as_int(decorated.get("confidence_pct")),
+                "source_count": _as_int(decorated.get("source_count")),
+                "story_count": _as_int(decorated.get("story_count")),
+            }
+        )
+    return cards
 
 
 def _build_today_dashboard(
