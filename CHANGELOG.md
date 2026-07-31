@@ -192,6 +192,15 @@
 
 ### Fixed
 
+- **`/today` показывал пустой legacy briefing при наличии Engine-релиза**: если для `broad`
+  ещё нет `RadarPublication`, Today теперь использует тот же latest evaluated preview fallback,
+  что `/trends` и Radar API. Production publish также признаёт новые `Engine quality floors`,
+  а не только legacy `metrics.publication_gate`, поэтому зелёный ночной `engine quality check`
+  может быть опубликован в `broad`.
+- **Today стал кликабельным и объяснимым**: карточки trend-кандидатов открывают
+  `/trends/{trend_id}`, технические `partial`/`insufficient_history` объясняются в статусной
+  панели, а верх экрана показывает KPI выпуска, тематический срез и быстрые переходы в
+  News/Stories/Trends/Pulse/Radar.
 - **Perspective gap никогда не считался через CLI**: `reddit-pulse propose` грузил только
   reddit-items, поэтому guard баланса всегда видел 0 mainstream. Баланс теперь измеряется по
   всему релизу (`perspective_gap_available_counts`); на 7-дневном broad разрыв доступен

@@ -3,46 +3,136 @@
 {% block title %}Сегодня · {{ radar.date }} — reddit-compass{% endblock %}
 
 {% block content %}
-<div class="container">
+<div class="container today-dashboard">
     <div class="date-switcher">
         <h1 class="date-title">Сегодня · {{ radar.date }}</h1>
     </div>
 
-    <div class="freshness-bar">
+    <div class="freshness-bar today-freshness">
         <span class="status-badge status-{{ radar.input_status }}">{{ radar.input_status }}</span>
         <span class="freshness-text">
+            {% if radar.preview %}
+            Preview mode · latest evaluated Engine release
+            {% elif radar.publication_id %}
             publication {{ radar.publication_id }} · опубликовано {{ radar.published_at }}
+            {% else %}
+            Engine release · опубликовано {{ radar.published_at }}
+            {% endif %}
+        </span>
+        <span class="profile">
+            {{ radar.engine_version }} · {{ dashboard.release_window }}
         </span>
     </div>
 
-    {% if radar.serving_previous_publication %}
-    <p class="warning">
-        Для выбранной даты новой публикации нет. Показана последняя проверенная версия.
-    </p>
-    {% endif %}
+    <section class="section today-overview">
+        <div class="kpi-grid today-kpis" aria-label="Сводка выпуска">
+            <a class="kpi-card" href="/news?{{ analysis_query }}">
+                <div class="kpi-num">{{ dashboard.item_count }}</div>
+                <div class="kpi-label">материалов</div>
+            </a>
+            <a class="kpi-card" href="/trends?{{ analysis_query }}">
+                <div class="kpi-num">{{ dashboard.trend_count }}</div>
+                <div class="kpi-label">trend-кандидатов</div>
+            </a>
+            <a class="kpi-card" href="/trends?{{ analysis_query }}">
+                <div class="kpi-num">{{ dashboard.cross_source_trend_count }}</div>
+                <div class="kpi-label">cross-source</div>
+            </a>
+            <a class="kpi-card" href="/engine">
+                <div class="kpi-num">{{ dashboard.source_count }}</div>
+                <div class="kpi-label">source feeds</div>
+            </a>
+            <a class="kpi-card" href="/stories?{{ analysis_query }}">
+                <div class="kpi-num">{{ dashboard.source_cluster_count }}</div>
+                <div class="kpi-label">source clusters</div>
+            </a>
+        </div>
+
+        <div class="status-panel">
+            <h2>Качество и ограничения</h2>
+            <p class="section-note">
+                {{ dashboard.confirmed_trend_count }} проверено ·
+                {{ dashboard.candidate_trend_count }} кандидатов ·
+                history {{ radar.history_status }}
+            </p>
+            {% if dashboard.status_notes %}
+            <div class="status-note-grid">
+                {% for note in dashboard.status_notes %}
+                <div class="status-note">
+                    <strong>{{ note.title }}</strong>
+                    <span>{{ note.text }}</span>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="section-note">Выпуск опубликован как полный; история достаточна для lifecycle-оценок.</p>
+            {% endif %}
+        </div>
+    </section>
 
     <section class="section">
         <h2>Что изменилось</h2>
+        <p class="section-note">
+            Это верхние trend-кандидаты из опубликованного Engine release. Клик по карточке открывает trend detail
+            со stories и evidence.
+        </p>
         {% if changes %}
         <div class="story-grid">
             {% for trend in changes[:5] %}
-            <article class="story-card">
+            <a class="story-card today-trend-card" href="{{ trend.url }}">
                 <div class="story-meta">
-                    <span class="status-badge">{{ trend.lifecycle }}</span>
-                    <span>{{ trend.source_count }} источников · {{ trend.story_count }} событий</span>
+                    <span class="direction-badge" title="{{ trend.lifecycle_hint }}">{{ trend.lifecycle_label }}</span>
+                    {% if trend.source_scope_label %}
+                    <span class="scope-badge scope-{{ trend.source_scope }}">{{ trend.source_scope_label }}</span>
+                    {% endif %}
+                    <span>{{ trend.review_label }}</span>
+                    <span>{{ trend.confidence_pct }}%</span>
                 </div>
                 <h3>{{ trend.title }}</h3>
                 {% if trend.pattern %}<p>{{ trend.pattern }}</p>{% endif %}
-            </article>
+                <div class="today-card-footer">
+                    <span>{{ trend.source_count }} источников</span>
+                    <span>{{ trend.story_count }} событий</span>
+                    <span>Открыть →</span>
+                </div>
+            </a>
             {% endfor %}
         </div>
         {% else %}
-        <p>В опубликованной версии пока нет подтверждённых трендов.</p>
+        <p>В опубликованной версии пока нет trend-кандидатов.</p>
         {% endif %}
     </section>
 
+    <section class="section today-grid">
+        <div class="status-panel">
+            <h2>Тематический срез</h2>
+            <div class="cloud">
+                {% for domain in dashboard.top_domains %}
+                <a class="cloud-node" href="/trends?{{ analysis_query }}&domain={{ domain.domain_id }}">
+                    {{ domain.label_ru }}
+                    <span class="cloud-count">{{ domain.story_count }}</span>
+                </a>
+                {% else %}
+                <span class="section-note">Рубрики пока не рассчитаны.</span>
+                {% endfor %}
+            </div>
+        </div>
+
+        <div class="status-panel">
+            <h2>Куда идти дальше</h2>
+            <div class="quick-link-grid">
+                {% for title, url, hint in dashboard.quick_links %}
+                <a class="quick-link-card" href="{{ url }}">
+                    <strong>{{ title }}</strong>
+                    <span>{{ hint }}</span>
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+    </section>
+
     <div class="radar-cta">
-        <a href="/runs/{{ radar.date }}/radar?channel=broad" class="btn btn-primary">
+        <a href="/runs/{{ radar.date }}/radar?{{ analysis_query }}" class="btn btn-primary">
             Открыть полный Trend Radar →
         </a>
         <span class="radar-teaser">

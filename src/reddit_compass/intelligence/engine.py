@@ -4584,6 +4584,32 @@ def _discover_trends(
     return result[:50], history_status
 
 
+def _release_passes_publication_gate(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    story_release: StoryRelease,
+    trend_release: TrendRelease,
+) -> bool:
+    """Allow production publish through legacy gates or the newer Engine quality floors."""
+
+    legacy_gate = bool(story_release.metrics.get("publication_gate")) and bool(
+        trend_release.metrics.get("publication_gate")
+    )
+    if legacy_gate:
+        return True
+    from .quality import compute_quality, evaluate_floors
+
+    metrics = compute_quality(
+        conn,
+        data_release_id=data_release_id,
+        story_release_id=story_release.story_release_id,
+        trend_release_id=trend_release.trend_release_id,
+    )
+    floors = evaluate_floors(metrics)
+    return bool(floors) and all(floor.passed for floor in floors)
+
+
 def publish_radar(
     conn: sqlite3.Connection,
     *,
@@ -4604,20 +4630,22 @@ def publish_radar(
         or trend_release.status not in publishable_statuses
     ):
         raise ValueError("Only evaluated releases can be published")
-    if channel in {"broad", "ai-native"} and (
-        not bool(story_release.metrics.get("publication_gate"))
-        or not bool(trend_release.metrics.get("publication_gate"))
-    ):
-        raise ValueError(
-            "Production channel requires passed Story and Trend publication gates; "
-            "use a shadow channel while evaluating"
-        )
     facet_release = get_facet_release(conn, story_release.facet_release_id)
     if facet_release is None:
         raise ValueError("Facet release not found")
     data_release = get_data_release(conn, facet_release.data_release_id)
     if data_release is None or not verify_data_release(conn, data_release.release_id):
         raise ValueError("Data release not found or checksum failed")
+    if channel in {"broad", "ai-native"} and not _release_passes_publication_gate(
+        conn,
+        data_release_id=data_release.release_id,
+        story_release=story_release,
+        trend_release=trend_release,
+    ):
+        raise ValueError(
+            "Production channel requires passed Story/Trend publication gates "
+            "or passed Engine quality floors; use a shadow channel while evaluating"
+        )
     if data_release.input_status != "complete" and not allow_partial:
         raise ValueError("Partial data release requires allow_partial=True")
     current = get_current_publication(conn, channel)

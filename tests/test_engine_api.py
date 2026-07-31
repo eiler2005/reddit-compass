@@ -409,6 +409,7 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     radar_response = engine_client.get("/api/v2/radar/2026-07-29?channel=broad")
     trends_response = engine_client.get("/api/v2/engine/trends?channel=broad")
     trends_page = engine_client.get("/trends")
+    today_page = engine_client.get("/today")
 
     assert radar_response.status_code == 200
     assert radar_response.json()["preview"] is True
@@ -420,6 +421,28 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     assert trends_page.status_code == 200
     assert "Preview mode" in trends_page.text
     assert "Проверяемый тренд" in trends_page.text
+    assert today_page.status_code == 200
+    assert "Preview mode" in today_page.text
+    assert "Проверяемый тренд" in today_page.text
+    assert 'href="/trends/trend_1?channel=broad"' in today_page.text
+    assert "Качество и ограничения" in today_page.text
+    assert "Куда идти дальше" in today_page.text
+
+
+def test_engine_today_dashboard_is_clickable_and_informative(
+    engine_client: TestClient,
+) -> None:
+    response = engine_client.get("/today")
+
+    assert response.status_code == 200
+    assert "Сводка выпуска" in response.text
+    assert "trend-кандидатов" in response.text
+    assert "Качество и ограничения" in response.text
+    assert "Тематический срез" in response.text
+    assert "Куда идти дальше" in response.text
+    assert 'href="/trends/trend_1?channel=broad"' in response.text
+    assert 'href="/news?channel=broad"' in response.text
+    assert "Проверяемый тренд" in response.text
 
 
 def test_radar_keeps_previous_publication_for_new_date(

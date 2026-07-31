@@ -11,6 +11,7 @@ import sqlite3
 from collections.abc import Generator
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
@@ -91,6 +92,166 @@ def _analysis_query(channel: str = "broad", publication_id: str | None = None) -
     return urlencode(params)
 
 
+_LIFECYCLE_LABELS = {
+    "new": "новое",
+    "growing": "растёт",
+    "stable": "стабильно",
+    "fading": "остывает",
+    "resurfacing": "вернулось",
+    "insufficient_history": "мало истории",
+}
+
+_LIFECYCLE_HINTS = {
+    "new": "Впервые заметно в текущем окне.",
+    "growing": "Скорость выше предыдущего baseline.",
+    "stable": "Держится без резкого ускорения.",
+    "fading": "Новых подтверждений стало меньше.",
+    "resurfacing": "Сюжет вернулся после паузы.",
+    "insufficient_history": (
+        "Истории пока меньше нужного окна; динамика не классифицируется как рост/падение."
+    ),
+}
+
+_SCOPE_LABELS = {
+    "cross_source": "Reddit + СМИ",
+    "community_only": "только сообщества",
+    "mainstream_only": "только СМИ",
+}
+
+_REVIEW_LABELS = {
+    "confirmed": "проверено",
+    "pending": "машинный кандидат",
+    "rejected": "отклонено",
+    "legacy": "legacy",
+}
+
+
+def _decorate_today_trend(trend: dict[str, object], analysis_query: str) -> dict[str, object]:
+    enriched = dict(trend)
+    lifecycle = str(enriched.get("lifecycle") or "insufficient_history")
+    source_scope = str(enriched.get("source_scope") or "")
+    review_status = str(enriched.get("review_status") or "pending")
+    trend_id = str(enriched.get("trend_id") or "")
+    confidence_raw = enriched.get("confidence")
+    confidence = float(confidence_raw) if isinstance(confidence_raw, int | float | str) else 0.0
+    enriched["url"] = (
+        f"/trends/{trend_id}?{analysis_query}" if trend_id else f"/trends?{analysis_query}"
+    )
+    enriched["lifecycle_label"] = _LIFECYCLE_LABELS.get(lifecycle, lifecycle)
+    enriched["lifecycle_hint"] = _LIFECYCLE_HINTS.get(lifecycle, "")
+    enriched["source_scope_label"] = _SCOPE_LABELS.get(source_scope, source_scope)
+    enriched["review_label"] = _REVIEW_LABELS.get(review_status, review_status)
+    enriched["confidence_pct"] = round(confidence * 100)
+    return enriched
+
+
+def _build_today_dashboard(
+    radar: dict[str, object], changes: list[dict[str, object]]
+) -> dict[str, object]:
+    run_raw = radar.get("run")
+    run = cast(dict[str, Any], run_raw) if isinstance(run_raw, dict) else {}
+    shelves_raw = radar.get("shelves")
+    shelves = cast(dict[str, Any], shelves_raw) if isinstance(shelves_raw, dict) else {}
+    all_trends = [
+        trend
+        for trends in shelves.values()
+        if isinstance(trends, list)
+        for trend in trends
+        if isinstance(trend, dict)
+    ]
+    source_coverage_raw = run.get("source_coverage")
+    source_coverage = (
+        cast(dict[str, Any], source_coverage_raw) if isinstance(source_coverage_raw, dict) else {}
+    )
+    matrix_raw = radar.get("matrix")
+    matrix = matrix_raw if isinstance(matrix_raw, list) else []
+    source_clusters = sorted(
+        {
+            str(row.get("source_cluster"))
+            for row in matrix
+            if isinstance(row, dict) and row.get("source_cluster")
+        }
+    )
+    domains_raw = radar.get("domains")
+    domains = domains_raw if isinstance(domains_raw, list) else []
+    top_domains = [
+        domain for domain in domains[:8] if isinstance(domain, dict) and domain.get("domain_id")
+    ]
+    release_dates = run.get("release_dates", [])
+    if not isinstance(release_dates, list):
+        release_dates = []
+    status_notes: list[dict[str, str]] = []
+    if radar.get("input_status") == "partial":
+        status_notes.append(
+            {
+                "title": "Partial",
+                "text": (
+                    "Выпуск опубликован с неполным входным сбором. Аналитика доступна, "
+                    "но покрытие источников нужно читать как частичное."
+                ),
+            }
+        )
+    if radar.get("history_status") == "insufficient_history":
+        status_notes.append(
+            {
+                "title": "Мало истории",
+                "text": (
+                    "Engine пока не накопил достаточно последовательных релизов, поэтому "
+                    "не рисует честные growing/fading и помечает карточки как кандидаты."
+                ),
+            }
+        )
+    if radar.get("preview"):
+        status_notes.append(
+            {
+                "title": "Preview",
+                "text": "Показан latest evaluated release, а не production RadarPublication.",
+            }
+        )
+    if radar.get("serving_previous_publication"):
+        status_notes.append(
+            {
+                "title": "Предыдущая публикация",
+                "text": (
+                    "Для выбранной даты нет отдельной публикации, показана последняя проверенная."
+                ),
+            }
+        )
+
+    return {
+        "item_count": int(run.get("item_count") or 0) if isinstance(run, dict) else 0,
+        "source_count": len(source_coverage),
+        "source_cluster_count": len(source_clusters),
+        "trend_count": len(all_trends),
+        "cross_source_trend_count": sum(
+            1
+            for trend in all_trends
+            if str(trend.get("source_scope") or "") == "cross_source"
+            or int(trend.get("source_count") or 0) > 1
+        ),
+        "confirmed_trend_count": sum(
+            1 for trend in all_trends if str(trend.get("review_status") or "") == "confirmed"
+        ),
+        "candidate_trend_count": sum(
+            1 for trend in all_trends if str(trend.get("review_status") or "pending") != "confirmed"
+        ),
+        "change_count": len(changes),
+        "top_domains": top_domains,
+        "source_clusters": source_clusters,
+        "release_window": " → ".join([str(release_dates[0]), str(release_dates[-1])])
+        if release_dates
+        else "",
+        "status_notes": status_notes,
+        "quick_links": [
+            ("News", "/news?channel=broad", "сырые материалы"),
+            ("Stories", "/stories?channel=broad", "конкретные события"),
+            ("Trends", "/trends?channel=broad", "паттерны поверх событий"),
+            ("Reddit Pulse", "/pulse", "сигналы сообществ"),
+            ("Radar", f"/runs/{radar.get('date')}/radar?channel=broad", "полный workspace"),
+        ],
+    }
+
+
 @router.get("/today", response_class=HTMLResponse)
 async def today_page(
     request: Request,
@@ -101,14 +262,16 @@ async def today_page(
     """Главная страница: briefing на сегодня."""
     engine_path = _engine_path()
     if engine_path.exists():
-        from .v2 import _engine_radar
+        from .v2 import _engine_radar, _resolve_latest_evaluated_preview
 
         engine_conn = open_engine_readonly(engine_path)
         try:
             publication = get_current_publication(engine_conn, "broad")
-            release = (
-                get_data_release(engine_conn, publication.data_release_id) if publication else None
-            )
+            if publication:
+                release = get_data_release(engine_conn, publication.data_release_id)
+            else:
+                preview = _resolve_latest_evaluated_preview(engine_conn, channel="broad")
+                release = preview[1] if preview else None
             engine_date = date or (max(release.dates) if release and release.dates else None)
             published_radar = (
                 _engine_radar(
@@ -140,12 +303,19 @@ async def today_page(
                 for lifecycle in lifecycle_order
                 for trend in published_radar.shelves.get(lifecycle, [])
             ][:10]
+            analysis_query = _analysis_query("broad", None)
+            radar_payload = published_radar.model_dump()
+            decorated_changes = [
+                _decorate_today_trend(dict(trend), analysis_query) for trend in changes
+            ]
             return templates.TemplateResponse(
                 request=request,
                 name="engine_today.html",
                 context={
-                    "radar": published_radar.model_dump(),
-                    "changes": changes,
+                    "radar": radar_payload,
+                    "changes": decorated_changes,
+                    "dashboard": _build_today_dashboard(radar_payload, decorated_changes),
+                    "analysis_query": analysis_query,
                 },
             )
 

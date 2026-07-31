@@ -683,6 +683,45 @@ def test_production_channel_requires_quality_gates(tmp_path: Path) -> None:
         )
 
 
+def test_production_channel_accepts_quality_floors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    trends = create_trend_release(engine, story_release_id=stories.story_release_id)
+
+    class PassingFloor:
+        passed = True
+
+    monkeypatch.setattr(
+        "reddit_compass.intelligence.quality.compute_quality",
+        lambda *_args, **_kwargs: {"stories_overmerge_ge5": 0},
+    )
+    monkeypatch.setattr(
+        "reddit_compass.intelligence.quality.evaluate_floors",
+        lambda _metrics: [PassingFloor()],
+    )
+
+    publication = publish_radar(
+        engine,
+        story_release_id=stories.story_release_id,
+        trend_release_id=trends.trend_release_id,
+        channel="broad",
+        allow_partial=True,
+    )
+
+    assert get_current_publication(engine, "broad") == publication
+
+
 def test_legacy_lab_import_copies_only_checksum_matched_release(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
