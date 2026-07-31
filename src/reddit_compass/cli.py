@@ -28,6 +28,7 @@ from .detect_virality import detect_virality
 from .export import render_trends_report, write_snapshot, write_trends_report
 from .fetch_subreddits import fetch_all_subreddits
 from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
+from .intelligence.engine import DEFAULT_TREND_METHOD
 from .models import PostCard, TrackedThreadState, ViralitySignal
 from .search_keywords import search_all_keywords
 from .track_threads import track_all_threads
@@ -663,6 +664,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         active_label_story_pairs,
         auto_label_story_pairs,
         cache_release_embeddings,
+        calibrate_dense_thresholds,
         compare_engine_versions,
         compare_story_engine_variants,
         create_data_release,
@@ -747,16 +749,54 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             )
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return
+        if args.engine_group == "calibrate":
+            calibration = calibrate_dense_thresholds(
+                engine_conn,
+                data_release_id=args.release,
+                model_name=args.model,
+                model_revision=args.model_revision,
+                reference_model=args.reference_model or None,
+                max_positive_pairs=args.max_positive_pairs,
+                max_negative_pairs=args.max_negative_pairs,
+                seed=args.seed,
+            )
+            print(json.dumps(calibration, ensure_ascii=False, indent=2))
+            return
         if args.engine_group == "golden":
             if args.engine_action == "export":
+                output_path = Path(args.output)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                if args.format == "review":
+                    payload = export_golden_candidates(
+                        engine_conn,
+                        args.story_release,
+                        output_format="review",
+                        sample=args.sample,
+                        seed=args.seed,
+                    )
+                    lines = [json.dumps(pair, ensure_ascii=False) for pair in payload["pairs"]]
+                    output_path.write_text(
+                        "\n".join(lines) + ("\n" if lines else ""),
+                        encoding="utf-8",
+                    )
+                    print(
+                        json.dumps(
+                            {
+                                "output": str(output_path),
+                                "format": "review",
+                                "pairs": len(payload["pairs"]),
+                            },
+                            ensure_ascii=False,
+                            indent=2,
+                        )
+                    )
+                    return
                 payload = export_golden_candidates(
                     engine_conn,
                     args.story_release,
                     pair_limit=args.pair_limit,
                     group_limit=args.group_limit,
                 )
-                output_path = Path(args.output)
-                output_path.parent.mkdir(parents=True, exist_ok=True)
                 output_path.write_text(
                     json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
                     encoding="utf-8",
@@ -774,10 +814,27 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 )
                 return
             if args.engine_action == "import":
-                payload_raw = json.loads(Path(args.input).read_text(encoding="utf-8"))
-                if not isinstance(payload_raw, dict):
-                    raise ValueError("Golden Set root must be a JSON object")
-                result = import_golden_labels(engine_conn, payload_raw)
+                raw_text = Path(args.input).read_text(encoding="utf-8")
+                stripped = raw_text.lstrip()
+                if stripped.startswith("{") and "\n{" in stripped.rstrip():
+                    # JSONL из `--format review`: одна размеченная пара на строку.
+                    # story_release_id в строках не лежит, поэтому берём его из флага.
+                    if not args.story_release:
+                        raise ValueError(
+                            "JSONL review labels require --story-release "
+                            "(the file carries pairs only)"
+                        )
+                    payload_raw = {
+                        "story_release_id": args.story_release,
+                        "pairs": [
+                            json.loads(line) for line in raw_text.splitlines() if line.strip()
+                        ],
+                    }
+                else:
+                    payload_raw = json.loads(raw_text)
+                    if not isinstance(payload_raw, dict):
+                        raise ValueError("Golden Set root must be a JSON object")
+                result = import_golden_labels(engine_conn, payload_raw, source=args.note)
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return
         if args.engine_group == "legacy":
@@ -877,17 +934,25 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     "embedding_model": args.embedding_model,
                     "embedding_revision": args.embedding_revision,
                     "dense_top_k": args.dense_top_k,
-                    "dense_candidate_threshold": args.dense_threshold,
-                    "auto_merge_threshold": args.auto_merge_threshold,
-                    "review_threshold": args.review_threshold,
                     "near_duplicate_enabled": not args.no_near_duplicates,
                     "near_duplicate_max_bucket_size": args.near_duplicate_max_bucket_size,
                     "near_duplicate_simhash_distance": args.near_duplicate_simhash_distance,
                     "near_duplicate_shingle_jaccard": args.near_duplicate_shingle_jaccard,
                     "semantic_dedup_enabled": args.semantic_dedup,
-                    "semantic_dedup_threshold": args.semantic_dedup_threshold,
                     "semantic_dedup_max_days": args.semantic_dedup_max_days,
                 }
+                # Пороги, зависящие от модели эмбеддингов, передаём ТОЛЬКО если их явно
+                # задали флагом. Иначе дефолт CLI перебил бы профиль модели
+                # (embeddings.DENSE_THRESHOLD_PROFILES) и вернул общие константы.
+                for flag_name, param_name in (
+                    ("dense_threshold", "dense_candidate_threshold"),
+                    ("auto_merge_threshold", "auto_merge_threshold"),
+                    ("review_threshold", "review_threshold"),
+                    ("semantic_dedup_threshold", "semantic_dedup_threshold"),
+                ):
+                    value = getattr(args, flag_name)
+                    if value is not None:
+                        story_params[param_name] = value
                 story_release_output = create_story_release(
                     engine_conn,
                     facet_release_id=args.facet_release,
@@ -1903,6 +1968,22 @@ def build_parser() -> argparse.ArgumentParser:
     engine_embeddings.add_argument("--model-revision", default="default")
     engine_embeddings.add_argument("--batch-size", type=int, default=32)
 
+    engine_calibrate = engine_sub.add_parser(
+        "calibrate",
+        help="Calibrate dense-similarity thresholds for an embedding model (no labels needed)",
+    )
+    engine_calibrate.add_argument("--release", required=True)
+    engine_calibrate.add_argument("--model", required=True)
+    engine_calibrate.add_argument("--model-revision", default="default")
+    engine_calibrate.add_argument(
+        "--reference-model",
+        default="",
+        help="Transfer thresholds from this model by matching negative-score quantiles",
+    )
+    engine_calibrate.add_argument("--max-positive-pairs", type=int, default=3000)
+    engine_calibrate.add_argument("--max-negative-pairs", type=int, default=20000)
+    engine_calibrate.add_argument("--seed", type=int, default=13)
+
     engine_golden = engine_sub.add_parser(
         "golden",
         help="Export/import a version-scoped human review set",
@@ -1916,8 +1997,44 @@ def build_parser() -> argparse.ArgumentParser:
     engine_golden_export.add_argument("--output", required=True)
     engine_golden_export.add_argument("--pair-limit", type=int, default=120)
     engine_golden_export.add_argument("--group-limit", type=int, default=30)
+    engine_golden_export.add_argument(
+        "--format",
+        choices=["json", "review"],
+        default="json",
+        help=(
+            "json: legacy pairs/groups payload for `engine golden import`. "
+            "review: compact JSONL of decision='review' pairs stratified toward the "
+            "auto/reject score boundary, for human/LLM labeling."
+        ),
+    )
+    engine_golden_export.add_argument(
+        "--sample",
+        type=int,
+        default=200,
+        help="Pair count for --format review (ignored for --format json).",
+    )
+    engine_golden_export.add_argument(
+        "--seed",
+        type=int,
+        default=13,
+        help="Deterministic sampling seed for --format review.",
+    )
     engine_golden_import = engine_golden_sub.add_parser("import")
     engine_golden_import.add_argument("--input", required=True)
+    engine_golden_import.add_argument(
+        "--note",
+        default="",
+        choices=["", "claude_review", "qwen_review", "auto_label"],
+        help=(
+            "Label source for the whole batch; empty means human review. "
+            "Priority when sources disagree: human > claude_review > qwen_review > auto_label."
+        ),
+    )
+    engine_golden_import.add_argument(
+        "--story-release",
+        default="",
+        help="Required for JSONL review labels, which carry pairs without a release id",
+    )
 
     engine_legacy = engine_sub.add_parser(
         "legacy",
@@ -2047,9 +2164,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_stories_propose.add_argument("--embedding-revision", default="default")
     engine_stories_propose.add_argument("--dense-top-k", type=int, default=16)
-    engine_stories_propose.add_argument("--dense-threshold", type=float, default=0.62)
-    engine_stories_propose.add_argument("--auto-merge-threshold", type=float, default=0.82)
-    engine_stories_propose.add_argument("--review-threshold", type=float, default=0.58)
+    # default=None — не задан флаг, значит порог берётся из профиля модели эмбеддингов
+    # (embeddings.DENSE_THRESHOLD_PROFILES). Жёсткий дефолт здесь молча перебивал бы его.
+    engine_stories_propose.add_argument(
+        "--dense-threshold",
+        type=float,
+        default=None,
+        help="Override dense candidate threshold; default comes from the embedding profile",
+    )
+    engine_stories_propose.add_argument("--auto-merge-threshold", type=float, default=None)
+    engine_stories_propose.add_argument("--review-threshold", type=float, default=None)
     engine_stories_propose.add_argument(
         "--no-near-duplicates",
         action="store_true",
@@ -2067,7 +2191,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Enable guarded semantic embedding auto-merge for dense candidates.",
     )
-    engine_stories_propose.add_argument("--semantic-dedup-threshold", type=float, default=0.92)
+    engine_stories_propose.add_argument("--semantic-dedup-threshold", type=float, default=None)
     engine_stories_propose.add_argument("--semantic-dedup-max-days", type=int, default=7)
     engine_stories_inspect = engine_stories_sub.add_parser("inspect")
     engine_stories_inspect.add_argument("--story-release", required=True)
@@ -2098,7 +2222,7 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose.add_argument("--window", default="30d")
     engine_trends_propose.add_argument(
         "--method",
-        default="story_graph_v1",
+        default=DEFAULT_TREND_METHOD,
         choices=["story_graph_v1", "embedding_v2"],
         help="Trend discovery method; embedding_v2 clusters story vectors + c-TF-IDF names.",
     )

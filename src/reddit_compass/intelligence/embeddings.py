@@ -24,6 +24,93 @@ _MODEL2VEC_PREFIX = "minishlab/"
 _LEXICAL_DIMENSIONS = 384
 _TOKEN_PATTERN = re.compile(r"[\w$€£%.-]+", re.UNICODE)
 
+# Пороги плотного сходства — свойство модели эмбеддингов, а не глобальная константа.
+# У разных моделей разное распределение косинуса: порог 0.92, разумный для E5, на
+# статических дистиллированных векторах может отсекать почти всё (или, наоборот,
+# сливать всё подряд). Профиль подставляется в params story-релиза ДО вычисления
+# params_hash, поэтому релиз остаётся воспроизводимым даже если таблица потом изменится.
+#
+# Значения получают командой ``engine embeddings calibrate`` на замороженном релизе:
+# опорные пары даёт provenance (общий URL / near-duplicate fingerprint), разметка не нужна.
+DENSE_THRESHOLD_KEYS: tuple[str, ...] = (
+    "dense_candidate_threshold",
+    "dense_review_threshold",
+    "dense_auto_threshold",
+    "semantic_dedup_threshold",
+)
+
+# Консервативный профиль для незнакомой модели: пороги E5. Он не «правильный» для
+# произвольной модели — он лишь воспроизводит историческое поведение, пока модель
+# не откалибрована. Незнакомые модели логируются вызывающей стороной.
+_FALLBACK_DENSE_PROFILE: dict[str, float] = {
+    "dense_candidate_threshold": 0.68,
+    "dense_review_threshold": 0.72,
+    "dense_auto_threshold": 0.88,
+    "semantic_dedup_threshold": 0.92,
+}
+
+DENSE_THRESHOLD_PROFILES: dict[str, dict[str, float]] = {
+    # Эталон. Откалиброван практикой: на 7-дневном broad даёт compression ~0.70 без
+    # overmerge. Измеренное распределение негативов: медиана 0.780, максимум 0.963 —
+    # поэтому 0.68 и 0.72 лежат ниже медианы и фильтрами фактически не являются
+    # (retrieval ограничен top-K), а работают только два верхних порога.
+    DEFAULT_EMBEDDING_MODEL: dict(_FALLBACK_DENSE_PROFILE),
+    # Откалибровано переносом квантилей от E5 на релизе 2026-07-23_2026-07-29-broad-r1
+    # (207 provenance-позитивов, 150 000 негативов). У статических векторов совсем другая
+    # шкала: медиана негативов 0.048, максимум 0.496. Прежние пороги 0.88/0.92 отсекали
+    # ~половину заведомо верных пар (recall 0.54 / 0.51); откалиброванные дают 0.94 / 0.90
+    # при той же доле ложных срабатываний.
+    LEXICAL_HASH_EMBEDDING_MODEL: {
+        "dense_candidate_threshold": 0.0,
+        "dense_review_threshold": 0.0,
+        "dense_auto_threshold": 0.36,
+        "semantic_dedup_threshold": 0.45,
+    },
+    # Прод-модель ночного прогона (`engine cycle`). Откалибровано тем же переносом
+    # квантилей на том же релизе: медиана негативов 0.131, p99.9 = 0.651.
+    # Прежние E5-пороги 0.88/0.92 оставляли 63% / 53% provenance-позитивов;
+    # откалиброванные — 94% / 86% при той же доле ложных срабатываний.
+    MODEL2VEC_DEFAULT: {
+        "dense_candidate_threshold": 0.0,
+        "dense_review_threshold": 0.0,
+        "dense_auto_threshold": 0.59,
+        # Опора хвоста здесь тонкая (9 негативов из 150k), поэтому порог округлён вверх.
+        "semantic_dedup_threshold": 0.74,
+    },
+}
+
+
+def dense_thresholds_for(model_name: str) -> dict[str, float]:
+    """Пороги плотного сходства для модели эмбеддингов.
+
+    Незнакомая модель получает консервативный профиль E5 — это сохраняет прежнее
+    поведение, но не является калибровкой. Проверить, откалиброван ли профиль,
+    можно через :func:`is_dense_profile_calibrated`.
+    """
+    profile = DENSE_THRESHOLD_PROFILES.get(model_name)
+    if profile is None:
+        return dict(_FALLBACK_DENSE_PROFILE)
+    return dict(profile)
+
+
+def is_dense_profile_calibrated(model_name: str) -> bool:
+    """True, если у модели есть собственный профиль порогов, а не фолбэк."""
+    return model_name in DENSE_THRESHOLD_PROFILES
+
+
+def encoding_prefix_for(model_name: str) -> str:
+    """Префикс, который модель ожидает перед текстом при энкодинге.
+
+    E5 (sentence-transformers) требует ``passage:`` / ``query:``; model2vec и
+    lexical-hash работают с голым текстом. Префикс входит в ``input_hash`` кэша
+    эмбеддингов, чтобы векторы от разных форматов не смешивались.
+    """
+    if model_name == LEXICAL_HASH_EMBEDDING_MODEL:
+        return ""
+    if model_name.startswith(_MODEL2VEC_PREFIX):
+        return ""
+    return "passage: "
+
 
 def encode_passages(
     texts: list[str],
@@ -54,10 +141,11 @@ def encode_passages(
             "install reddit-compass[engine]"
         ) from exc
 
+    prefix = encoding_prefix_for(model_name)
     model_class: Any = module.SentenceTransformer
     model = model_class(model_name)
     vectors: Any = model.encode(
-        [f"passage: {text}" for text in texts],
+        [f"{prefix}{text}" for text in texts],
         batch_size=batch_size,
         normalize_embeddings=True,
         show_progress_bar=False,

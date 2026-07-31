@@ -142,7 +142,7 @@ class MergeModel:
     precision_at_threshold: float = 0.0
     recall_at_threshold: float = 0.0
     model_hash: str = ""
-    label_source: str = "auto"
+    label_source: str = "auto_label"
     meta: dict[str, object] = field(default_factory=dict)
 
     def score(self, features: dict[str, object]) -> float:
@@ -184,7 +184,7 @@ class MergeModel:
             precision_at_threshold=_as_float(params.get("precision_at_threshold")),
             recall_at_threshold=_as_float(params.get("recall_at_threshold")),
             model_hash=str(params.get("model_hash", "")),
-            label_source=str(params.get("label_source", "auto")),
+            label_source=str(params.get("label_source", "auto_label")),
         )
 
 
@@ -212,7 +212,7 @@ def train_merge_model(
     learning_rate: float = 0.1,
     iterations: int = 2000,
     l2: float = 0.01,
-    label_source: str = "auto",
+    label_source: str = "auto_label",
 ) -> MergeModel:
     """Обучает логистическую регрессию и калибрует порог под target_precision."""
 

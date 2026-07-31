@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import random
 import sqlite3
 import subprocess
 from collections import Counter, defaultdict
@@ -34,8 +36,12 @@ from .clustering import (
 )
 from .embeddings import (
     DEFAULT_EMBEDDING_MODEL,
+    DENSE_THRESHOLD_KEYS,
     MODEL2VEC_DEFAULT,
+    dense_thresholds_for,
     encode_passages,
+    encoding_prefix_for,
+    is_dense_profile_calibrated,
     top_k_cosine_pairs,
 )
 from .engine_reviews import (
@@ -56,7 +62,12 @@ from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
 ENGINE_SCHEMA_VERSION = 6
 DEFAULT_STORY_METHOD = "hybrid_v2"
-DEFAULT_TREND_METHOD = "story_graph_v1"
+# Дефолт совпадает с прод-путём (`engine cycle`). Раньше библиотека умалчивала
+# `story_graph_v1`, а ночной прогон считал `embedding_v2` — и разница была не
+# косметической: на том же story-релизе граф-метод даёт 5 трендов с негодными именами
+# и один дубль, то есть роняет полы качества, которые прод-путь проходит.
+# `story_graph_v1` остаётся доступным явным выбором и фолбэком, если model2vec недоступен.
+DEFAULT_TREND_METHOD = "embedding_v2"
 
 ReleaseStatus = Literal["building", "finalized"]
 AnalysisStatus = Literal["building", "evaluated", "rejected", "published"]
@@ -1269,7 +1280,10 @@ def cache_release_embeddings(
     items = load_frozen_items(conn, data_release_id)
     model_hash = _stable_id("embedding_model", model_name, model_revision)
     inputs = {item.item_id: _embedding_input(item) for item in items}
-    input_hashes = {item_id: _hash_json({"text": text}) for item_id, text in inputs.items()}
+    prefix = encoding_prefix_for(model_name)
+    input_hashes = {
+        item_id: _hash_json({"text": text, "prefix": prefix}) for item_id, text in inputs.items()
+    }
     existing = {
         str(row["input_hash"])
         for row in conn.execute(
@@ -1382,6 +1396,327 @@ def _embedding_input(item: FrozenItem) -> str:
     title = " ".join(item.title.split())
     excerpt = " ".join(item.excerpt.split())[:1200]
     return f"{title}\n{excerpt}".strip()
+
+
+# --- Калибровка порогов плотного сходства (Фаза 1.2) ---------------------------------
+#
+# Пороги нельзя переносить между моделями эмбеддингов: у E5 и статических векторов
+# разное распределение косинуса. Калибровка не требует ручной разметки — опорные пары
+# даёт provenance: items с общим не-landing URL или идентичным нормализованным
+# заголовком заведомо описывают один материал.
+#
+# ВАЖНОЕ ОГРАНИЧЕНИЕ. Позитивы здесь смещены в сторону «лёгких»: общий URL или
+# одинаковый заголовок дают очень высокий косинус. Пары, ради которых слияние и нужно —
+# разные издания об одном событии разными заголовками — в это множество не попадают.
+# Поэтому калибровка надёжна для СТРОГОГО конца (auto / dedup), где решает распределение
+# негативов, и не заменяет разметку (Фаза 3) для оценки полноты. Нижние пороги —
+# это retrieval, их поднимать по этим позитивам нельзя.
+
+_CALIBRATION_NEGATIVE_QUANTILES: tuple[float, ...] = (0.5, 0.9, 0.95, 0.98, 0.99, 0.995, 0.999)
+_CALIBRATION_POSITIVE_QUANTILES: tuple[float, ...] = (0.01, 0.05, 0.1, 0.25, 0.5, 0.75)
+# Сколько пар из одной URL-группы берём: одна большая группа не должна доминировать.
+_CALIBRATION_MAX_PAIRS_PER_GROUP = 12
+
+# Якоря переноса порогов между моделями. Это НЕ подобранные числа: они измерены на
+# E5 (`intfloat/multilingual-e5-small`), релиз `2026-07-23_2026-07-29-broad-r1`,
+# 20 000 негативных пар — конфигурация, дававшая compression ~0.70 без overmerge.
+#
+# Переносить между моделями надо не абсолютный порог, а долю ложных срабатываний
+# на заведомо несвязанных парах. Для E5 медиана негативов = 0.78, поэтому:
+#   0.68 (candidate) и 0.72 (review) лежат НИЖЕ медианы — это не фильтры,
+#   а почти пропуск всего; реально работают только два верхних порога.
+#   0.88 (auto)   → сквозь проходит 0.375% несвязанных пар
+#   0.92 (dedup)  → сквозь проходит 0.015% несвязанных пар
+_REFERENCE_NEGATIVE_QUANTILES: dict[str, float] = {
+    "dense_candidate_threshold": 0.0006,
+    "dense_review_threshold": 0.0232,
+    "dense_auto_threshold": 0.99625,
+    "semantic_dedup_threshold": 0.99985,
+}
+
+
+def _pair_cosine(left: list[float], right: list[float]) -> float | None:
+    left_norm = math.sqrt(sum(value * value for value in left))
+    right_norm = math.sqrt(sum(value * value for value in right))
+    if left_norm <= 0.0 or right_norm <= 0.0:
+        return None
+    dot = sum(a * b for a, b in zip(left, right, strict=True))
+    return dot / (left_norm * right_norm)
+
+
+def _quantile(sorted_values: list[float], quantile: float) -> float:
+    if not sorted_values:
+        return 0.0
+    if len(sorted_values) == 1:
+        return sorted_values[0]
+    position = quantile * (len(sorted_values) - 1)
+    low = math.floor(position)
+    high = min(low + 1, len(sorted_values) - 1)
+    weight = position - low
+    return sorted_values[low] * (1.0 - weight) + sorted_values[high] * weight
+
+
+def _quantile_rank(sorted_values: list[float], value: float) -> float:
+    """Доля значений строго меньше ``value`` — обратная функция к :func:`_quantile`."""
+    if not sorted_values:
+        return 0.0
+    low, high = 0, len(sorted_values)
+    while low < high:
+        middle = (low + high) // 2
+        if sorted_values[middle] < value:
+            low = middle + 1
+        else:
+            high = middle
+    return low / len(sorted_values)
+
+
+def _calibration_positive_pairs(
+    items: list[FrozenItem],
+    *,
+    limit: int,
+) -> list[tuple[str, str, str]]:
+    """Пары, заведомо описывающие один материал. Разметка не нужна.
+
+    Источники: общий не-landing canonical/target URL и идентичный нормализованный
+    заголовок. Landing-URL (корни репозиториев, страницы моделей) исключены —
+    один такой адрес обслуживает разные материалы.
+    """
+    url_groups: dict[str, list[str]] = defaultdict(list)
+    title_groups: dict[str, list[str]] = defaultdict(list)
+    for item in items:
+        for url in _item_urls(item):
+            if not _is_stable_landing_url(url):
+                url_groups[url].append(item.item_id)
+        normalized = normalize_title(item.title, item.provider)
+        if normalized and not is_generic_title(normalized) and not is_low_signal_title(item.title):
+            title_groups[normalized].append(item.item_id)
+
+    pairs: list[tuple[str, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for source, groups in (("url", url_groups), ("title", title_groups)):
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            taken = 0
+            for index, left in enumerate(sorted(members)):
+                for right in sorted(members)[index + 1 :]:
+                    key = _pair_key(left, right)
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    pairs.append((key[0], key[1], source))
+                    taken += 1
+                    if taken >= _CALIBRATION_MAX_PAIRS_PER_GROUP:
+                        break
+                if taken >= _CALIBRATION_MAX_PAIRS_PER_GROUP:
+                    break
+            if len(pairs) >= limit:
+                return pairs[:limit]
+    return pairs[:limit]
+
+
+def _calibration_negative_pairs(
+    items: list[FrozenItem],
+    positive_keys: set[tuple[str, str]],
+    *,
+    limit: int,
+    seed: int,
+) -> list[tuple[str, str]]:
+    """Случайные пары разных материалов.
+
+    Отбрасываем всё, что похоже на скрытый позитив: общий URL, общий нормализованный
+    заголовок или заметное лексическое пересечение заголовков.
+    """
+    rng = random.Random(seed)
+    by_id = {item.item_id: item for item in items}
+    item_ids = sorted(by_id)
+    if len(item_ids) < 2:
+        return []
+    urls = {item_id: _item_urls(by_id[item_id]) for item_id in item_ids}
+    normalized = {
+        item_id: normalize_title(by_id[item_id].title, by_id[item_id].provider)
+        for item_id in item_ids
+    }
+    tokens = {item_id: set(extract_tokens(normalized[item_id])) for item_id in item_ids}
+
+    pairs: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    attempts = 0
+    max_attempts = limit * 40
+    while len(pairs) < limit and attempts < max_attempts:
+        attempts += 1
+        left = rng.choice(item_ids)
+        right = rng.choice(item_ids)
+        if left == right:
+            continue
+        key = _pair_key(left, right)
+        if key in seen or key in positive_keys:
+            continue
+        seen.add(key)
+        if urls[left] & urls[right]:
+            continue
+        if normalized[left] and normalized[left] == normalized[right]:
+            continue
+        left_tokens, right_tokens = tokens[left], tokens[right]
+        if left_tokens and right_tokens:
+            overlap = len(left_tokens & right_tokens) / len(left_tokens | right_tokens)
+            if overlap >= 0.3:
+                continue
+        pairs.append(key)
+    return pairs
+
+
+def calibrate_dense_thresholds(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    model_name: str,
+    model_revision: str = "default",
+    reference_model: str | None = None,
+    max_positive_pairs: int = 3000,
+    # Верхние пороги берутся из хвоста распределения негативов (квантиль 0.99985),
+    # поэтому выборка должна быть достаточно большой: на 20k хвост держится на трёх
+    # значениях и гуляет ±0.03, на 60k стабилизируется.
+    max_negative_pairs: int = 60000,
+    seed: int = 13,
+) -> dict[str, Any]:
+    """Эмпирически подобрать пороги плотного сходства для модели эмбеддингов.
+
+    Возвращает распределения косинуса на опорных парах и предлагаемые пороги.
+    Если задана ``reference_model`` с известными рабочими порогами, переносятся
+    не абсолютные значения, а **квантили**: порог модели-эталона переводится
+    в квантиль её распределения негативов, и тот же квантиль берётся у целевой модели.
+    """
+    if not verify_data_release(conn, data_release_id):
+        raise ValueError(f"Data release checksum failed: {data_release_id}")
+    items = load_frozen_items(conn, data_release_id)
+    if len(items) < 2:
+        raise ValueError(f"Data release has too few items to calibrate: {data_release_id}")
+
+    def _scores(model: str) -> dict[str, Any]:
+        vectors = load_release_embeddings(
+            conn,
+            data_release_id=data_release_id,
+            model_name=model,
+            model_revision=model_revision,
+            item_ids=(item.item_id for item in items),
+        )
+        coverage = len(vectors) / max(len(items), 1)
+        if coverage < 0.5:
+            raise ValueError(
+                f"Model {model!r} has embedding coverage {coverage:.1%} on release "
+                f"{data_release_id}. Run `engine embeddings --release {data_release_id} "
+                f"--model {model}` first."
+            )
+        positives = _calibration_positive_pairs(items, limit=max_positive_pairs)
+        positive_keys = {_pair_key(left, right) for left, right, _ in positives}
+        negatives = _calibration_negative_pairs(
+            items, positive_keys, limit=max_negative_pairs, seed=seed
+        )
+        positive_scores: list[float] = []
+        by_source: dict[str, int] = defaultdict(int)
+        for left, right, source in positives:
+            if left in vectors and right in vectors:
+                score = _pair_cosine(vectors[left], vectors[right])
+                if score is not None:
+                    positive_scores.append(score)
+                    by_source[source] += 1
+        negative_scores: list[float] = []
+        for left, right in negatives:
+            if left in vectors and right in vectors:
+                score = _pair_cosine(vectors[left], vectors[right])
+                if score is not None:
+                    negative_scores.append(score)
+        positive_scores.sort()
+        negative_scores.sort()
+        return {
+            "model": model,
+            "coverage": round(coverage, 4),
+            "positive_pairs": len(positive_scores),
+            "positive_pair_sources": dict(by_source),
+            "negative_pairs": len(negative_scores),
+            "positive_scores": positive_scores,
+            "negative_scores": negative_scores,
+        }
+
+    target = _scores(model_name)
+    if not target["positive_scores"] or not target["negative_scores"]:
+        raise ValueError(
+            f"Not enough provenance pairs on release {data_release_id} to calibrate {model_name!r}"
+        )
+
+    negatives = target["negative_scores"]
+    positives = target["positive_scores"]
+
+    quantiles: dict[str, float] = dict(_REFERENCE_NEGATIVE_QUANTILES)
+    reference_report: dict[str, Any] | None = None
+    if reference_model and reference_model != model_name:
+        reference = _scores(reference_model)
+        reference_negatives = reference["negative_scores"]
+        reference_thresholds = dense_thresholds_for(reference_model)
+        if reference_negatives:
+            quantiles = {
+                key: round(_quantile_rank(reference_negatives, reference_thresholds[key]), 5)
+                for key in DENSE_THRESHOLD_KEYS
+            }
+        reference_report = {
+            "model": reference_model,
+            "thresholds": reference_thresholds,
+            "negative_quantiles_of_thresholds": quantiles,
+            "positive_pairs": reference["positive_pairs"],
+            "negative_pairs": reference["negative_pairs"],
+        }
+
+    suggested = {
+        key: round(_quantile(negatives, quantiles[key]), 4) for key in DENSE_THRESHOLD_KEYS
+    }
+    # Пороги обязаны идти по возрастанию строгости: retrieval <= review <= auto <= dedup.
+    ordered = 0.0
+    for key in DENSE_THRESHOLD_KEYS:
+        ordered = max(ordered, suggested[key])
+        suggested[key] = round(ordered, 4)
+
+    return {
+        "data_release_id": data_release_id,
+        "model": model_name,
+        "coverage": target["coverage"],
+        "positive_pairs": target["positive_pairs"],
+        "positive_pair_sources": target["positive_pair_sources"],
+        "negative_pairs": target["negative_pairs"],
+        "positive_percentiles": {
+            f"p{quantile:g}": round(_quantile(positives, quantile), 4)
+            for quantile in _CALIBRATION_POSITIVE_QUANTILES
+        },
+        "negative_percentiles": {
+            f"p{quantile:g}": round(_quantile(negatives, quantile), 4)
+            for quantile in _CALIBRATION_NEGATIVE_QUANTILES
+        },
+        "target_negative_quantiles": quantiles,
+        "suggested_thresholds": suggested,
+        "positive_recall_at_suggested": {
+            key: round(
+                sum(1 for score in positives if score >= suggested[key]) / max(len(positives), 1),
+                4,
+            )
+            for key in DENSE_THRESHOLD_KEYS
+        },
+        # Сколько негативов реально поддерживает каждый предложенный порог. Если опора
+        # хвоста мала (единицы), верхние пороги оценены ненадёжно — нужна выборка больше.
+        "negative_tail_support": {
+            key: sum(1 for score in negatives if score >= suggested[key])
+            for key in DENSE_THRESHOLD_KEYS
+        },
+        "current_thresholds": dense_thresholds_for(model_name),
+        "positive_recall_at_current": {
+            key: round(
+                sum(1 for score in positives if score >= value) / max(len(positives), 1),
+                4,
+            )
+            for key, value in dense_thresholds_for(model_name).items()
+        },
+        "calibrated_profile_exists": is_dense_profile_calibrated(model_name),
+        "reference": reference_report,
+    }
 
 
 _RELEASE_ITEM_PAYLOAD_COLUMNS = (
@@ -1919,6 +2254,11 @@ def _select_engine_items(
 # Единый канонический набор дефолтов story-скоринга (Фаза 3). CLI и experiments
 # могут переопределять отдельные ключи как явные экспериментальные ручки, но базовая
 # точка всегда берётся отсюда, чтобы не держать три расходящихся набора констант.
+# Минимальный score ребра до медоида при сборке группы. Откалибровано замером:
+# прежние 0.72 лежали выше всей серой зоны и отсекали её целиком (см.
+# ``_valid_group_against_medoid``). Переслияние не появляется вплоть до 0.5.
+DEFAULT_MEDOID_MIN_SCORE = 0.55
+
 DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "auto_merge_threshold": 0.82,
     "review_threshold": 0.62,
@@ -1940,11 +2280,22 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
     "llm_merge_min_confidence": 0.85,
     "exclude_routine": True,
+    "medoid_min_score": DEFAULT_MEDOID_MIN_SCORE,
 }
 
 
 def _story_generation_params(params: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {**DEFAULT_STORY_PARAMS, **(params or {})}
+    """Разрешить параметры story-скоринга: дефолты → профиль модели → явные значения.
+
+    Пороги плотного сходства зависят от модели эмбеддингов (см.
+    ``embeddings.DENSE_THRESHOLD_PROFILES``): у E5 и статических векторов разное
+    распределение косинуса, и один набор констант на все модели тихо ломает слияние.
+    Разрешённые значения попадают в ``params`` до вычисления ``params_hash``,
+    поэтому релиз остаётся воспроизводимым, даже если профиль потом изменится.
+    """
+    explicit = params or {}
+    model_name = str(explicit.get("embedding_model", DEFAULT_STORY_PARAMS["embedding_model"]))
+    return {**DEFAULT_STORY_PARAMS, **dense_thresholds_for(model_name), **explicit}
 
 
 def create_story_release(
@@ -2016,6 +2367,14 @@ def create_story_release(
         len(embeddings) / max(len(items), 1),
         4,
     )
+    # Релиз на неоткалиброванной модели использует фолбэк-пороги от E5. Это молча
+    # ломает слияние (см. docs/PLAN_V4.md §1.1), поэтому факт виден в метриках.
+    metrics["dense_profile_calibrated"] = is_dense_profile_calibrated(
+        str(params["embedding_model"])
+    )
+    metrics["dense_thresholds"] = {
+        key: params[key] for key in DENSE_THRESHOLD_KEYS if key in params
+    }
 
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -3474,7 +3833,12 @@ def _constrained_story_groups(
         ):
             continue
         medoid_id = _choose_medoid(merged_ids, pair_by_ids)
-        if not _valid_group_against_medoid(merged_ids, medoid_id, pair_by_ids):
+        if not _valid_group_against_medoid(
+            merged_ids,
+            medoid_id,
+            pair_by_ids,
+            min_score=float(params.get("medoid_min_score", DEFAULT_MEDOID_MIN_SCORE)),
+        ):
             continue
         groups[left_owner] = merged_ids
         del groups[right_owner]
@@ -3517,12 +3881,34 @@ def _valid_group_against_medoid(
     item_ids: list[str],
     medoid_id: str,
     pair_by_ids: dict[tuple[str, str], PairCandidate],
+    *,
+    min_score: float = DEFAULT_MEDOID_MIN_SCORE,
 ) -> bool:
+    """Каждый член группы обязан иметь прямое ребро к медоиду без жёстких конфликтов.
+
+    Порог ``min_score`` — второй, независимый от скоринга ограничитель. Он был жёстко
+    зашит как 0.72, то есть выше всей серой зоны (score 0.45–0.65): любая пара, поднятая
+    ревью или merge-моделью до ``auto_merge``, всё равно отсекалась здесь. Разметка
+    и обучение при этом никак не влияли на результат.
+
+    Замер на 7-дневном broad-релизе (200 claude-меток + 29 человеческих, model2vec):
+
+    ```
+    порог   compression   multi/1k   cross/1k   overmerge>=5   >=8
+    0.72       0.9434         45         16          0          0
+    0.60       0.9186         55         27          0          0
+    0.55       0.9113         57         29          0          0
+    0.50       0.9101         58         30          0          0
+    ```
+
+    Переслияние не появляется нигде до 0.5, а кросс-источниковые истории почти удваиваются.
+    Дефолт 0.55 — консервативный край плато.
+    """
     for item_id in item_ids:
         if item_id == medoid_id:
             continue
         pair = pair_by_ids.get(_pair_key(item_id, medoid_id))
-        if pair is None or pair.decision != "auto_merge" or pair.score < 0.72:
+        if pair is None or pair.decision != "auto_merge" or pair.score < min_score:
             return False
         if any(
             bool(pair.features.get(conflict))
@@ -3548,6 +3934,11 @@ def _single_provider_large_group_without_event_url(
         for right_id in item_ids[index + 1 :]:
             pair = pair_by_ids.get(_pair_key(left_id, right_id))
             if pair and pair.reason == "shared canonical/target URL":
+                return False
+            # Синдицированные перепечатки одного материала: fingerprint
+            # заголовка подтверждает идентичность независимо от провайдера.
+            # Show HN / 49ers не попадают сюда — у них fingerprint не срабатывал.
+            if pair and pair.reason == "near-duplicate title fingerprint":
                 return False
     return True
 
@@ -4715,6 +5106,7 @@ def _release_passes_publication_gate(
     data_release_id: str,
     story_release: StoryRelease,
     trend_release: TrendRelease,
+    signal_release_id: str | None = None,
 ) -> bool:
     """Allow production publish through legacy gates or the newer Engine quality floors."""
 
@@ -4730,6 +5122,7 @@ def _release_passes_publication_gate(
         data_release_id=data_release_id,
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
+        signal_release_id=signal_release_id,
     )
     floors = evaluate_floors(metrics)
     return bool(floors) and all(floor.passed for floor in floors)
@@ -4742,6 +5135,7 @@ def publish_radar(
     trend_release_id: str,
     channel: str = "broad",
     allow_partial: bool = False,
+    signal_release_id: str | None = None,
 ) -> Publication:
     story_release = get_story_release(conn, story_release_id)
     trend_release = get_trend_release(conn, trend_release_id)
@@ -4774,6 +5168,7 @@ def publish_radar(
         data_release_id=data_release.release_id,
         story_release=story_release,
         trend_release=trend_release,
+        signal_release_id=signal_release_id,
     ):
         raise ValueError(
             "Production channel requires passed Story/Trend publication gates "
@@ -5131,6 +5526,125 @@ def auto_label_story_pairs(
     }
 
 
+# Источники меток по убыванию доверия. Метка из более доверенного источника перекрывает
+# менее доверенную для той же пары.
+#
+# Уровень `auto_label` — особый: он порождён самой лестницей правил
+# (``story_scoring.auto_label_pair`` берёт метку из ``decision``/``reason``). Модель,
+# обученная только на нём, воспроизводит своего учителя, а precision/recall, посчитанные
+# против него, измеряют согласие правил с самими собой. Поэтому ведущий источник всегда
+# виден в метриках: см. ``labels_are_circular``.
+LABEL_SOURCES: tuple[str, ...] = ("human", "claude_review", "qwen_review", "auto_label")
+_MACHINE_LABEL_NOTES = frozenset(LABEL_SOURCES[1:])
+
+
+def _pair_label_source(note: str) -> str:
+    """Источник метки по её ``note``. Всё, что не машинная разметка, — человек.
+
+    ``note`` несёт и источник, и обоснование, поэтому источник — это префикс до
+    двоеточия: ``"claude_review: разные компании"`` → ``claude_review``.
+    """
+    head = note.split(":", 1)[0].strip()
+    return head if head in _MACHINE_LABEL_NOTES else "human"
+
+
+# Решения, которые лестница правил приняла детерминированно. Авто-метка на такой паре —
+# это пересказ самого правила, а не независимое суждение: она ничего не добавляет ни к
+# обучению, ни к оценке. Серая зона (`review`) — единственное место, где авто-разметчик
+# высказывается о том, что правилами ещё не решено.
+_RULE_DECIDED_DECISIONS = frozenset({"auto_merge", "reject"})
+
+
+@dataclass(frozen=True)
+class ResolvedPairLabels:
+    """Метки пар после разрешения конфликтов по доверию к источнику."""
+
+    labels: dict[str, str]
+    sources: dict[str, str]
+    composition: dict[str, int]
+    leading: str
+    by_source: dict[str, dict[str, str]]
+
+    def informative(self, decisions: dict[str, str]) -> dict[str, str]:
+        """Метки без тавтологичных: авто-разметка там, где правила уже решили сами.
+
+        ``decisions`` — решение движка по каждой паре. Авто-метка на ``auto_merge``
+        или ``reject`` воспроизводит правило, поэтому в обучение и в оценку не идёт.
+        """
+        return {
+            target_id: label
+            for target_id, label in self.labels.items()
+            if not (
+                self.sources.get(target_id) == "auto_label"
+                and decisions.get(target_id, "") in _RULE_DECIDED_DECISIONS
+            )
+        }
+
+    def summarize(self, labels: dict[str, str]) -> tuple[dict[str, int], str]:
+        """Состав по источникам и ведущий источник для произвольного среза меток."""
+        composition = {
+            source: sum(1 for target in labels if self.sources.get(target) == source)
+            for source in LABEL_SOURCES
+        }
+        composition = {source: count for source, count in composition.items() if count}
+        leading = next((source for source in LABEL_SOURCES if composition.get(source)), "none")
+        return composition, leading
+
+    def agreement(self) -> dict[str, float | None]:
+        """Попарное согласие между источниками меток на общих парах.
+
+        Для каждой пары источников (A, B) — доля пар, где оба источника дали
+        одинаковую метку (оба same_story или оба different_story). Если общих
+        пар нет — None. Ключи: ``human_claude``, ``claude_qwen``, ``claude_auto``.
+        """
+        pairs_to_check = [
+            ("human", "claude_review", "human_claude"),
+            ("claude_review", "qwen_review", "claude_qwen"),
+            ("claude_review", "auto_label", "claude_auto"),
+        ]
+        result: dict[str, float | None] = {}
+        for src_a, src_b, key in pairs_to_check:
+            labels_a = self.by_source.get(src_a, {})
+            labels_b = self.by_source.get(src_b, {})
+            common = set(labels_a) & set(labels_b)
+            if not common:
+                result[key] = None
+            else:
+                agree = sum(1 for t in common if labels_a[t] == labels_b[t])
+                result[key] = round(agree / len(common), 4)
+        return result
+
+
+def resolve_pair_labels(conn: sqlite3.Connection, story_release_id: str) -> ResolvedPairLabels:
+    """Метки пар с разрешением конфликтов по доверию к источнику.
+
+    Ведущий источник — самый доверенный из реально давших хотя бы одну метку.
+    """
+    by_source: dict[str, dict[str, str]] = {source: {} for source in LABEL_SOURCES}
+    for row in conn.execute(
+        """SELECT target_id, label, note FROM engine_labels
+           WHERE target_kind = 'story_pair' AND release_id = ?""",
+        (story_release_id,),
+    ).fetchall():
+        source = _pair_label_source(str(row["note"] or ""))
+        by_source[source][str(row["target_id"])] = str(row["label"])
+    resolved: dict[str, str] = {}
+    sources: dict[str, str] = {}
+    for source in reversed(LABEL_SOURCES):
+        for target_id, label in by_source[source].items():
+            resolved[target_id] = label
+            sources[target_id] = source
+    composition = {source: len(values) for source, values in by_source.items() if values}
+    leading = next((source for source in LABEL_SOURCES if by_source[source]), "none")
+    return ResolvedPairLabels(
+        labels=resolved,
+        sources=sources,
+        composition=composition,
+        leading=leading,
+        by_source={s: dict(v) for s, v in by_source.items() if v},
+    )
+
+
 def train_story_merge_model(
     conn: sqlite3.Connection,
     story_release_id: str,
@@ -5140,39 +5654,35 @@ def train_story_merge_model(
 ) -> dict[str, Any]:
     """Обучает логистическую модель слияния на размеченных парах (Фаза 3).
 
-    Источники меток по приоритету: человеческие (``engine_labels`` без note=auto_label)
-    поверх автоматических. Модель и её хэш сохраняются в ``metrics_json`` релиза, чтобы
-    релиз оставался воспроизводимым.
+    Приоритет источников меток: ``human > claude_review > qwen_review > auto_label``
+    (см. :data:`LABEL_SOURCES`).
+
+    Из обучения исключаются авто-метки на парах, которые лестница правил уже решила
+    детерминированно: такая метка — пересказ правила, и модель, обученная на них,
+    воспроизводит своего учителя. Замер на 7-дневном broad-релизе: авто-разметчик
+    покрывает 100% ``auto_merge``/``reject`` и лишь 3.1% серой зоны — то есть учит
+    ровно тому, что уже известно, и молчит там, где решение открыто.
+
+    Модель и её хэш сохраняются в ``metrics_json`` релиза, чтобы релиз оставался
+    воспроизводимым.
     """
 
     release = get_story_release(conn, story_release_id)
     if release is None:
         raise ValueError(f"Story release not found: {story_release_id}")
-    label_rows = conn.execute(
-        """SELECT target_id, label, note FROM engine_labels
-           WHERE target_kind = 'story_pair' AND release_id = ?""",
-        (story_release_id,),
-    ).fetchall()
-    # Приоритет меток: человек > Qwen > авто-разметка (детерминированно, без гонок).
-    auto_labels: dict[str, str] = {}
-    qwen_labels: dict[str, str] = {}
-    human_labels: dict[str, str] = {}
-    for row in label_rows:
-        note = str(row["note"] or "")
-        target_id = str(row["target_id"])
-        label = str(row["label"])
-        if note == "auto_label":
-            auto_labels[target_id] = label
-        elif note == "qwen_review":
-            qwen_labels[target_id] = label
-        else:
-            human_labels[target_id] = label
-    labels_by_id = {**auto_labels, **qwen_labels, **human_labels}
+    resolved = resolve_pair_labels(conn, story_release_id)
     pair_rows = conn.execute(
-        """SELECT item_id_a, item_id_b, features_json
+        """SELECT item_id_a, item_id_b, decision, features_json
            FROM story_candidate_pairs WHERE story_release_id = ?""",
         (story_release_id,),
     ).fetchall()
+    decisions = {
+        "|".join(_pair_key(str(row["item_id_a"]), str(row["item_id_b"]))): str(row["decision"])
+        for row in pair_rows
+    }
+    labels_by_id = resolved.informative(decisions)
+    label_composition, label_source = resolved.summarize(labels_by_id)
+    tautological_dropped = len(resolved.labels) - len(labels_by_id)
     vectors: list[Any] = []
     labels: list[bool] = []
     for row in pair_rows:
@@ -5183,15 +5693,25 @@ def train_story_merge_model(
         vectors.append(extract_feature_vector(_json_dict(row["features_json"])))
         labels.append(pair_label == "same_story")
     if not vectors:
-        raise ValueError(f"No labeled pairs available for training: {story_release_id}")
-    label_source = "human" if human_labels else ("qwen" if qwen_labels else "auto")
+        raise ValueError(
+            f"No informative labeled pairs for training: {story_release_id}. "
+            f"Dropped {tautological_dropped} auto labels on rule-decided pairs; "
+            "label the grey zone (`engine golden export --format review`) first."
+        )
     model = train_merge_model(
         vectors,
         labels,
         target_precision=target_precision,
         label_source=label_source,
     )
-    summary = model.to_params()
+    summary = {
+        **model.to_params(),
+        "label_composition": label_composition,
+        "tautological_labels_dropped": tautological_dropped,
+        # Модель обучена только на метках, порождённых лестницей правил, — узнать
+        # что-то сверх неё она не может.
+        "labels_are_circular": label_source == "auto_label",
+    }
     if persist:
         metrics = {**release.metrics, "merge_model": summary}
         conn.execute(
@@ -5203,6 +5723,7 @@ def train_story_merge_model(
         "story_release_id": story_release_id,
         "labeled_pairs": len(vectors),
         "label_source": label_source,
+        "label_composition": label_composition,
         "model": summary,
     }
 
@@ -5477,7 +5998,10 @@ async def run_engine_cycle(
     # Кэш эмбеддингов для embedding_v2 (torch-free model2vec). При любой ошибке
     # (пакет не установлен, нет сети для загрузки модели) — graceful fallback:
     # stories/trends строятся без плотных векторов (trend_method → story_graph_v1).
+    # ВАЖНО: фолбэк помечается флагом embedding_fallback, чтобы ночной прогон не
+    # публиковал один алгоритм под именем другого.
     embed_ok = False
+    embedding_fallback = False
     if embed_model:
         try:
             cache_release_embeddings(conn, data_release_id=data.release_id, model_name=embed_model)
@@ -5485,8 +6009,11 @@ async def run_engine_cycle(
         except Exception as exc:
             import logging
 
+            embedding_fallback = True
             logging.getLogger(__name__).warning(
-                "embedding cache failed (%s); falling back to story_graph_v1 trends", exc
+                "EMBEDDING FALLBACK: cache failed (%s); trend_method downgraded "
+                "from embedding_v2 to story_graph_v1 — release will be flagged",
+                exc,
             )
     story_params: dict[str, Any] = {"review_model": review_model}
     if embed_ok:
@@ -5673,6 +6200,7 @@ async def run_engine_cycle(
                 trend_release_id=trends.trend_release_id,
                 channel=publish_channel,
                 allow_partial=allow_partial,
+                signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
             )
             publication_id = publication.publication_id
     return {
@@ -5681,6 +6209,7 @@ async def run_engine_cycle(
         "story_release_id": stories.story_release_id,
         "trend_release_id": trends.trend_release_id,
         "trend_method": use_trend_method,
+        "embedding_fallback": embedding_fallback,
         "embed_model": embed_model if embed_ok else "",
         "auto_labels": auto.get("added", 0),
         "provisional_story_release_id": provisional_stories.story_release_id,
@@ -5714,8 +6243,17 @@ def export_golden_candidates(
     *,
     pair_limit: int = 120,
     group_limit: int = 30,
+    output_format: str = "json",
+    sample: int | None = None,
+    seed: int = 13,
 ) -> dict[str, Any]:
-    """Create a stratified, editable review payload from frozen real data."""
+    """Create a stratified, editable review payload from frozen real data.
+
+    `output_format="json"` (default) keeps the legacy pairs/groups payload consumed by
+    `import_golden_labels`. `output_format="review"` returns a compact, human-readable
+    sample of `decision='review'` pairs only, stratified toward the auto/reject score
+    boundary — see `_stratified_review_sample` for the sampling contract.
+    """
     release = get_story_release(conn, story_release_id)
     if release is None:
         raise ValueError(f"Story release not found: {story_release_id}")
@@ -5736,10 +6274,57 @@ def export_golden_candidates(
         (story_release_id,),
     ).fetchall()
     by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    review_records: list[dict[str, Any]] = []
     for row in rows:
         item_id_a = str(row["item_id_a"])
         item_id_b = str(row["item_id_b"])
         if item_id_a not in items or item_id_b not in items:
+            continue
+        item_a = items[item_id_a]
+        item_b = items[item_id_b]
+        pair_id = "|".join(_pair_key(item_id_a, item_id_b))
+        features = _json_dict(row["features_json"])
+        decision = str(row["decision"])
+        if output_format == "review":
+            if decision != "review":
+                continue
+            review_records.append(
+                {
+                    "pair_id": pair_id,
+                    "title_a": item_a.title,
+                    "title_b": item_b.title,
+                    "provider_a": item_a.provider,
+                    "provider_b": item_b.provider,
+                    "source_cluster_a": item_a.source_cluster,
+                    "source_cluster_b": item_b.source_cluster,
+                    "published_at_a": item_a.published_at,
+                    "published_at_b": item_b.published_at,
+                    "url_a": item_a.target_url or item_a.canonical_url or item_a.discussion_url,
+                    "url_b": item_b.target_url or item_b.canonical_url or item_b.discussion_url,
+                    "shared_entities": sorted(features.get("shared_entities") or []),
+                    "score": float(row["score"]),
+                    "decision": decision,
+                    "reason": str(row["reason"] or ""),
+                    "features": {
+                        "title_score": features.get("title_score"),
+                        "token_jaccard": features.get("token_jaccard"),
+                        "entity_score": features.get("entity_score"),
+                        "dense_similarity": features.get("dense_similarity"),
+                        "date_distance_days": features.get("date_distance_days"),
+                        "conflicts": sorted(
+                            name
+                            for name, flag in (
+                                ("number_conflict", features.get("number_conflict")),
+                                ("location_conflict", features.get("location_conflict")),
+                                ("person_conflict", features.get("person_conflict")),
+                            )
+                            if flag
+                        ),
+                    },
+                    "label": "",
+                    "note": "",
+                }
+            )
             continue
         domains = sorted(
             set(_json_list(facets.get(item_id_a, {}).get("domain_ids"), ["other"]))
@@ -5748,21 +6333,33 @@ def export_golden_candidates(
         primary_domain = domains[0] if domains else "other"
         by_domain[primary_domain].append(
             {
-                "pair_id": "|".join(_pair_key(item_id_a, item_id_b)),
+                "pair_id": pair_id,
                 "item_id_a": item_id_a,
                 "item_id_b": item_id_b,
-                "title_a": items[item_id_a].title,
-                "title_b": items[item_id_b].title,
-                "provider_a": items[item_id_a].provider,
-                "provider_b": items[item_id_b].provider,
+                "title_a": item_a.title,
+                "title_b": item_b.title,
+                "provider_a": item_a.provider,
+                "provider_b": item_b.provider,
                 "domains": domains,
                 "score": float(row["score"]),
-                "engine_decision": str(row["decision"]),
-                "features": _json_dict(row["features_json"]),
+                "engine_decision": decision,
+                "features": features,
                 "label": "",
                 "note": "",
             }
         )
+
+    if output_format == "review":
+        sample_size = pair_limit if sample is None else sample
+        selected = _stratified_review_sample(review_records, sample_size, seed=seed)
+        return {
+            "schema_version": 1,
+            "format": "review",
+            "story_release_id": story_release_id,
+            "data_release_id": facet_release.data_release_id,
+            "pairs": selected,
+        }
+
     pairs = _round_robin_strata(by_domain, pair_limit)
 
     story_rows = conn.execute(
@@ -5824,10 +6421,28 @@ def export_golden_candidates(
     }
 
 
+def _label_note(source: str, rationale: str) -> str:
+    """Собрать ``note`` из источника и обоснования: источник читается как префикс."""
+    rationale = rationale.strip()
+    if not source:
+        return rationale
+    return f"{source}: {rationale}" if rationale else source
+
+
 def import_golden_labels(
     conn: sqlite3.Connection,
     payload: dict[str, Any],
+    *,
+    source: str = "",
 ) -> dict[str, int]:
+    """Импортировать размеченные пары и группы.
+
+    ``source`` помечает происхождение всей партии (``claude_review``, ``qwen_review``);
+    пустая строка означает человеческую разметку. Источник определяет приоритет метки
+    при конфликтах — см. :data:`LABEL_SOURCES`.
+    """
+    if source and source not in _MACHINE_LABEL_NOTES:
+        raise ValueError(f"Unknown label source: {source!r}; expected one of {LABEL_SOURCES[1:]}")
     story_release_id = str(payload.get("story_release_id") or "")
     if get_story_release(conn, story_release_id) is None:
         raise ValueError(f"Story release not found: {story_release_id}")
@@ -5846,14 +6461,20 @@ def import_golden_labels(
         item_id_a = str(pair.get("item_id_a") or "")
         item_id_b = str(pair.get("item_id_b") or "")
         if not item_id_a or not item_id_b:
-            raise ValueError("Golden pair requires item_id_a and item_id_b")
+            # Формат `review` несёт склеенный ``pair_id`` вместо пары полей: он читаемее
+            # при ручной разметке и совпадает с ключом в ``engine_labels``.
+            pair_id = str(pair.get("pair_id") or "")
+            if pair_id.count("|") == 1:
+                item_id_a, item_id_b = pair_id.split("|", 1)
+        if not item_id_a or not item_id_b:
+            raise ValueError("Golden pair requires item_id_a and item_id_b (or pair_id)")
         label_engine_target(
             conn,
             target_kind="story_pair",
             target_id="|".join(_pair_key(item_id_a, item_id_b)),
             release_id=story_release_id,
             label=label,  # type: ignore[arg-type]
-            note=str(pair.get("note") or ""),
+            note=_label_note(source, str(pair.get("note") or "")),
         )
         imported_pairs += 1
     for group in payload.get("groups", []):
@@ -5873,7 +6494,7 @@ def import_golden_labels(
             target_id=story_id,
             release_id=story_release_id,
             label=label,  # type: ignore[arg-type]
-            note=str(group.get("note") or ""),
+            note=_label_note(source, str(group.get("note") or "")),
         )
         imported_groups += 1
     return {"pair_labels": imported_pairs, "group_labels": imported_groups}
@@ -5899,6 +6520,159 @@ def _round_robin_strata(
                 break
         if not progressed:
             break
+    return selected
+
+
+# Фаза 3.1: разметка окупается только в окрестности границы решения. Измерено на
+# 7-дневном релизе (docs/PLAN_V4.md §3): auto_merge даёт compression 0.9503, review с
+# score >= 0.6 — 0.8751, >= 0.5 — 0.7543 (целевой диапазон), >= 0.4 — 0.5280. Вся
+# возможность слияния сидит в парах decision='review', и граница решения проходит в
+# районе 0.5-0.6, поэтому сэмпл целится в [0.45, 0.65] с запасом по обе стороны.
+_REVIEW_BOUNDARY_SCORE_LOW = 0.45
+_REVIEW_BOUNDARY_SCORE_HIGH = 0.65
+_REVIEW_BOUNDARY_MIN_RATIO = 0.5
+# voices↔mainstream (Reddit против СМИ) — самые ценные кросс-источниковые пары и
+# сейчас их меньше всего; квота гарантирует, что они не потеряются в стратификации.
+_REVIEW_CROSS_CLUSTER_QUOTA_RATIO = 0.15
+
+
+def _cluster_pair_key(cluster_a: str, cluster_b: str) -> str:
+    return "|".join(sorted((cluster_a or "other", cluster_b or "other")))
+
+
+def _seeded_round_robin(
+    records: list[dict[str, Any]],
+    limit: int,
+    rng: random.Random,
+) -> list[dict[str, Any]]:
+    """Round-robin across `source_cluster` pairs, seeded-shuffled within each stratum.
+
+    Keeps any single cluster pairing (e.g. mainstream↔mainstream) from dominating the
+    sample while staying deterministic for a fixed `rng` seed and input order.
+    """
+    if limit <= 0 or not records:
+        return []
+    strata: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for record in records:
+        key = _cluster_pair_key(record["source_cluster_a"], record["source_cluster_b"])
+        strata[key].append(record)
+    for key in strata:
+        rng.shuffle(strata[key])
+    keys = sorted(strata)
+    offsets = {key: 0 for key in keys}
+    picked: list[dict[str, Any]] = []
+    while len(picked) < limit:
+        progressed = False
+        for key in keys:
+            offset = offsets[key]
+            if offset >= len(strata[key]):
+                continue
+            picked.append(strata[key][offset])
+            offsets[key] += 1
+            progressed = True
+            if len(picked) >= limit:
+                break
+        if not progressed:
+            break
+    return picked
+
+
+def _stratified_review_sample(
+    records: list[dict[str, Any]],
+    limit: int,
+    *,
+    seed: int = 13,
+    boundary_low: float = _REVIEW_BOUNDARY_SCORE_LOW,
+    boundary_high: float = _REVIEW_BOUNDARY_SCORE_HIGH,
+    boundary_min_ratio: float = _REVIEW_BOUNDARY_MIN_RATIO,
+    cross_cluster_quota_ratio: float = _REVIEW_CROSS_CLUSTER_QUOTA_RATIO,
+) -> list[dict[str, Any]]:
+    """Deterministically sample `decision='review'` pairs for human/LLM labeling.
+
+    `records` must already be review-only (callers filter by decision before invoking
+    this). Priority order, each step deterministic for a fixed `seed`:
+
+    1. Reserve a floor of voices<->mainstream cross-source pairs — rarest and most
+       informative for calibration.
+    2. Fill at least `boundary_min_ratio` of the sample from `[boundary_low,
+       boundary_high]`, where the auto-merge/reject decision boundary actually sits.
+    3. Fill the remainder from outside that window, so tail behaviour stays visible.
+
+    Steps 2-3 stratify by the unordered (source_cluster_a, source_cluster_b) pairing so
+    no single cluster combination dominates. The same `seed` and input always produce
+    the same output (byte-identical JSONL on repeat runs).
+    """
+    if limit <= 0 or not records:
+        return []
+    rng = random.Random(seed)
+    # Stable base ordering: `records` arrives sorted by (decision, score desc,
+    # item_id_a, item_id_b) from the SQL query, but pair_id is a cheap, explicit
+    # tie-breaker that keeps every downstream filter's relative order reproducible
+    # regardless of caller changes upstream.
+    pool = sorted(records, key=lambda record: str(record["pair_id"]))
+    selected: list[dict[str, Any]] = []
+    selected_ids: set[str] = set()
+
+    def in_boundary(record: dict[str, Any]) -> bool:
+        return boundary_low <= float(record["score"]) <= boundary_high
+
+    # 1. Cross-cluster (voices<->mainstream) quota, boundary-window pairs preferred.
+    cross_pool = [
+        record
+        for record in pool
+        if _cluster_pair_key(record["source_cluster_a"], record["source_cluster_b"])
+        == _cluster_pair_key("voices", "mainstream")
+    ]
+    cross_target = min(len(cross_pool), max(1, round(limit * cross_cluster_quota_ratio)))
+    if cross_pool:
+        cross_boundary = [record for record in cross_pool if in_boundary(record)]
+        cross_tail = [record for record in cross_pool if not in_boundary(record)]
+        rng.shuffle(cross_boundary)
+        rng.shuffle(cross_tail)
+        for record in cross_boundary + cross_tail:
+            if len(selected) >= cross_target:
+                break
+            selected.append(record)
+            selected_ids.add(str(record["pair_id"]))
+
+    # 2. Boundary-window quota over what remains (cross-quota pairs already counted).
+    remaining_pool = [record for record in pool if str(record["pair_id"]) not in selected_ids]
+    remaining_budget = limit - len(selected)
+    boundary_target_total = math.ceil(limit * boundary_min_ratio)
+    boundary_have = sum(1 for record in selected if in_boundary(record))
+    boundary_need = max(0, boundary_target_total - boundary_have)
+
+    boundary_pool = [record for record in remaining_pool if in_boundary(record)]
+    boundary_take_n = min(boundary_need, remaining_budget, len(boundary_pool))
+    boundary_selected = _seeded_round_robin(boundary_pool, boundary_take_n, rng)
+    selected.extend(boundary_selected)
+    for record in boundary_selected:
+        selected_ids.add(str(record["pair_id"]))
+    remaining_budget -= len(boundary_selected)
+
+    # 3. Tail (outside the boundary window) fills the rest.
+    tail_pool = [
+        record
+        for record in remaining_pool
+        if not in_boundary(record) and str(record["pair_id"]) not in selected_ids
+    ]
+    tail_take_n = min(remaining_budget, len(tail_pool))
+    tail_selected = _seeded_round_robin(tail_pool, tail_take_n, rng)
+    selected.extend(tail_selected)
+    for record in tail_selected:
+        selected_ids.add(str(record["pair_id"]))
+    remaining_budget -= len(tail_selected)
+
+    # 4. Top up from anything unselected if either pool above was short (small releases).
+    if remaining_budget > 0:
+        leftover_pool = [
+            record for record in remaining_pool if str(record["pair_id"]) not in selected_ids
+        ]
+        leftover_selected = _seeded_round_robin(leftover_pool, remaining_budget, rng)
+        selected.extend(leftover_selected)
+
+    selected = selected[:limit]
+    selected.sort(key=lambda record: (-float(record["score"]), str(record["pair_id"])))
     return selected
 
 
@@ -6006,21 +6780,21 @@ def evaluate_story_release(conn: sqlite3.Connection, story_release_id: str) -> d
     release = get_story_release(conn, story_release_id)
     if release is None:
         raise ValueError(f"Story release not found: {story_release_id}")
-    label_rows = conn.execute(
-        """SELECT target_id, label FROM engine_labels
-           WHERE target_kind = 'story_pair' AND release_id = ?""",
-        (story_release_id,),
-    ).fetchall()
-    labels = {str(row["target_id"]): str(row["label"]) for row in label_rows}
+    resolved = resolve_pair_labels(conn, story_release_id)
     pair_rows = conn.execute(
         "SELECT * FROM story_candidate_pairs WHERE story_release_id = ?",
         (story_release_id,),
     ).fetchall()
-    predictions = {
+    decisions = {
         "|".join(_pair_key(str(row["item_id_a"]), str(row["item_id_b"]))): str(row["decision"])
-        == "auto_merge"
         for row in pair_rows
     }
+    predictions = {target: decision == "auto_merge" for target, decision in decisions.items()}
+    # Оценка идёт по тем же информативным меткам, что и обучение: авто-метка на паре,
+    # которую правила уже решили, сравнивала бы предсказание правил с ними же.
+    labels = resolved.informative(decisions)
+    label_composition, label_source = resolved.summarize(labels)
+    tautological_dropped = len(resolved.labels) - len(labels)
     facet_release = get_facet_release(conn, release.facet_release_id)
     providers: dict[str, str] = {}
     if facet_release is not None:
@@ -6090,10 +6864,20 @@ def evaluate_story_release(conn: sqlite3.Connection, story_release_id: str) -> d
         if membership_rows
         else 0.0
     )
+    # Метки уровня `auto_label` порождены самой лестницей правил, а predictions —
+    # это её же решения. Precision/recall против них измеряют согласие правил с самими
+    # собой: false_negative тогда равен нулю по построению, а recall — единице.
+    labels_are_circular = label_source == "auto_label"
+    label_agreement = resolved.agreement()
     result = {
         **release.metrics,
         "labeled_pairs": evaluated_labels,
         "labeled_groups": len(group_labels),
+        "label_source": label_source,
+        "label_composition": label_composition,
+        "label_agreement": label_agreement,
+        "tautological_labels_dropped": tautological_dropped,
+        "labels_are_circular": labels_are_circular,
         "pair_precision": round(precision, 4),
         "pair_recall": round(recall, 4),
         "cross_source_story_recall": round(cross_source_recall, 4),
@@ -6107,6 +6891,9 @@ def evaluate_story_release(conn: sqlite3.Connection, story_release_id: str) -> d
         "publication_gate": bool(
             evaluated_labels >= 120
             and len(group_labels) >= 30
+            # Гейт, подтверждающий precision против собственных правил, не подтверждает
+            # ничего. Нужен хотя бы один независимый источник меток.
+            and not labels_are_circular
             and precision >= 0.95
             and recall >= 0.75
             and overmerge_rate <= 0.03

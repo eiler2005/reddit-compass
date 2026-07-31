@@ -41,6 +41,7 @@ from reddit_compass.intelligence.engine import (
     load_release_embeddings,
     prepare_story_review_jobs,
     publish_radar,
+    resolve_pair_labels,
     rollback_publication,
     run_engine_cycle,
     store_quality_report,
@@ -227,9 +228,14 @@ def test_story_and_trend_releases_are_independent_versions(tmp_path: Path) -> No
         theme_catalog={"ai_security": ["security review", "security rules"]},
     )
     stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    # Тест про независимость версий релизов, а не про выбор алгоритма. Метод закреплён
+    # явно: у синтетической фикстуры нет кэша эмбеддингов, и дефолтный `embedding_v2`
+    # на трёх историях без векторов честно не находит связного тренда.
+    # Сам `embedding_v2` покрыт отдельно — test_create_trend_release_embedding_v2.
     trends = create_trend_release(
         engine,
         story_release_id=stories.story_release_id,
+        method="story_graph_v1",
         params={"min_stories": 3, "min_dates": 2},
     )
 
@@ -724,6 +730,239 @@ def test_golden_set_export_and_import_are_release_scoped(tmp_path: Path) -> None
     assert metrics["publication_gate"] is False
 
 
+# --- `engine golden export --format review` (Фаза 3.1) --------------------------------
+#
+# The matching heuristics can't be steered precisely enough to produce a hand-checkable
+# score/cluster distribution, so these tests build a data release from synthetic items
+# spanning four source_clusters and then insert `story_candidate_pairs` rows directly —
+# the same pattern already used by `test_story_review_jobs_use_the_same_pair_key_as_training`
+# and `test_auto_label_and_train_merge_model_persist` above.
+
+_REVIEW_SAMPLE_CLUSTERS = ("voices", "mainstream", "developers", "business")
+_REVIEW_SAMPLE_PROVIDERS = {
+    "voices": "reddit",
+    "mainstream": "nytimes",
+    "developers": "hackernews",
+    "business": "reuters",
+}
+# 5 boundary-window (>=1 excess pair beyond the [0.45, 0.65] target quota is still
+# reserved for tail-only scores) + 3 tail-only scores, one voices<->mainstream pair
+# each: this cluster pairing is the scarce, high-value one the export must not starve.
+_CROSS_BOUNDARY_SCORES = (0.45, 0.50, 0.55, 0.60, 0.65)
+_CROSS_TAIL_SCORES = (0.20, 0.30, 0.40)
+# Non voices<->mainstream combinations, 12 boundary + 12 tail scores each, so the
+# boundary-window and tail pools are large enough to prove the >=50% quota precisely.
+_NONCROSS_COMBOS = (
+    ("voices", "voices"),
+    ("mainstream", "mainstream"),
+    ("developers", "developers"),
+    ("business", "business"),
+    ("developers", "business"),
+)
+
+
+def _review_sample_item(cluster: str, index: int, date: str) -> ContentItem:
+    provider = _REVIEW_SAMPLE_PROVIDERS[cluster]
+    item_id = f"{cluster}_{index}"
+    return ContentItem(
+        item_id=item_id,
+        provider=provider,
+        source_cluster=cluster,  # type: ignore[arg-type]
+        external_id=item_id,
+        canonical_url=f"https://{provider}.example/{item_id}",
+        title=f"{cluster} synthetic story {index}",
+        excerpt=f"{cluster} synthetic story {index}. Context for review sampling tests.",
+        published_at=f"{date}T06:00:00Z",
+        observed_at=f"{date}T07:00:00Z",
+        snapshot_date=date,
+        content_scope="abstract",
+        source_section="technology",
+        domain_ids=["ai_technology"],
+    )
+
+
+def _review_pair_features(score: float) -> str:
+    return json.dumps(
+        {
+            "title_score": round(score, 4),
+            "token_jaccard": round(score * 0.6, 4),
+            "entity_score": round(score * 0.8, 4),
+            "dense_similarity": None,
+            "shared_entities": ["synthetic"],
+            "number_conflict": False,
+            "location_conflict": False,
+            "person_conflict": False,
+        }
+    )
+
+
+def _seed_review_sample_release(tmp_path: Path) -> tuple[sqlite3.Connection, str]:
+    """Story release whose `story_candidate_pairs` are fully hand-controlled: 128
+    decision='review' pairs spanning the score boundary window and every cluster
+    combination (with a dedicated voices<->mainstream slice), plus two non-review
+    pairs that must never appear in a `--format review` export."""
+    corpus_path = tmp_path / "compass.db"
+    corpus = sqlite3.connect(corpus_path)
+    corpus.row_factory = sqlite3.Row
+    migrate(corpus)
+    date = "2026-07-29"
+    run_id = f"{date}:broad"
+    upsert_run(
+        corpus,
+        run_id=run_id,
+        snapshot_date=date,
+        profile="broad",
+        status="complete",
+        started_at=f"{date}T07:00:00Z",
+        finished_at=f"{date}T07:10:00Z",
+    )
+    items = [
+        _review_sample_item(cluster, index, date)
+        for cluster in _REVIEW_SAMPLE_CLUSTERS
+        for index in range(20)
+    ]
+    upsert_items(corpus, items)
+    upsert_observations(
+        corpus,
+        [
+            Observation(run_id=run_id, item_id=item.item_id, observed_at=item.observed_at)
+            for item in items
+        ],
+    )
+    corpus.commit()
+
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(corpus, engine, source_db_path=corpus_path, run_ids=[run_id])
+    facets = create_facet_release(engine, data_release_id=data_release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    # Replace whatever the real matching heuristics produced with the controlled pool.
+    engine.execute(
+        "DELETE FROM story_candidate_pairs WHERE story_release_id = ?",
+        (stories.story_release_id,),
+    )
+
+    used_pairs: set[tuple[str, str]] = set()
+    rows: list[tuple[str, str, str, float, str, str, str]] = []
+
+    def add(item_a: str, item_b: str, score: float, decision: str) -> None:
+        key = tuple(sorted((item_a, item_b)))
+        assert key not in used_pairs, f"duplicate synthetic pair {key}"
+        used_pairs.add(key)
+        rows.append(
+            (
+                stories.story_release_id,
+                key[0],
+                key[1],
+                score,
+                decision,
+                _review_pair_features(score),
+                "synthetic",
+            )
+        )
+
+    for index, score in enumerate(_CROSS_BOUNDARY_SCORES + _CROSS_TAIL_SCORES):
+        add(f"voices_{index}", f"mainstream_{index}", score, "review")
+
+    for cluster_a, cluster_b in _NONCROSS_COMBOS:
+        for k in range(12):
+            boundary_score = round(0.45 + 0.20 * k / 11, 4)
+            tail_score = round(0.10 + 0.05 * k, 4) if k < 6 else round(0.70 + 0.05 * (k - 6), 4)
+            add(f"{cluster_a}_{k % 20}", f"{cluster_b}_{(k + 7) % 20}", boundary_score, "review")
+            add(f"{cluster_a}_{k % 20}", f"{cluster_b}_{(k + 3) % 20}", tail_score, "review")
+
+    # Non-review decisions must be invisible to a --format review export.
+    add("voices_19", "mainstream_19", 0.90, "auto_merge")
+    add("developers_19", "business_19", 0.10, "reject")
+
+    engine.executemany(
+        """INSERT INTO story_candidate_pairs
+           (story_release_id, item_id_a, item_id_b, score, decision, features_json, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        rows,
+    )
+    engine.commit()
+    return engine, stories.story_release_id
+
+
+def test_golden_review_export_includes_only_review_decision_pairs(tmp_path: Path) -> None:
+    engine, story_release_id = _seed_review_sample_release(tmp_path)
+
+    golden = export_golden_candidates(
+        engine,
+        story_release_id,
+        output_format="review",
+        sample=200,
+        seed=13,
+    )
+
+    assert golden["format"] == "review"
+    # 128 review pairs were seeded; the 2 auto_merge/reject pairs are excluded.
+    assert len(golden["pairs"]) == 128
+    assert all(pair["decision"] == "review" for pair in golden["pairs"])
+    exported_ids = {pair["pair_id"] for pair in golden["pairs"]}
+    assert "mainstream_19|voices_19" not in exported_ids
+    assert "business_19|developers_19" not in exported_ids
+
+
+def test_golden_review_export_favors_the_decision_boundary_window(tmp_path: Path) -> None:
+    engine, story_release_id = _seed_review_sample_release(tmp_path)
+
+    golden = export_golden_candidates(
+        engine,
+        story_release_id,
+        output_format="review",
+        sample=40,
+        seed=13,
+    )
+
+    pairs = golden["pairs"]
+    assert len(pairs) == 40
+    boundary = [pair for pair in pairs if 0.45 <= pair["score"] <= 0.65]
+    assert len(boundary) / len(pairs) >= 0.5
+
+
+def test_golden_review_export_reserves_voices_mainstream_quota(tmp_path: Path) -> None:
+    engine, story_release_id = _seed_review_sample_release(tmp_path)
+
+    golden = export_golden_candidates(
+        engine,
+        story_release_id,
+        output_format="review",
+        sample=40,
+        seed=13,
+    )
+
+    cross_pairs = [
+        pair
+        for pair in golden["pairs"]
+        if {pair["source_cluster_a"], pair["source_cluster_b"]} == {"voices", "mainstream"}
+    ]
+    # 8 voices<->mainstream review pairs were seeded; round(40 * 0.15) = 6 is the
+    # mandatory floor reserved up front, independent of how the score-boundary
+    # stratification lands (it may pick up the rest too — the quota is a floor, not
+    # a cap, so >= 6 is the contract, not an exact count).
+    assert 6 <= len(cross_pairs) <= 8
+
+
+def test_golden_review_export_is_deterministic_for_a_fixed_seed(tmp_path: Path) -> None:
+    engine, story_release_id = _seed_review_sample_release(tmp_path)
+
+    first = export_golden_candidates(
+        engine, story_release_id, output_format="review", sample=40, seed=7
+    )
+    second = export_golden_candidates(
+        engine, story_release_id, output_format="review", sample=40, seed=7
+    )
+    different_seed = export_golden_candidates(
+        engine, story_release_id, output_format="review", sample=40, seed=8
+    )
+
+    assert first["pairs"] == second["pairs"]
+    assert [pair["pair_id"] for pair in first["pairs"]] != [
+        pair["pair_id"] for pair in different_seed["pairs"]
+    ]
+
+
 def test_publish_and_rollback_switch_only_channel_pointer(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
@@ -970,6 +1209,110 @@ def test_manual_labels_are_version_scoped(tmp_path: Path) -> None:
     assert row["label"] == "same_story"
 
 
+def test_label_sources_resolve_by_trust(tmp_path: Path) -> None:
+    """Метка более доверенного источника перекрывает менее доверенную для той же пары.
+
+    Порядок: human > claude_review > qwen_review > auto_label. Источник читается как
+    префикс ``note`` до двоеточия, поэтому обоснование метки не теряется.
+    """
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    def add(target: str, label: str, note: str) -> None:
+        label_engine_target(
+            engine,
+            target_kind="story_pair",
+            target_id=target,
+            release_id="stories_v1",
+            label=label,  # type: ignore[arg-type]
+            note=note,
+        )
+
+    # Одна пара размечена всеми четырьмя источниками, каждый со своим вердиктом.
+    add("a|b", "different_story", "auto_label")
+    add("a|b", "different_story", "qwen_review: разные компании")
+    add("a|b", "same_story", "claude_review: один и тот же отчёт")
+    add("a|b", "same_story", "разобрал руками")
+    # Остальные пары покрыты только частью источников.
+    add("c|d", "same_story", "claude_review: общий первоисточник")
+    add("c|d", "different_story", "auto_label")
+    add("e|f", "different_story", "qwen_review")
+    add("g|h", "same_story", "auto_label")
+
+    resolved = resolve_pair_labels(engine, "stories_v1")
+    labels, composition, leading = resolved.labels, resolved.composition, resolved.leading
+
+    assert labels["a|b"] == "same_story", "человеческая метка обязана победить"
+    assert labels["c|d"] == "same_story", "claude_review сильнее auto_label"
+    assert labels["e|f"] == "different_story"
+    assert labels["g|h"] == "same_story"
+    assert leading == "human"
+    assert composition == {
+        "human": 1,
+        "claude_review": 2,
+        "qwen_review": 2,
+        "auto_label": 3,
+    }
+
+
+def test_leading_label_source_flags_circular_labels(tmp_path: Path) -> None:
+    """Пока метки только авто-разметочные, оценка качества сравнивает правила с собой."""
+    engine = engine_db(tmp_path / "trend_engine.db")
+    label_engine_target(
+        engine,
+        target_kind="story_pair",
+        target_id="a|b",
+        release_id="stories_v1",
+        label="same_story",
+        note="auto_label",
+    )
+    leading = resolve_pair_labels(engine, "stories_v1").leading
+    assert leading == "auto_label"
+
+    label_engine_target(
+        engine,
+        target_kind="story_pair",
+        target_id="c|d",
+        release_id="stories_v1",
+        label="different_story",
+        note="claude_review: разные события",
+    )
+    leading_after = resolve_pair_labels(engine, "stories_v1").leading
+    assert leading_after == "claude_review"
+
+
+def test_golden_import_stamps_label_source(tmp_path: Path) -> None:
+    """``--note claude_review`` помечает всю партию, обоснование остаётся в хвосте."""
+    engine = engine_db(tmp_path / "trend_engine.db")
+    engine.execute(
+        """INSERT INTO story_releases
+           (story_release_id, facet_release_id, method, params_hash, status,
+            metrics_json, git_sha, created_at)
+           VALUES ('stories_v1', 'facets_v1', 'hybrid_v2', 'h', 'evaluated', '{}', '', 'now')"""
+    )
+    engine.commit()
+
+    import_golden_labels(
+        engine,
+        {
+            "story_release_id": "stories_v1",
+            "pairs": [
+                {"item_id_a": "a", "item_id_b": "b", "label": "same_story", "note": "один отчёт"}
+            ],
+        },
+        source="claude_review",
+    )
+    row = engine.execute("SELECT note FROM engine_labels").fetchone()
+    assert row["note"] == "claude_review: один отчёт"
+
+    resolved = resolve_pair_labels(engine, "stories_v1")
+    composition, leading = resolved.composition, resolved.leading
+    assert leading == "claude_review"
+    assert composition == {"claude_review": 1}
+
+    with pytest.raises(ValueError, match="Unknown label source"):
+        import_golden_labels(engine, {"story_release_id": "stories_v1"}, source="nonsense")
+
+
 def test_active_label_story_pairs_writes_informative_pair_labels(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
@@ -1167,9 +1510,48 @@ def test_auto_label_and_train_merge_model_persist(tmp_path: Path) -> None:
     # Повторный прогон не дублирует метки.
     assert auto_label_story_pairs(engine, "stories_ml")["added"] == 0
 
+    # Все 30 пар решены правилами детерминированно, поэтому авто-метки на них —
+    # пересказ самих правил. Обучаться на них нельзя, и отказ должен быть явным.
+    with pytest.raises(ValueError, match="No informative labeled pairs"):
+        train_story_merge_model(engine, "stories_ml")
+
+    # Серая зона — единственное место, где метка добавляет информацию.
+    grey = []
+    for i in range(15):
+        grey.append(
+            ("stories_ml", f"g{i}", f"h{i}", 0.6, "review", json.dumps(positive()), "ambiguous")
+        )
+        grey.append(
+            ("stories_ml", f"m{i}", f"n{i}", 0.55, "review", json.dumps(negative()), "ambiguous")
+        )
+    engine.executemany(
+        """INSERT INTO story_candidate_pairs
+           (story_release_id, item_id_a, item_id_b, score, decision, features_json, reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        grey,
+    )
+    for i in range(15):
+        for left, right, label in (
+            (f"g{i}", f"h{i}", "same_story"),
+            (f"m{i}", f"n{i}", "different_story"),
+        ):
+            label_engine_target(
+                engine,
+                target_kind="story_pair",
+                target_id=f"{left}|{right}",
+                release_id="stories_ml",
+                label=label,  # type: ignore[arg-type]
+                note="claude_review: размечено в серой зоне",
+            )
+    engine.commit()
+
     trained = train_story_merge_model(engine, "stories_ml")
-    assert trained["label_source"] == "auto"
-    assert trained["labeled_pairs"] == 30
+    # Источники меток названы так же, как их ``note`` — один словарь вместо двух.
+    assert trained["label_source"] == "claude_review"
+    assert trained["labeled_pairs"] == 30, "в обучение идёт только серая зона"
+    assert trained["label_composition"] == {"claude_review": 30}
+    assert trained["model"]["tautological_labels_dropped"] == 30
+    assert trained["model"]["labels_are_circular"] is False
     model = trained["model"]
     assert model["precision_at_threshold"] >= 0.95
     assert model["model_hash"]
@@ -1180,17 +1562,18 @@ def test_auto_label_and_train_merge_model_persist(tmp_path: Path) -> None:
     stored = json.loads(row["metrics_json"])["merge_model"]
     assert stored["model_hash"] == model["model_hash"]
 
-    # Человеческая метка имеет приоритет над авто-меткой.
+    # Человеческая метка имеет приоритет над машинной на той же паре.
     label_engine_target(
         engine,
         target_kind="story_pair",
-        target_id="a0|b0",
+        target_id="g0|h0",
         release_id="stories_ml",
         label="different_story",
         note="manual",
     )
     retrained = train_story_merge_model(engine, "stories_ml")
     assert retrained["label_source"] == "human"
+    assert retrained["label_composition"] == {"human": 1, "claude_review": 29}
 
 
 def test_create_trend_release_embedding_v2(tmp_path: Path) -> None:
@@ -1606,3 +1989,52 @@ def test_run_engine_cycle_rebuilds_stories_after_valid_qwen_pair(
     assert result["valid_reviewed_pairs"] == 1
     assert result["reviewed_story_rebuilt"] is True
     assert result["story_release_id"] != result["provisional_story_release_id"]
+
+
+def test_medoid_threshold_is_a_release_parameter(tmp_path: Path) -> None:
+    """Порог ребра до медоида настраивается и попадает в params релиза.
+
+    Он был жёстко зашит как 0.72 — выше всей серой зоны (score 0.45–0.65), поэтому
+    пары, поднятые ревью или merge-моделью до auto_merge, всё равно отсекались при
+    сборке групп. Разметка и обучение при этом не влияли на результат вовсе.
+    """
+    from reddit_compass.intelligence.engine import (
+        DEFAULT_MEDOID_MIN_SCORE,
+        PairCandidate,
+        _story_generation_params,
+        _valid_group_against_medoid,
+    )
+
+    def pair(score: float) -> PairCandidate:
+        return PairCandidate(
+            item_id_a="a",
+            item_id_b="b",
+            score=score,
+            decision="auto_merge",
+            reason="test",
+            features={},
+        )
+
+    grey_zone = {("a", "b"): pair(0.60)}
+    assert not _valid_group_against_medoid(["a", "b"], "a", grey_zone, min_score=0.72)
+    assert _valid_group_against_medoid(["a", "b"], "a", grey_zone, min_score=0.55)
+
+    # Дефолт должен пропускать середину серой зоны, иначе слой ревью бессмысленен.
+    assert DEFAULT_MEDOID_MIN_SCORE < 0.65
+    assert _valid_group_against_medoid(["a", "b"], "a", grey_zone)
+
+    # Значение обязано лежать в params до вычисления params_hash — релиз воспроизводим.
+    assert _story_generation_params()["medoid_min_score"] == DEFAULT_MEDOID_MIN_SCORE
+    assert _story_generation_params({"medoid_min_score": 0.7})["medoid_min_score"] == 0.7
+
+
+def test_library_trend_method_matches_production() -> None:
+    """Дефолт библиотеки обязан совпадать с тем, что реально считает ночной прогон.
+
+    Расхождение было не косметическим: на одном и том же story-релизе (4 957 items)
+    `story_graph_v1` дал 6 трендов с 5 негодными именами и одним дублем — то есть ронял
+    полы качества, — а `embedding_v2` дал 109 трендов и полы имён прошёл.
+    """
+    from reddit_compass.intelligence.engine import DEFAULT_TREND_METHOD
+
+    assert DEFAULT_TREND_METHOD == "embedding_v2"
