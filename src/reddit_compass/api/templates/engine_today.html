@@ -70,37 +70,18 @@
         </div>
     </section>
 
-    <section class="section">
+    <section class="section" data-today-changes-url="{{ changes_endpoint }}">
         <h2>Что изменилось</h2>
         <p class="section-note">
             Это верхние trend-кандидаты из опубликованного Engine release. Клик по карточке открывает trend detail
             со stories и evidence.
         </p>
-        {% if changes %}
-        <div class="story-grid">
-            {% for trend in changes[:5] %}
-            <a class="story-card today-trend-card" href="{{ trend.url }}">
-                <div class="story-meta">
-                    <span class="direction-badge" title="{{ trend.lifecycle_hint }}">{{ trend.lifecycle_label }}</span>
-                    {% if trend.source_scope_label %}
-                    <span class="scope-badge scope-{{ trend.source_scope }}">{{ trend.source_scope_label }}</span>
-                    {% endif %}
-                    <span>{{ trend.review_label }}</span>
-                    <span>{{ trend.confidence_pct }}%</span>
-                </div>
-                <h3>{{ trend.title }}</h3>
-                {% if trend.pattern %}<p>{{ trend.pattern }}</p>{% endif %}
-                <div class="today-card-footer">
-                    <span>{{ trend.source_count }} источников</span>
-                    <span>{{ trend.story_count }} событий</span>
-                    <span>Открыть →</span>
-                </div>
-            </a>
-            {% endfor %}
+        <div class="story-grid" data-today-changes aria-live="polite">
+            <p class="section-note">Подбираю главные изменения выпуска…</p>
         </div>
-        {% else %}
-        <p>В опубликованной версии пока нет trend-кандидатов.</p>
-        {% endif %}
+        <noscript>
+            <p class="section-note">Для карточек включите JavaScript или откройте <a href="/trends?{{ analysis_query }}">Trends</a>.</p>
+        </noscript>
     </section>
 
     <section class="section" data-reading-feed-url="{{ reading_endpoint }}">

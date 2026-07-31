@@ -1,18 +1,24 @@
 (() => {
     "use strict";
 
-    const section = document.querySelector("[data-reading-feed-url]");
-    if (!(section instanceof HTMLElement)) return;
-
-    const endpoint = section.dataset.readingFeedUrl;
-    const feed = section.querySelector("[data-reading-feed]");
-    if (!endpoint || !(feed instanceof HTMLElement)) return;
-
     const safeHttpUrl = (value) => {
         if (typeof value !== "string") return "";
         try {
             const parsed = new URL(value);
             return parsed.protocol === "https:" || parsed.protocol === "http:" ? parsed.href : "";
+        } catch (_) {
+            return "";
+        }
+    };
+
+    const safeInternalTrendUrl = (value) => {
+        if (typeof value !== "string") return "";
+        try {
+            const parsed = new URL(value, window.location.origin);
+            if (parsed.origin !== window.location.origin || !parsed.pathname.startsWith("/trends/")) {
+                return "";
+            }
+            return `${parsed.pathname}${parsed.search}`;
         } catch (_) {
             return "";
         }
@@ -38,7 +44,77 @@
         return link;
     };
 
-    const renderItem = (item, index) => {
+    const fetchItems = (endpoint) =>
+        fetch(endpoint, { headers: { Accept: "application/json" } })
+            .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+            .then((payload) => (Array.isArray(payload.items) ? payload.items : []));
+
+    const renderChange = (trend) => {
+        const card = document.createElement("a");
+        card.className = "story-card today-trend-card";
+        card.href = safeInternalTrendUrl(trend.url) || "/trends?channel=broad";
+
+        const meta = document.createElement("div");
+        meta.className = "story-meta";
+        appendText(meta, "span", trend.lifecycle_label, "direction-badge");
+        if (trend.source_scope_label) {
+            appendText(meta, "span", trend.source_scope_label, `scope-badge scope-${trend.source_scope}`);
+        }
+        appendText(meta, "span", trend.review_label);
+        appendText(meta, "span", `${trend.confidence_pct || 0}%`);
+        card.append(meta);
+
+        appendText(card, "h3", trend.title || "Trend-кандидат");
+        if (trend.pattern) appendText(card, "p", trend.pattern);
+
+        const footer = document.createElement("div");
+        footer.className = "today-card-footer";
+        appendText(footer, "span", `${trend.source_count || 0} источников`);
+        appendText(footer, "span", `${trend.story_count || 0} событий`);
+        appendText(footer, "span", "Открыть →");
+        card.append(footer);
+        return card;
+    };
+
+    const changesSection = document.querySelector("[data-today-changes-url]");
+    if (changesSection instanceof HTMLElement) {
+        const endpoint = changesSection.dataset.todayChangesUrl;
+        const container = changesSection.querySelector("[data-today-changes]");
+        if (endpoint && container instanceof HTMLElement) {
+            fetchItems(endpoint)
+                .then((items) => {
+                    container.replaceChildren();
+                    if (!items.length) {
+                        appendText(
+                            container,
+                            "p",
+                            "В опубликованной версии пока нет trend-кандидатов.",
+                            "section-note"
+                        );
+                        return;
+                    }
+                    items.forEach((trend) => container.append(renderChange(trend)));
+                })
+                .catch(() => {
+                    container.replaceChildren();
+                    appendText(
+                        container,
+                        "p",
+                        "Не удалось загрузить изменения. Откройте Trends, чтобы продолжить исследование.",
+                        "section-note"
+                    );
+                });
+        }
+    }
+
+    const readingSection = document.querySelector("[data-reading-feed-url]");
+    if (!(readingSection instanceof HTMLElement)) return;
+
+    const readingEndpoint = readingSection.dataset.readingFeedUrl;
+    const feed = readingSection.querySelector("[data-reading-feed]");
+    if (!readingEndpoint || !(feed instanceof HTMLElement)) return;
+
+    const renderReadingItem = (item, index) => {
         const article = document.createElement("article");
         article.className = "reading-item";
         appendText(article, "div", String(index + 1).padStart(2, "0"), "reading-rank");
@@ -84,16 +160,14 @@
         return article;
     };
 
-    const fetchPage = (offset) => {
-        const url = new URL(endpoint, window.location.origin);
+    const fetchReadingPage = (offset) => {
+        const url = new URL(readingEndpoint, window.location.origin);
         url.searchParams.set("offset", String(offset));
         url.searchParams.set("limit", "10");
-        return fetch(url, { headers: { Accept: "application/json" } })
-            .then((response) => (response.ok ? response.json() : Promise.reject(response)))
-            .then((payload) => (Array.isArray(payload.items) ? payload.items : []));
+        return fetchItems(url);
     };
 
-    Promise.all([fetchPage(0), fetchPage(10)])
+    Promise.all([fetchReadingPage(0), fetchReadingPage(10)])
         .then((pages) => {
             const items = pages.flat();
             feed.replaceChildren();
@@ -106,7 +180,7 @@
                 );
                 return;
             }
-            items.forEach((item, index) => feed.append(renderItem(item, index)));
+            items.forEach((item, index) => feed.append(renderReadingItem(item, index)));
         })
         .catch(() => {
             feed.replaceChildren();

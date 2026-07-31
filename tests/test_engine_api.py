@@ -412,6 +412,7 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     trends_response = engine_client.get("/api/v2/engine/trends?channel=broad")
     trends_page = engine_client.get("/trends")
     today_page = engine_client.get("/today")
+    changes_response = engine_client.get("/ui/today-changes?date=2026-07-29")
 
     assert radar_response.status_code == 200
     assert radar_response.json()["preview"] is True
@@ -424,9 +425,10 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     assert "Preview mode" in trends_page.text
     assert "Проверяемый тренд" in trends_page.text
     assert today_page.status_code == 200
+    assert changes_response.status_code == 200
     assert "Preview mode" in today_page.text
-    assert "Проверяемый тренд" in today_page.text
-    assert 'href="/trends/trend_1?channel=broad"' in today_page.text
+    assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
+    assert changes_response.json()["items"][0]["url"] == "/trends/trend_1?channel=broad"
     assert "Качество и ограничения" in today_page.text
     assert "Куда идти дальше" in today_page.text
 
@@ -436,23 +438,24 @@ def test_engine_today_dashboard_is_clickable_and_informative(
 ) -> None:
     response = engine_client.get("/today")
     reading_response = engine_client.get("/ui/today-reading?date=2026-07-29")
+    changes_response = engine_client.get("/ui/today-changes?date=2026-07-29")
 
     assert response.status_code == 200
     assert reading_response.status_code == 200
+    assert changes_response.status_code == 200
     assert "Сводка выпуска" in response.text
     assert "trend-кандидатов" in response.text
     assert "Качество и ограничения" in response.text
     assert "Что прочитать сегодня" in response.text
     assert "Тематический срез" in response.text
     assert "Куда идти дальше" in response.text
-    assert 'href="/trends/trend_1?channel=broad"' in response.text
     assert 'href="/news?channel=broad"' in response.text
     assert 'href="/stories?channel=broad&amp;domain=world_geopolitics"' in response.text
     assert 'src="/static/today_reading.js"' in response.text
     assert reading_response.json()["items"][0]["primary_url"] == "https://example.com/story"
+    assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
     assert "javascript:alert" not in response.text
     assert "javascript:alert" not in reading_response.text
-    assert "Проверяемый тренд" in response.text
 
 
 def test_today_reading_list_prefers_article_and_dedupes_story(
@@ -506,6 +509,7 @@ def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
     engine_page = engine_client.get("/engine")
     radar_page = engine_client.get("/runs/2026-07-29/radar")
     today_page = engine_client.get("/today")
+    changes_response = engine_client.get("/ui/today-changes?date=2026-07-29")
 
     assert engine_page.status_code == 200
     assert "publication_test" in engine_page.text
@@ -518,7 +522,7 @@ def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
     assert "Wrong date pulse" not in radar_page.text
     assert "javascript:alert" not in radar_page.text
     assert today_page.status_code == 200
-    assert "Проверяемый тренд" in today_page.text
+    assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
     assert "publication_test" in today_page.text
 
 

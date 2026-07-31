@@ -536,6 +536,21 @@ def _load_today_engine_radar(
     )
 
 
+def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, object]]:
+    lifecycle_order = (
+        "growing",
+        "new",
+        "resurfacing",
+        "stable",
+        "insufficient_history",
+        "fading",
+    )
+    changes = [
+        trend for lifecycle in lifecycle_order for trend in radar.shelves.get(lifecycle, [])
+    ][:5]
+    return [_decorate_today_trend(dict(trend), analysis_query) for trend in changes]
+
+
 def _build_today_dashboard(
     radar: dict[str, object], changes: list[dict[str, object]], analysis_query: str
 ) -> dict[str, object]:
@@ -668,24 +683,9 @@ async def today_page(
             engine_conn.close()
 
         if published_radar is not None:
-            lifecycle_order = (
-                "growing",
-                "new",
-                "resurfacing",
-                "stable",
-                "insufficient_history",
-                "fading",
-            )
-            changes = [
-                trend
-                for lifecycle in lifecycle_order
-                for trend in published_radar.shelves.get(lifecycle, [])
-            ][:10]
             analysis_query = _analysis_query("broad", None)
             radar_payload = published_radar.model_dump()
-            decorated_changes = [
-                _decorate_today_trend(dict(trend), analysis_query) for trend in changes
-            ]
+            decorated_changes = _today_change_candidates(published_radar, analysis_query)
             return templates.TemplateResponse(
                 request=request,
                 name="engine_today.html",
@@ -698,6 +698,8 @@ async def today_page(
                         analysis_query,
                     ),
                     "reading_endpoint": "/ui/today-reading?"
+                    + urlencode({"date": radar_payload["date"], "profile": profile}),
+                    "changes_endpoint": "/ui/today-changes?"
                     + urlencode({"date": radar_payload["date"], "profile": profile}),
                     "analysis_query": analysis_query,
                 },
@@ -774,6 +776,30 @@ async def today_page(
             "csrf_token": _generate_csrf_token(),
         },
     )
+
+
+@router.get("/ui/today-changes")
+async def today_changes_feed(
+    date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
+) -> dict[str, object]:
+    """Compact JSON cards for the top changes shown by Today."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return {"date": date or "", "items": []}
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
+        if radar is None:
+            return {"date": date or "", "items": []}
+        return {
+            "date": radar.date,
+            "items": _today_change_candidates(radar, _analysis_query("broad", None)),
+        }
+    except HTTPException:
+        return {"date": date or "", "items": []}
+    finally:
+        engine_conn.close()
 
 
 @router.get("/ui/today-reading")
