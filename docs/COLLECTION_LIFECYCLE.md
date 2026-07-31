@@ -38,7 +38,7 @@ Ladder / PH       │              │
 
 | Место | Что делает | Что **не** делает |
 |---|---|---|
-| Mac (residential IP) | Берёт публичный Reddit и передаёт `posts.jsonl` в Docker volume VPS | Не копирует локальный `compass.db`; не строит stories/trends |
+| Local approved route | Берёт публичный Reddit и передаёт `posts.jsonl` в Docker volume VPS | Не копирует локальный `compass.db`; не строит stories/trends |
 | VPS adapters | Пишут `rss.jsonl`, `hackernews.jsonl`, `ladder.jsonl`, `producthunt.jsonl` | Не публикуют Radar |
 | Collector finalizer | Проверяет артефакты, нормализует их и фиксирует raw run в `compass.db` | Не вызывает LLM и не меняет `trend_engine.db` |
 | Trend Engine | Берёт read-only снимок raw run, строит версии facets/stories/trends | Не запускает source adapters и не изменяет `compass.db` |
@@ -154,7 +154,8 @@ reviewed StoryRelease      # новый immutable attempt в том же cycle
 
 Таким образом валидный Qwen-ответ влияет на **тот же** ночной cycle, а не остаётся декоративной
 разметкой до следующего дня. Invalid JSON, неизвестные evidence IDs и сетевые ошибки сохраняются
-как диагностика, но не превращаются в merge.
+как диагностика, но не превращаются в merge. Один Engine-review ограничен 75 секундами: timeout
+сохраняется как ошибка attempt и не может зависшим запросом задержать quality/publication stage.
 
 ### 3.3. Trends и качество
 
