@@ -1522,8 +1522,25 @@ def _release_input_status(
         and cluster_counts.get("voices", 0) == 0
     ):
         return "partial"
+    # Some adapters record both an aggregate provider row (``reddit``) and
+    # granular section rows (``reddit:LocalLLaMA``).  An aggregate zero is a
+    # reporting artifact, not missing voice coverage, once at least one real
+    # section from that provider succeeded in the immutable window.
+    healthy_granular_providers = {
+        str(payload[2])
+        for payload in health_payloads
+        if (
+            str(payload[4]) == "ok"
+            and int(payload[5] or 0) > 0
+            and str(payload[1]) != str(payload[2])
+        )
+    }
     required_source_empty = any(
-        str(payload[3]) == "voices" and str(payload[4]) in {"empty", "degraded"}
+        str(payload[3]) == "voices"
+        and str(payload[4]) in {"empty", "degraded"}
+        and not (
+            str(payload[1]) == str(payload[2]) and str(payload[2]) in healthy_granular_providers
+        )
         for payload in health_payloads
     )
     return "partial" if required_source_empty else "complete"

@@ -133,6 +133,11 @@ Data Release — не ссылка на живую БД, а полная frozen-
 Такой release можно отлаживать, но его нельзя публиковать в `broad` или `ai-native` даже с
 `--allow-partial`; исключение допустимо лишь в непроизводственном `shadow`.
 
+Health может содержать aggregate provider-row и section-rows одного провайдера. Например,
+`reddit=0` не делает release partial, если в том же frozen window есть успешные
+`reddit:<subreddit>` rows с материалами: это агрегатный reporting artifact, а не отсутствие
+voice coverage. Настоящий пустой provider без успешной section-строки остаётся `partial`.
+
 ### 3.2. Stories и Qwen
 
 Stories строятся из URL, title/BM25, entities, времени, чисел и локальных embedding candidates.

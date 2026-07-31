@@ -126,6 +126,44 @@ def test_data_release_marks_expected_empty_voice_source_partial(tmp_path: Path) 
     assert "dominant_cluster_empty:voices" in report["warnings"]
 
 
+def test_data_release_accepts_granular_voice_coverage_over_empty_aggregate(
+    tmp_path: Path,
+) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    _add_voice_coverage(corpus)
+    save_source_health(
+        corpus,
+        "2026-07-27:broad",
+        [
+            SourceHealth(
+                source_id="reddit",
+                provider="reddit",
+                cluster="voices",
+                status="ok",
+                count=0,
+            ),
+            SourceHealth(
+                source_id="reddit:LocalLLaMA",
+                provider="reddit",
+                cluster="voices",
+                status="ok",
+                count=20,
+            ),
+        ],
+    )
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+
+    assert release.input_status == "complete"
+
+
 def test_story_and_trend_releases_are_independent_versions(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
