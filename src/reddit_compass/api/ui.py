@@ -180,6 +180,37 @@ _READING_PROVIDER_WEIGHTS = {
     "producthunt": 7.0,
 }
 
+# Человекочитаемые названия типов сигналов Pulse. Сырые `policy_politics` и
+# `career_labor` в интерфейсе не читаются, а тип — единственная рабочая тематическая ось
+# сигналов: `domain_ids_json` у них практически всегда `other`.
+_SIGNAL_TYPE_LABELS = {
+    "ai_capability": "Возможности AI",
+    "ai_risk": "Риски AI",
+    "ai_tools": "AI-инструменты",
+    "career_labor": "Работа и карьера",
+    "complaint": "Жалобы",
+    "discussion": "Дискуссии",
+    "market_investing": "Рынки и инвестиции",
+    "meme_culture": "Мемы и культура",
+    "pain_point": "Боли",
+    "policy_politics": "Политика и регулирование",
+    "product_request": "Запросы на продукт",
+    "question": "Вопросы",
+    "other": "Прочее",
+}
+
+
+def signal_type_label(signal_type: str) -> str:
+    return _SIGNAL_TYPE_LABELS.get(signal_type, signal_type.replace("_", " "))
+
+
+# Сколько постов одной тематики и одного сабреддита пускаем в блок «Новое на Reddit».
+# Политика ограничена жёстче остальных: без этого лента съезжает в неё целиком —
+# `policy_politics` держит самый высокий средний pulse среди всех типов.
+_NEW_REDDIT_PER_TYPE = 3
+_NEW_REDDIT_PER_SUBREDDIT = 2
+_NEW_REDDIT_POLITICS_CAP = 3
+
 _READING_CLUSTER_WEIGHTS = {
     "business": 8.0,
     "mainstream": 8.0,
@@ -518,6 +549,129 @@ def _build_today_reading_list(
     return selected
 
 
+def _pulse_topic_clouds(
+    conn: sqlite3.Connection,
+    signal_release_id: str,
+    *,
+    examples: int = 3,
+) -> list[dict[str, object]]:
+    """Тематики Pulse со счётчиком и живыми примерами заголовков.
+
+    Тип сигнала — единственная работающая тематическая ось: ``domain_ids_json`` у сигналов
+    практически всегда ``other``, потому что фасеты считаются по тексту материала, а у
+    Reddit-поста текста обычно нет. Примеры нужны, чтобы название тематики было понятно
+    без клика: «Боли» само по себе не объясняет, что внутри.
+    """
+    rows = conn.execute(
+        """
+        SELECT signal_type, COUNT(*) AS total, AVG(pulse_score) AS avg_pulse
+        FROM community_signals
+        WHERE signal_release_id = ?
+        GROUP BY signal_type
+        ORDER BY total DESC
+        """,
+        (signal_release_id,),
+    ).fetchall()
+    clouds: list[dict[str, object]] = []
+    for row in rows:
+        signal_type = str(row["signal_type"])
+        sample = conn.execute(
+            """
+            SELECT title FROM community_signals
+            WHERE signal_release_id = ? AND signal_type = ?
+            ORDER BY pulse_score DESC LIMIT ?
+            """,
+            (signal_release_id, signal_type, max(examples, 0)),
+        ).fetchall()
+        clouds.append(
+            {
+                "signal_type": signal_type,
+                "label": signal_type_label(signal_type),
+                "total": int(row["total"]),
+                "avg_pulse": round(float(row["avg_pulse"] or 0.0), 1),
+                "examples": [str(item["title"]) for item in sample],
+            }
+        )
+    return clouds
+
+
+def _build_today_reddit_new(
+    conn: sqlite3.Connection,
+    signal_release_id: str,
+    *,
+    exclude_item_ids: set[str],
+    signal_type: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, object]]:
+    """Свежие Reddit-посты, которых ещё не было на странице.
+
+    «Новое» здесь — по дате публикации, а не по полю ``novelty``: оно насыщено
+    (>0.5 у 99% сигналов) и ничего не разделяет. Из выборки исключается всё, что уже
+    показано в ленте чтения, — иначе блок дублировал бы соседний.
+
+    Разнообразие держится квотами по типу сигнала и сабреддиту, причём политика
+    ограничена жёстче остальных: у ``policy_politics`` самый высокий средний pulse,
+    и без отдельного потолка она вытесняет всё остальное.
+    """
+    rows = conn.execute(
+        """
+        SELECT cs.item_id, cs.subreddit, cs.signal_type, cs.title,
+               cs.discussion_url, cs.target_url, cs.pulse_score,
+               ri.published_at,
+               COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) AS reddit_score,
+               COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) AS reddit_comments
+        FROM community_signals cs
+        JOIN signal_releases sr ON sr.signal_release_id = cs.signal_release_id
+        LEFT JOIN release_items ri
+               ON ri.item_id = cs.item_id AND ri.release_id = sr.data_release_id
+        WHERE cs.signal_release_id = ?
+        ORDER BY ri.published_at DESC, cs.pulse_score DESC
+        """,
+        (signal_release_id,),
+    ).fetchall()
+
+    selected: list[dict[str, object]] = []
+    per_type: dict[str, int] = {}
+    per_subreddit: dict[str, int] = {}
+    for row in rows:
+        item_id = str(row["item_id"])
+        if item_id in exclude_item_ids:
+            continue
+        row_type = str(row["signal_type"])
+        if signal_type and row_type != signal_type:
+            continue
+        subreddit = str(row["subreddit"] or "")
+        cap = _NEW_REDDIT_POLITICS_CAP if row_type == "policy_politics" else _NEW_REDDIT_PER_TYPE
+        # Явно выбранная тематика — это уже запрос на неё, квота по типу не нужна.
+        if not signal_type and per_type.get(row_type, 0) >= cap:
+            continue
+        if per_subreddit.get(subreddit, 0) >= _NEW_REDDIT_PER_SUBREDDIT:
+            continue
+        per_type[row_type] = per_type.get(row_type, 0) + 1
+        per_subreddit[subreddit] = per_subreddit.get(subreddit, 0) + 1
+        discussion_url = _safe_url(str(row["discussion_url"] or ""))
+        target_url = _safe_url(str(row["target_url"] or ""))
+        selected.append(
+            {
+                "item_id": item_id,
+                "title": str(row["title"] or ""),
+                "subreddit": subreddit,
+                "signal_type": row_type,
+                "signal_type_label": signal_type_label(row_type),
+                "discussion_url": discussion_url,
+                # Ссылка на первоисточник, если пост ведёт наружу; иначе только обсуждение.
+                "target_url": target_url if target_url != discussion_url else "",
+                "pulse_score": round(float(row["pulse_score"] or 0.0), 1),
+                "reddit_score": int(row["reddit_score"] or 0),
+                "reddit_comments": int(row["reddit_comments"] or 0),
+                "published_at": str(row["published_at"] or "")[:10],
+            }
+        )
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 @lru_cache(maxsize=24)
 def _cached_today_reading_list(
     engine_path_value: str,
@@ -736,6 +890,7 @@ async def today_page(
     request: Request,
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
+    reddit_type: str | None = None,
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
@@ -768,12 +923,60 @@ async def today_page(
                 )
             except (HTTPException, OSError, sqlite3.Error):
                 initial_reading = []
+
+            # Свежее с Reddit: то, чего ещё нет в ленте чтения выше. Считается по
+            # опубликованному signal release, поэтому блок остаётся частью выпуска,
+            # а не отдельной живой выборкой из корпуса.
+            reddit_new: list[dict[str, object]] = []
+            reddit_types: list[dict[str, object]] = []
+            engine_conn = open_engine_readonly(engine_path)
+            try:
+                from .v2 import _latest_signal_release
+
+                # Сначала сигналы того же data release, что и публикация. Если Pulse
+                # считался на другом релизе (частый случай: радар семидневный, а Pulse
+                # однодневный), берём последний финализированный — как это делает /pulse.
+                sig_id = _latest_signal_release(
+                    engine_conn,
+                    data_release_id=str(radar_payload.get("data_release_id") or "") or None,
+                ) or _latest_signal_release(engine_conn)
+                if sig_id:
+                    already_shown = {
+                        str(item.get("item_id")) for item in initial_reading if item.get("item_id")
+                    }
+                    reddit_new = _build_today_reddit_new(
+                        engine_conn,
+                        sig_id,
+                        exclude_item_ids=already_shown,
+                        signal_type=reddit_type or None,
+                    )
+                    reddit_types = [
+                        {
+                            "signal_type": cloud["signal_type"],
+                            "label": cloud["label"],
+                            "total": cloud["total"],
+                        }
+                        for cloud in _pulse_topic_clouds(engine_conn, sig_id, examples=0)
+                    ]
+            except (HTTPException, OSError, sqlite3.Error):
+                reddit_new, reddit_types = [], []
+            finally:
+                engine_conn.close()
+
             return templates.TemplateResponse(
                 request=request,
                 name="engine_today.html",
                 context={
                     "radar": radar_payload,
                     "changes": decorated_changes,
+                    "reddit_new": reddit_new,
+                    "reddit_types": reddit_types,
+                    "reddit_type": reddit_type or "",
+                    "reddit_quotas": {
+                        "per_type": _NEW_REDDIT_PER_TYPE,
+                        "per_subreddit": _NEW_REDDIT_PER_SUBREDDIT,
+                        "politics": _NEW_REDDIT_POLITICS_CAP,
+                    },
                     "dashboard": _build_today_dashboard(
                         radar_payload,
                         decorated_changes,
@@ -1072,6 +1275,7 @@ async def pulse_page(
     signal_type: str | None = None,
     subreddit: str | None = None,
     page: int = 1,
+    view: str = "cards",
 ) -> HTMLResponse:
     """Reddit Pulse: Reddit-native community signals with raw engagement."""
     engine_path = _engine_path()
@@ -1098,7 +1302,10 @@ async def pulse_page(
                 context={"message": "Нет Reddit Pulse данных."},
                 status_code=404,
             )
-        page_size = 30
+        # Режим ссылок: клик по облаку тематики даёт топ-20 прямых ссылок на посты,
+        # а не сетку карточек — на этом шаге нужен сам пост, а не его метрики.
+        links_view = view == "links"
+        page_size = 20 if links_view else 30
         offset = (max(page, 1) - 1) * page_size
         signals, total = _engine_pulse_signals(
             engine_conn,
@@ -1179,6 +1386,7 @@ async def pulse_page(
             (sig_id,),
         ).fetchall()
         signal_types = [r["signal_type"] for r in type_rows]
+        topic_clouds = _pulse_topic_clouds(engine_conn, sig_id)
     finally:
         engine_conn.close()
 
@@ -1193,11 +1401,15 @@ async def pulse_page(
             "page_size": page_size,
             "total_pages": total_pages,
             "pulse_summary": pulse_summary,
+            "topic_clouds": topic_clouds,
+            "links_view": links_view,
             "filters": {
                 "sort": sort,
                 "signal_type": signal_type or "",
                 "subreddit": subreddit or "",
+                "view": view,
             },
+            "signal_type_labels": _SIGNAL_TYPE_LABELS,
             "signal_types": signal_types,
             "sort_options": [
                 ("pulse", "Pulse score"),

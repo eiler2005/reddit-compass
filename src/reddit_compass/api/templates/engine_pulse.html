@@ -165,9 +165,37 @@
     {% endif %}
     {% endif %}
 
+    {# ── Тематики: облака с примерами ── #}
+    {% if topic_clouds %}
+    <section class="section">
+        <h2>Тематики</h2>
+        <p class="section-note">
+            Клик по тематике открывает топ-20 постов прямыми ссылками на Reddit,
+            отсортированными по выбранному фильтру.
+        </p>
+        <div class="topic-cloud-grid">
+            {% for cloud in topic_clouds %}
+            <a class="topic-cloud{% if filters.signal_type == cloud.signal_type %} topic-cloud-active{% endif %}"
+               href="/pulse?signal_type={{ cloud.signal_type }}&sort={{ filters.sort }}&view=links">
+                <div class="topic-cloud-head">
+                    <span class="topic-cloud-label">{{ cloud.label }}</span>
+                    <span class="topic-cloud-count">{{ cloud.total }}</span>
+                </div>
+                <ul class="topic-cloud-examples">
+                    {% for example in cloud.examples %}
+                    <li>{{ example }}</li>
+                    {% endfor %}
+                </ul>
+                <div class="topic-cloud-foot">средний pulse {{ cloud.avg_pulse }}</div>
+            </a>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
     {# ── Full filterable list ── #}
     <section class="section">
-        <h2>Все сигналы</h2>
+        <h2>{% if links_view %}{{ signal_type_labels.get(filters.signal_type, filters.signal_type) or "Все сигналы" }}{% else %}Все сигналы{% endif %}</h2>
         <form class="filters" method="get" action="/pulse">
             <select name="sort">
                 {% for val, label in sort_options %}
@@ -177,14 +205,41 @@
             <select name="signal_type">
                 <option value="">Все типы</option>
                 {% for st in signal_types %}
-                <option value="{{ st }}" {% if filters.signal_type == st %}selected{% endif %}>{{ st }}</option>
+                <option value="{{ st }}" {% if filters.signal_type == st %}selected{% endif %}>{{ signal_type_labels.get(st, st) }}</option>
                 {% endfor %}
             </select>
             <input type="text" name="subreddit" value="{{ filters.subreddit }}" placeholder="subreddit">
+            <input type="hidden" name="view" value="{{ filters.view }}">
             <button class="btn-primary" type="submit">Фильтр</button>
+            {% if links_view %}
+            <a class="btn-secondary" href="/pulse?signal_type={{ filters.signal_type }}&sort={{ filters.sort }}">Карточками</a>
+            {% else %}
+            <a class="btn-secondary" href="/pulse?signal_type={{ filters.signal_type }}&sort={{ filters.sort }}&view=links">Списком ссылок</a>
+            {% endif %}
         </form>
         <p class="section-note">{{ total }} сигналов · страница {{ page }}/{{ total_pages }}</p>
 
+        {% if links_view %}
+        {# Прямые ссылки на посты: на этом шаге нужен сам пост, а не его метрики. #}
+        <ol class="pulse-link-list">
+            {% for s in signals %}
+            <li class="pulse-link-item">
+                <a class="pulse-link-title" href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
+                <div class="pulse-link-meta">
+                    <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
+                    <span title="Reddit upvotes">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
+                    <span title="Комментарии">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
+                    <span title="Pulse score">pulse {{ "%.0f"|format(s.pulse_score) }}</span>
+                    {% if s.target_url and s.target_url != s.discussion_url %}
+                    <a href="{{ s.target_url }}" target="_blank" rel="noopener">первоисточник</a>
+                    {% endif %}
+                </div>
+            </li>
+            {% else %}
+            <li class="section-note">Для этой тематики постов нет.</li>
+            {% endfor %}
+        </ol>
+        {% else %}
         <div class="shelf-grid">
             {% for s in signals %}
             <article class="pulse-card">
@@ -220,16 +275,17 @@
             </article>
             {% endfor %}
         </div>
+        {% endif %}
 
         {# Pagination #}
         {% if total_pages > 1 %}
         <nav class="pagination" aria-label="Pagination">
             {% if page > 1 %}
-            <a href="/pulse?sort={{ filters.sort }}&signal_type={{ filters.signal_type }}&subreddit={{ filters.subreddit }}&page={{ page - 1 }}" class="btn-secondary">← Назад</a>
+            <a href="/pulse?sort={{ filters.sort }}&signal_type={{ filters.signal_type }}&subreddit={{ filters.subreddit }}&view={{ filters.view }}&page={{ page - 1 }}" class="btn-secondary">← Назад</a>
             {% endif %}
             <span class="section-note">{{ page }} / {{ total_pages }}</span>
             {% if page < total_pages %}
-            <a href="/pulse?sort={{ filters.sort }}&signal_type={{ filters.signal_type }}&subreddit={{ filters.subreddit }}&page={{ page + 1 }}" class="btn-secondary">Далее →</a>
+            <a href="/pulse?sort={{ filters.sort }}&signal_type={{ filters.signal_type }}&subreddit={{ filters.subreddit }}&view={{ filters.view }}&page={{ page + 1 }}" class="btn-secondary">Далее →</a>
             {% endif %}
         </nav>
         {% endif %}

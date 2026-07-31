@@ -359,11 +359,11 @@ Published UI workspaces:
 
 | View | URL | Purpose |
 |---|---|---|
-| **Today** | `/today` | Утренний бриф: 3–5 изменений, персональная лента до 20 свежих материалов с прямыми ссылками и drill-down по рубрикам |
+| **Today** | `/today` | Утренний бриф: изменения, лента до 20 материалов и блок «Новое на Reddit» — свежие посты выпуска прямыми ссылками, с фильтрами по тематикам |
 | **News** | `/news` | Сырой inbox опубликованного Data Release: материалы, источники, sections, связанный story |
 | **Stories** | `/stories` | Конкретные события с evidence items; не raw news и не тренды |
 | **Trends** | `/trends` | Повторяющиеся паттерны поверх нескольких stories |
-| **Pulse** | `/pulse` | Reddit-native community signals: percentile внутри саба, velocity, discussion depth, gaps |
+| **Pulse** | `/pulse` | Reddit-native сигналы: облака тематик с примерами, percentile внутри саба, velocity, depth, gaps. Клик по тематике даёт топ-20 прямыми ссылками на посты |
 | **Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: landscape, shelves, coverage, project panels |
 | **Project Lens** | `/projects/rbc`, `/projects/book` | Книга/РБК/business поверх опубликованных stories/trends |
 | **Story detail** | `/stories/{id}` | Evidence опубликованного Engine story |

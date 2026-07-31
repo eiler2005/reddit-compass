@@ -887,3 +887,117 @@ def test_published_layer_ui_preserves_shadow_channel(engine_client: TestClient) 
     assert "/stories/story_1?channel=shadow&amp;publication_id=publication_shadow" in news.text
     assert stories.status_code == 200
     assert "/radar?channel=shadow&amp;publication_id=publication_shadow" in stories.text
+
+
+def test_pulse_topic_clouds_carry_examples(engine_client: TestClient) -> None:
+    """Название тематики без примеров не читается: «Прочее» ничего не объясняет."""
+    from reddit_compass.api.ui import _pulse_topic_clouds
+    from reddit_compass.intelligence.engine import open_engine_readonly
+
+    conn = open_engine_readonly(Path(os.environ["RC_ENGINE_DB_PATH"]))
+    try:
+        clouds = _pulse_topic_clouds(conn, "signals_test")
+    finally:
+        conn.close()
+
+    assert clouds, "у релиза есть сигналы — облака не должны быть пустыми"
+    politics = next(c for c in clouds if c["signal_type"] == "policy_politics")
+    assert politics["label"] == "Политика и регулирование", "сырой тип в интерфейсе не читается"
+    assert politics["total"] >= 1
+    assert politics["examples"], "облако без примеров бесполезно"
+
+
+def test_pulse_links_view_renders_direct_post_links(engine_client: TestClient) -> None:
+    """Клик по тематике даёт ссылки на посты, а не сетку карточек с метриками."""
+    response = engine_client.get("/pulse?signal_type=policy_politics&view=links")
+
+    assert response.status_code == 200
+    assert "pulse-link-list" in response.text
+    assert 'class="pulse-card"' not in response.text, "в режиме ссылок карточек быть не должно"
+    # Небезопасная схема в discussion_url не должна доезжать до разметки.
+    assert "javascript:alert" not in response.text
+
+
+def test_today_new_reddit_respects_topic_and_subreddit_quotas() -> None:
+    """Блок «Новое на Reddit» держит разнообразие квотами.
+
+    Политика ограничена жёстче остальных тем: у policy_politics самый высокий средний
+    pulse, и без отдельного потолка она вытесняет из блока всё остальное.
+    """
+    import sqlite3
+
+    from reddit_compass.api.ui import (
+        _NEW_REDDIT_PER_SUBREDDIT,
+        _NEW_REDDIT_POLITICS_CAP,
+        _build_today_reddit_new,
+    )
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE community_signals (
+            signal_release_id TEXT, item_id TEXT, subreddit TEXT, signal_type TEXT,
+            title TEXT, discussion_url TEXT, target_url TEXT, pulse_score REAL
+        );
+        CREATE TABLE signal_releases (signal_release_id TEXT, data_release_id TEXT);
+        CREATE TABLE release_items (
+            release_id TEXT, item_id TEXT, published_at TEXT, raw_engagement TEXT
+        );
+        INSERT INTO signal_releases VALUES ('sig', 'data');
+        """
+    )
+    # Десять политических постов с высшим pulse и по два из других тем.
+    rows = [
+        ("sig", f"p{i}", "politics", "policy_politics", f"P{i}", "", "", 99.0) for i in range(10)
+    ]
+    rows += [("sig", f"a{i}", f"sub{i}", "ai_capability", f"A{i}", "", "", 50.0) for i in range(4)]
+    conn.executemany("INSERT INTO community_signals VALUES (?, ?, ?, ?, ?, ?, ?, ?)", rows)
+    conn.executemany(
+        "INSERT INTO release_items VALUES ('data', ?, '2026-07-30T10:00:00Z', '{}')",
+        [(row[1],) for row in rows],
+    )
+    conn.commit()
+
+    posts = _build_today_reddit_new(conn, "sig", exclude_item_ids=set(), limit=20)
+    politics = [p for p in posts if p["signal_type"] == "policy_politics"]
+
+    assert len(politics) <= _NEW_REDDIT_POLITICS_CAP, "политика обязана быть ограничена"
+    assert len(politics) < len(posts), "блок не должен состоять из одной темы"
+    per_subreddit: dict[str, int] = {}
+    for post in posts:
+        key = str(post["subreddit"])
+        per_subreddit[key] = per_subreddit.get(key, 0) + 1
+    assert max(per_subreddit.values()) <= _NEW_REDDIT_PER_SUBREDDIT
+
+
+def test_today_new_reddit_excludes_items_already_in_reading_list() -> None:
+    """Блок не должен дублировать ленту чтения, стоящую выше на той же странице."""
+    import sqlite3
+
+    from reddit_compass.api.ui import _build_today_reddit_new
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE community_signals (
+            signal_release_id TEXT, item_id TEXT, subreddit TEXT, signal_type TEXT,
+            title TEXT, discussion_url TEXT, target_url TEXT, pulse_score REAL
+        );
+        CREATE TABLE signal_releases (signal_release_id TEXT, data_release_id TEXT);
+        CREATE TABLE release_items (
+            release_id TEXT, item_id TEXT, published_at TEXT, raw_engagement TEXT
+        );
+        INSERT INTO signal_releases VALUES ('sig', 'data');
+        INSERT INTO community_signals VALUES ('sig','shown','a','question','Shown','','',90.0);
+        INSERT INTO community_signals VALUES ('sig','fresh','b','question','Fresh','','',10.0);
+        INSERT INTO release_items VALUES ('data','shown','2026-07-30T10:00:00Z','{}');
+        INSERT INTO release_items VALUES ('data','fresh','2026-07-30T09:00:00Z','{}');
+        """
+    )
+    conn.commit()
+
+    posts = _build_today_reddit_new(conn, "sig", exclude_item_ids={"shown"})
+
+    assert [p["item_id"] for p in posts] == ["fresh"]

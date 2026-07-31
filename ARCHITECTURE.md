@@ -224,6 +224,15 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 - Card markup lives in Jinja only. `/ui/today-changes` and `/ui/today-reading` return HTML
   fragments rendered from the same partials as the first page, so the browser appends markup
   instead of rebuilding it in JavaScript.
+- **Reddit surfaces trade cards for links where the post itself is the destination.** Pulse topic
+  clouds (`/pulse`) carry live example headlines — a bare type name like «Прочее» explains nothing —
+  and clicking one opens `?view=links`: the top twenty as direct Reddit URLs, ordered by the active
+  sort. Today's «Новое на Reddit» block uses the same list, restricted to posts absent from the
+  reading queue above it.
+- Signal topics come from `signal_type`, not `domain_ids`: facets are computed from item text, and
+  a Reddit post usually has none, so `domain_ids_json` is almost always `other`. Diversity is held
+  by quotas — per topic, per subreddit, and a tighter cap on `policy_politics`, which carries the
+  highest average pulse and otherwise crowds the block out.
 
 ### Story/Trend Engine contract
 

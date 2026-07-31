@@ -1541,6 +1541,7 @@ a.story-card {
 
     .story-grid, .story-grid.compact { grid-template-columns: 1fr; }
     .shelf-grid { grid-template-columns: 1fr; }
+    .topic-cloud-grid { grid-template-columns: 1fr; }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
 
     .date-switcher { flex-direction: column; gap: 0.75rem; }
@@ -1758,4 +1759,186 @@ a.story-card {
 
 .footer-nav a:hover {
     color: var(--accent-bright);
+}
+
+/* ── Тематики Pulse: облака с примерами ───────────────────────────────────
+   Название тематики само по себе ничего не объясняет («Боли», «Прочее»),
+   поэтому карточка несёт живые примеры заголовков и счётчик. */
+.topic-cloud-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 1rem;
+}
+
+.topic-cloud {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    padding: 1rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.topic-cloud:hover {
+    border-color: var(--accent-2);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(116, 58, 174, 0.2);
+}
+
+.topic-cloud-active {
+    border-color: var(--accent-2);
+    box-shadow: 0 0 0 1px var(--accent-2) inset;
+}
+
+.topic-cloud-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.topic-cloud-label {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.topic-cloud-count {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    color: var(--accent-2-bright);
+}
+
+.topic-cloud-examples {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+}
+
+.topic-cloud-examples li {
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: var(--text-secondary);
+    /* Пример нужен, чтобы понять тематику, а не прочитать заголовок целиком. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.topic-cloud-foot {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+/* ── Список прямых ссылок на посты ────────────────────────────────────────
+   Режим, в котором нужен сам пост, а не его метрики: клик по тематике
+   и блок «Новое на Reddit» на /today. */
+.pulse-link-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    counter-reset: pulse-link;
+    display: flex;
+    flex-direction: column;
+}
+
+.pulse-link-item {
+    counter-increment: pulse-link;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.7rem 0 0.7rem 2.4rem;
+    border-bottom: 1px solid var(--border);
+    position: relative;
+}
+
+.pulse-link-item::before {
+    content: counter(pulse-link, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.pulse-link-item:last-child {
+    border-bottom: none;
+}
+
+.pulse-link-title {
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+    line-height: 1.4;
+}
+
+.pulse-link-title:hover {
+    color: var(--accent-2-bright);
+    text-decoration: underline;
+}
+
+.pulse-link-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.pulse-link-meta a {
+    color: var(--accent-2-bright);
+    text-decoration: none;
+}
+
+.pulse-link-meta a:hover {
+    text-decoration: underline;
+}
+
+/* ── Фильтры тематик в блоке «Новое на Reddit» ── */
+.reddit-type-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+}
+
+.reddit-type-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.7rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.reddit-type-chip:hover {
+    border-color: var(--accent-2);
+    color: var(--accent-2-bright);
+}
+
+.reddit-type-chip-active {
+    border-color: var(--accent-2);
+    color: var(--accent-2-bright);
+    background: var(--surface-2);
+}
+
+.reddit-type-count {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-muted);
 }
