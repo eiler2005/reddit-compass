@@ -23,6 +23,10 @@
 - **Embedding cache correctness**: повторное использование уже сохранённых vector hashes теперь
   только создаёт release-specific refs и не вызывает `model2vec.encode([])`. Это устраняет
   production fallback `need at least one array to concatenate` при повторном Engine cycle.
+- **Bounded candidate retrieval**: sparse token/entity buckets и общий candidate budget больше не
+  разворачивают полный `N×N` на семидневном корпусе. Узкие URL/near-duplicate anchors и top-K
+  dense neighbours сохраняют важные пары, а частотные `AI`/`OpenAI`/`US` не могут съесть память
+  или весь ночной цикл.
 - **Same-cycle reviewed Engine**: валидные bounded Qwen pair reviews создают второй immutable
   StoryRelease в том же cycle; bounded trend review materializes финальный TrendRelease. Qwen
   pair labels используют тот же canonical pair key, что обучающий merge scorer.

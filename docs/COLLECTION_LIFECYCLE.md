@@ -139,6 +139,12 @@ Stories строятся из URL, title/BM25, entities, времени, чис�
 Сначала применяются детерминированные hard-conflicts и provenance anchors. Qwen получает только
 серую зону (ограниченная порция pairs), с `temperature=0`, Pydantic JSON и evidence item IDs.
 
+Candidate retrieval не разворачивает полный `N×N`: dense layer сохраняет top-K соседей на item,
+а sparse token/entity buckets ограничены 32 документами и общим budget 100 000 pairs на release.
+Большой bucket `OpenAI`/`AI`/`US` сам по себе не создаёт сотни тысяч сравнений и не является
+доказательством одного события. URL и near-duplicate anchors обрабатываются первыми; если budget
+исчерпан, детерминированно остаются наиболее узкие buckets.
+
 ```text
 provisional StoryRelease
     │   auto labels + Qwen pair answers

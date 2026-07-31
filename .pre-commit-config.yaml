@@ -1,4 +1,11 @@
 repos:
+  - repo: local
+    hooks:
+      - id: reddit-compass-secret-scan
+        name: reddit-compass secret scan
+        entry: scripts/secret-scan
+        language: system
+        pass_filenames: false
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.12.12
     hooks:

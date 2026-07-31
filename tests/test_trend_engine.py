@@ -6,12 +6,14 @@ import asyncio
 import hashlib
 import json
 import sqlite3
+from collections import defaultdict
 from pathlib import Path
 
 import pytest
 
 from reddit_compass.intelligence.engine import (
     FrozenItem,
+    _add_index_pairs,
     _discover_trends_graph,
     _story_topic_keys,
     active_label_story_pairs,
@@ -225,6 +227,39 @@ def test_huggingface_model_release_url_can_merge_launch_wave() -> None:
     assert len(candidates) == 1
     assert candidates[0].decision == "auto_merge"
     assert candidates[0].reason == "shared HuggingFace model release URL"
+
+
+def test_sparse_candidate_buckets_and_global_pair_budget_are_bounded() -> None:
+    pair_reasons: dict[tuple[str, str], set[str]] = defaultdict(set)
+
+    reached = _add_index_pairs(
+        pair_reasons,
+        [f"item:{index:03d}" for index in range(100)],
+        "token",
+        max_candidate_pairs=25,
+    )
+
+    assert reached is True
+    assert len(pair_reasons) == 25
+
+    # A shared high-frequency entity is not meaningful event evidence.  It
+    # must be skipped instead of turning 80 inputs into 3,160 fuzzy scores.
+    items = [
+        _frozen_item(
+            f"source:{index:03d}",
+            f"https://example.test/{index}",
+            f"OpenAI routine update {index}",
+            "2026-07-29T08:00:00Z",
+        )
+        for index in range(80)
+    ]
+    candidates = generate_story_candidates(
+        items,
+        {item.item_id: {"entities": json.dumps(["openai"])} for item in items},
+        params={"near_duplicate_enabled": False, "max_sparse_bucket_size": 16},
+    )
+
+    assert candidates == []
 
 
 def test_near_duplicate_title_fingerprint_merges_syndicated_headlines() -> None:

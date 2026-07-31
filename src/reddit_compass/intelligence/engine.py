@@ -1845,6 +1845,11 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "auto_merge_threshold": 0.82,
     "review_threshold": 0.62,
     "max_token_df_ratio": 0.2,
+    # Sparse inverted indexes are candidate retrieval, not an all-pairs
+    # clustering engine.  Common actors/tokens (AI, OpenAI, US) must not
+    # expand into millions of unrelated pair scores on a daily release.
+    "max_sparse_bucket_size": 32,
+    "max_candidate_pairs": 100_000,
     "embedding_model": DEFAULT_EMBEDDING_MODEL,
     "embedding_revision": "default",
     "dense_top_k": 12,
@@ -2700,6 +2705,8 @@ def generate_story_candidates(
     """Generate URL/sparse/dense top-K candidates without materializing all pairs."""
     params = params or {}
     max_df = max(8, int(len(items) * float(params.get("max_token_df_ratio", 0.2))))
+    sparse_bucket_limit = max(2, int(params.get("max_sparse_bucket_size", 32)))
+    max_candidate_pairs = max(1, int(params.get("max_candidate_pairs", 100_000)))
     item_by_id = {item.item_id: item for item in items}
     url_index: dict[str, list[str]] = defaultdict(list)
     token_index: dict[str, list[str]] = defaultdict(list)
@@ -2722,26 +2729,42 @@ def generate_story_candidates(
             entity_index[entity].append(item.item_id)
 
     pair_reasons: dict[tuple[str, str], set[str]] = defaultdict(set)
-    for ids in url_index.values():
-        _add_index_pairs(pair_reasons, ids, "url")
-    for ids in token_index.values():
-        if 1 < len(ids) <= max_df:
-            _add_index_pairs(pair_reasons, ids, "token")
-    for ids in entity_index.values():
-        if 1 < len(ids) <= max_df:
-            _add_index_pairs(pair_reasons, ids, "entity")
     near_duplicate_max_bucket_size = int(params.get("near_duplicate_max_bucket_size", 40))
-    if near_duplicate_enabled:
-        for ids in near_duplicate_index.values():
-            if 1 < len(ids) <= near_duplicate_max_bucket_size:
-                _add_index_pairs(pair_reasons, ids, "near_duplicate")
+    # Process discriminative, small buckets first.  A shared common actor or
+    # generic term is not enough evidence of one event; dense/near-duplicate
+    # retrieval handles semantic neighbours without an O(n²) expansion.
+    indexes: tuple[tuple[str, dict[str, list[str]], int], ...] = (
+        ("url", url_index, max_candidate_pairs),
+        ("near_duplicate", near_duplicate_index, near_duplicate_max_bucket_size)
+        if near_duplicate_enabled
+        else ("near_duplicate", {}, 0),
+        ("token", token_index, min(max_df, sparse_bucket_limit)),
+        ("entity", entity_index, min(max_df, sparse_bucket_limit)),
+    )
+    for reason, index, bucket_limit in indexes:
+        if bucket_limit < 2:
+            continue
+        for _key, ids in sorted(index.items(), key=lambda pair: (len(pair[1]), pair[0])):
+            if not 1 < len(ids) <= bucket_limit:
+                continue
+            if _add_index_pairs(
+                pair_reasons,
+                ids,
+                reason,
+                max_candidate_pairs=max_candidate_pairs,
+            ):
+                break
+        if len(pair_reasons) >= max_candidate_pairs:
+            break
     dense_scores = top_k_cosine_pairs(
         embeddings or {},
         top_k=int(params.get("dense_top_k", 12)),
         min_similarity=float(params.get("dense_candidate_threshold", 0.68)),
         chunk_size=int(params.get("dense_chunk_size", 256)),
     )
-    for pair in dense_scores:
+    for pair in sorted(dense_scores, key=lambda value: (-dense_scores[value], value)):
+        if pair not in pair_reasons and len(pair_reasons) >= max_candidate_pairs:
+            break
         pair_reasons[pair].add("dense")
 
     result: list[PairCandidate] = []
@@ -6208,11 +6231,22 @@ def _add_index_pairs(
     pair_reasons: dict[tuple[str, str], set[str]],
     item_ids: Iterable[str],
     reason: str,
-) -> None:
+    *,
+    max_candidate_pairs: int | None = None,
+) -> bool:
+    """Add a bounded index bucket; return whether the global budget was reached."""
     unique_ids = sorted(set(item_ids))
     for index, left in enumerate(unique_ids):
         for right in unique_ids[index + 1 :]:
-            pair_reasons[(left, right)].add(reason)
+            key = (left, right)
+            if (
+                max_candidate_pairs is not None
+                and key not in pair_reasons
+                and len(pair_reasons) >= max_candidate_pairs
+            ):
+                return True
+            pair_reasons[key].add(reason)
+    return max_candidate_pairs is not None and len(pair_reasons) >= max_candidate_pairs
 
 
 def _near_duplicate_bucket_keys(normalized_title: str) -> list[str]:
