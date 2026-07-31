@@ -1657,6 +1657,7 @@ def runs_page(
             ).fetchall()
             run_id_set = {str(row["run_id"]) for row in rows}
             data_by_release: dict[str, dict[str, object]] = {}
+            run_ids_by_release: dict[str, set[str]] = {}
             for data in data_rows:
                 try:
                     release_run_ids = {str(value) for value in json.loads(data["run_ids_json"])}
@@ -1668,16 +1669,15 @@ def runs_page(
                 release = dict(data)
                 release_id = str(data["release_id"])
                 data_by_release[release_id] = release
-                for run_id in matching_run_ids:
-                    releases_by_run.setdefault(run_id, release)
+                run_ids_by_release[release_id] = matching_run_ids
 
             if data_by_release:
                 release_ids = list(data_by_release)
-                placeholders = ", ".join("?" for _ in release_ids)
+                release_placeholders = ", ".join("?" for _ in release_ids)
                 facet_rows = engine_conn.execute(
                     f"""SELECT facet_release_id, data_release_id, status, created_at
                         FROM facet_releases
-                        WHERE data_release_id IN ({placeholders})
+                        WHERE data_release_id IN ({release_placeholders})
                         ORDER BY created_at DESC""",
                     release_ids,
                 ).fetchall()
@@ -1721,7 +1721,7 @@ def runs_page(
                         FROM radar_publications p
                         LEFT JOIN published_channels c
                           ON c.current_publication_id = p.publication_id
-                        ORDER BY p.created_at DESC"""
+                        ORDER BY is_current DESC, p.created_at DESC"""
                 ).fetchall()
                 publication_by_data: dict[str, dict[str, object]] = {}
                 for publication in publications:
@@ -1739,7 +1739,7 @@ def runs_page(
                         f"""SELECT data_release_id, story_release_id, trend_release_id,
                                    floors_json, passed, created_at
                             FROM engine_quality_reports
-                            WHERE data_release_id IN ({placeholders})
+                            WHERE data_release_id IN ({release_placeholders})
                             ORDER BY created_at DESC""",
                         release_ids,
                     ).fetchall()
@@ -1776,8 +1776,7 @@ def runs_page(
                         "created_at": str(quality_row["created_at"]),
                     }
 
-                for release_record in releases_by_run.values():
-                    data_release_id = str(release_record["release_id"])
+                for data_release_id, release_record in data_by_release.items():
                     facet = facets_by_data.get(data_release_id)
                     story = stories_by_facet.get(str(facet["facet_release_id"])) if facet else None
                     trend = trends_by_story.get(str(story["story_release_id"])) if story else None
@@ -1786,6 +1785,35 @@ def runs_page(
                     release_record["trend"] = trend
                     release_record["quality"] = quality_by_data.get(data_release_id)
                     release_record["publication"] = publication_by_data.get(data_release_id)
+
+                def release_selection_key(
+                    release: dict[str, object],
+                ) -> tuple[int, int, int, int, int, str]:
+                    """Prefer the active complete chain over a newer incomplete attempt."""
+                    publication = cast(
+                        dict[str, object] | None,
+                        release.get("publication"),
+                    )
+                    return (
+                        int(bool(publication and publication.get("is_current"))),
+                        int(bool(release.get("trend"))),
+                        int(bool(release.get("story"))),
+                        int(bool(release.get("facet"))),
+                        int(release.get("input_status") == "complete"),
+                        str(release.get("created_at", "")),
+                    )
+
+                # Several immutable attempts can originate from the same raw
+                # run.  The journal must show the operationally relevant
+                # chain (current publication, then most complete analysis),
+                # not merely the newest Data Release row.
+                for data_release_id, release_record in data_by_release.items():
+                    for run_id in run_ids_by_release[data_release_id]:
+                        current = releases_by_run.get(run_id)
+                        if current is None or release_selection_key(
+                            release_record
+                        ) > release_selection_key(current):
+                            releases_by_run[run_id] = release_record
         except sqlite3.Error:
             # A run ledger must continue to show source truth even if a
             # read-only Engine file is temporarily unavailable.

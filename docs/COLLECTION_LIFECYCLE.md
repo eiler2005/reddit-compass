@@ -209,6 +209,11 @@ immutable версий и шесть стадий. Цвет — лишь доп�
 различает `passed`, `failed`, `pending`, `partial` и `published`. Раскрытие полностью
 read-only: оно не запускает адаптеры, Qwen или publication.
 
+Один raw `run_id` может породить несколько immutable попыток. В журнале выбирается не просто
+самая новая строка Data Release: приоритет имеет current `RadarPublication`, затем наиболее
+полная цепочка `Trends → Stories → Facets`. Так новый facet-only experiment не скрывает
+проверенный shadow/production выпуск и его quality outcome.
+
 Раскрытие не является кнопкой «запустить»: web UI намеренно read-only. Оно объясняет, почему
 Today/Radar показывает предыдущую версию, preview или недостаточную историю. На коротком Today
 технические стадии не дублируются: там только свежий reading queue и изменения опубликованного

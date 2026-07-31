@@ -608,6 +608,51 @@ def test_runs_page_exposes_collection_to_publication_stages(engine_client: TestC
 
     engine = engine_db(Path(os.environ["RC_ENGINE_DB_PATH"]))
     try:
+        # A newer facet-only attempt references the same collection run.  The
+        # ledger must continue to show the current published full chain rather
+        # than this incomplete attempt merely because it has a later timestamp.
+        engine.execute(
+            """
+            INSERT INTO data_releases (
+                release_id, profile, dates_json, run_ids_json, source_db_path,
+                source_db_checksum, input_checksum, input_status, source_coverage_json,
+                item_count, observation_count, status, created_at, finalized_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "data_pending",
+                "broad",
+                '["2026-07-29"]',
+                '["run_test"]',
+                "fixture.db",
+                "source-checksum",
+                "input-checksum",
+                "complete",
+                "{}",
+                1,
+                1,
+                "finalized",
+                "2026-07-30T10:00:00Z",
+                "2026-07-30T10:00:00Z",
+            ),
+        )
+        engine.execute(
+            """
+            INSERT INTO facet_releases (
+                facet_release_id, data_release_id, method, params_hash,
+                status, metrics_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "facet_pending",
+                "data_pending",
+                "fixture",
+                "params",
+                "evaluated",
+                "{}",
+                "2026-07-30T10:00:00Z",
+            ),
+        )
         store_quality_report(
             engine,
             data_release_id="data_test",
@@ -626,6 +671,13 @@ def test_runs_page_exposes_collection_to_publication_stages(engine_client: TestC
                 )
             ],
         )
+        engine.commit()
+        assert (
+            engine.execute(
+                "SELECT passed FROM engine_quality_reports WHERE data_release_id = 'data_test'"
+            ).fetchone()[0]
+            == 1
+        )
     finally:
         engine.close()
 
@@ -640,6 +692,8 @@ def test_runs_page_exposes_collection_to_publication_stages(engine_client: TestC
     assert "publication_test" in response.text
     assert "все абсолютные полы пройдены" in response.text
     assert "результат не записан для этой версии" not in response.text
+    assert "data_test" in response.text
+    assert "data_pending" not in response.text
 
 
 def test_reddit_pulse_api_filters_by_release_date_and_sanitizes_url(
