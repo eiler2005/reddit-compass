@@ -201,6 +201,9 @@
   `/trends/{trend_id}`, технические `partial`/`insufficient_history` объясняются в статусной
   панели, а верх экрана показывает KPI выпуска, тематический срез и быстрые переходы в
   News/Stories/Trends/Pulse/Radar.
+- **Trend detail больше не раздувается на больших кластерах**: `/trends/{trend_id}` показывает
+  первые 20 stories и ссылку в Stories workspace, вместо HTML на мегабайты для широких
+  machine-generated trend-кандидатов.
 - **Perspective gap никогда не считался через CLI**: `reddit-pulse propose` грузил только
   reddit-items, поэтому guard баланса всегда видел 0 mainstream. Баланс теперь измеряется по
   всему релизу (`perspective_gap_available_counts`); на 7-дневном broad разрыв доступен

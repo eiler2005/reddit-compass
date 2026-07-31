@@ -547,6 +547,56 @@ def test_published_story_and_trend_detail_endpoints(engine_client: TestClient) -
     assert trend.json()["stories"][0]["evidence_items"][0]["provider"] == "reuters"
 
 
+def test_published_trend_detail_limits_member_stories(engine_client: TestClient) -> None:
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    for index in range(25):
+        story_id = f"story_extra_{index}"
+        conn.execute(
+            """
+            INSERT INTO engine_stories (
+                story_release_id, story_id, canonical_key, title, domain_ids,
+                project_scores, first_seen, last_seen, confidence, source_count, item_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "story_test",
+                story_id,
+                story_id,
+                f"Extra story {index}",
+                '["world_geopolitics"]',
+                '{"rbc": 10}',
+                "2026-07-27",
+                "2026-07-29",
+                "medium",
+                1,
+                1,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO engine_trend_stories (
+                trend_release_id, trend_id, story_id, membership_score, reason
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            ("trend_test", "trend_1", story_id, 0.5, "test"),
+        )
+    conn.execute(
+        "UPDATE engine_trends SET story_count = ? WHERE trend_release_id = ? AND trend_id = ?",
+        (26, "trend_test", "trend_1"),
+    )
+    conn.commit()
+    conn.close()
+
+    trend = engine_client.get("/api/v2/engine/trends/trend_1")
+    trend_detail = engine_client.get("/trends/trend_1")
+
+    assert trend.status_code == 200
+    assert len(trend.json()["stories"]) == 20
+    assert trend_detail.status_code == 200
+    assert "Показано 20 из 26 stories" in trend_detail.text
+
+
 def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:
     news = engine_client.get("/news")
     stories = engine_client.get("/stories")
