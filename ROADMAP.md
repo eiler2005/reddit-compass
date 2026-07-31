@@ -144,7 +144,7 @@ reddit-compass растёт от автономного коллектора т�
   или подписка.
 - Twitter/X — API платный ($100/мес). Отложить до обоснования ROI.
 
-## Phase 7 — Reddit-fetch на VPS (план; активация после ответа IPRoyal)
+## Phase 7 — Reddit-fetch на VPS (план; активация после ответа residential proxy provider)
 
 Цель: ночной сбор Reddit переезжает с Mac на VPS — расписание не зависит от того,
 включён ли ноутбук. Mac остаётся резервным маршрутом.
@@ -152,15 +152,15 @@ reddit-compass растёт от автономного коллектора т�
 **Проверено 2026-07-27 (live):**
 
 - Datacenter IP VPS: `.json` = 403 даже в headless-браузере (Reddit режет DC-IP).
-- VPS + IPRoyal: TCP-таймаут — residential endpoint пускает только whitelisted
-  source IP (сейчас — домашний IP Mac).
-- Browser-путь через IPRoyal с Mac: работает (200); голый HTTP с pool-IP — 403,
+- VPS + residential proxy: TCP-таймаут — endpoint пускает только whitelisted
+source route (сейчас — local approved route).
+- Browser-путь через residential proxy с Mac: работает (200); голый HTTP с pool-IP — 403,
   поэтому за ротационным proxy нужен `REDDIT_COMPASS_ENGINE=playwright` (реализовано).
 
 **Шаги (по порядку):**
 
-1. **IPRoyal (тикет открыт):** whitelist IP VPS `204.168.239.217` (или переход
-   на username/password-аутентификацию) + sticky-эндпоинт (один exit IP на ~20 мин —
+1. **Residential proxy provider (тикет открыт):** whitelist текущего VPS host из gitignored
+deploy env (или переход на username/password-аутентификацию) + sticky-эндпоинт (один exit IP на ~20 мин —
    убирает транзитивные `Failed to fetch` от ротации IP по соединениям).
 2. **Деплой-фиксы (обязательное условие):**
    - разнести теги образов: `reddit-compass-api:latest` / `reddit-compass-collector:latest`
@@ -184,7 +184,7 @@ Arctic Shift — как дополнительный исторический и
 - **Reddit Official API: ДОСТУП НЕ ПОЛУЧЕН.** Заявка на Reddit Data API подана 2026-07-22
   (статус: SUBMITTED_AWAITING_REDDIT_REVIEW → фактически игнорируется Reddit). Сервис работает
   через Playwright JSON API (публичные данные, без credentials). При одобрении — переход на
-  asyncpraw (100 req/min, 100% ToS). До тех пор: Playwright + residential IP + stealth.
+asyncpraw (100 req/min, 100% ToS). До тех пор: Playwright + approved residential route + stealth.
 - **Exploratory subreddits:** если пост из нового сабреддита виральный → предложить добавить
   в monitoring (вдохновлено Reddit_Scrapper ⭐198). Опция, не ядро.
 - Proxy-ротация реализована (9d912d8); при 429 на VPS — SSH-туннель через HostKey или

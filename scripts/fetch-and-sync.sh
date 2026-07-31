@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 # fetch-and-sync.sh — Reddit fetch локально (Mac) + sync на VPS.
 #
-# Маршрут Reddit-запросов (страховка домашнего IP):
-#   auto (по умолчанию) — чередование по чётности дня: чётные дни = домашний IP,
-#                         нечётные = IPRoyal proxy (браузерный движок playwright);
+# Маршрут Reddit-запросов:
+#   auto (по умолчанию) — чередование direct approved route / configured proxy;
 #   RC_PROXY_MODE=on|off — принудительный выбор маршрута.
 # Proxy берётся из REDDIT_COMPASS_PROXIES (deploy/hostkey/.env.secrets).
 #
@@ -17,8 +16,6 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-VPS_HOST="204.168.239.217"
-VPS_USER="deploy"
 REMOTE_DIR="/opt/reddit-compass"
 # DATA_DIR из окружения позволяет прогнать скрипт в изолированный каталог (тесты)
 DATA_DIR="${DATA_DIR:-${PROJECT_DIR}/data}"
@@ -35,6 +32,9 @@ if [[ -f "${SECRETS_FILE}" ]]; then
     . "${SECRETS_FILE}"
     set +a
 fi
+
+VPS_HOST="${RC_DEPLOY_HOST:-reddit-compass-vps}"
+VPS_USER="${RC_DEPLOY_USER:-deploy}"
 
 # RC_PROXY_MODE: auto (чередование по дню) | on | off. Без proxy в секретах — off.
 resolve_proxy_mode() {
@@ -62,10 +62,10 @@ do_fetch() {
     if [[ "${proxy_mode}" == "on" ]]; then
         # Reddit отдаёт .json браузерному трафику, но режет голый HTTP с pool-IP
         export REDDIT_COMPASS_ENGINE=playwright
-        echo "🌐 [$(date +%H:%M:%S)] Маршрут Reddit: IPRoyal proxy (движок playwright)"
+        echo "🌐 [$(date +%H:%M:%S)] Маршрут Reddit: configured proxy (движок playwright)"
     else
         unset REDDIT_COMPASS_ENGINE
-        echo "🏠 [$(date +%H:%M:%S)] Маршрут Reddit: домашний IP (прямой доступ)"
+        echo "🏠 [$(date +%H:%M:%S)] Маршрут Reddit: direct approved route"
     fi
 
     echo "🔍 [$(date +%H:%M:%S)] Reddit fetch: ${TODAY}"

@@ -7,16 +7,21 @@ reddit-compass uses two layers before commit/push:
    bearer tokens, API-key-like values and non-placeholder secret assignments.
 2. `detect-secrets` + `detect-private-key` — generic pre-commit hooks.
 
-Run manually before pushing (this scans exactly the staged commit payload):
+Run the same check as the pre-commit hook:
 
 ```bash
 scripts/secret-scan
+```
+
+Run a full audit before pushing or publishing docs:
+
+```bash
+scripts/secret-scan --all
 uv run pre-commit run --all-files
 ```
 
-For an explicit whole-working-tree audit, use `scripts/secret-scan --all`. It is
-not the pre-commit default: unrelated work may legitimately be present while a
-small, independent fix is being committed.
+`--all` is not the pre-commit default: unrelated work may legitimately be present while a small,
+independent fix is being committed.
 
 Rules:
 
@@ -28,6 +33,13 @@ Rules:
 - If a real secret ever lands in git history, rotate it first, then clean history with BFG or an
   equivalent tool.
 
-The scanner intentionally ignores gitignored runtime data and secrets. The hook
-reads staged blobs from Git's index; `--all` reads tracked and non-ignored
-untracked worktree files.
+The scanner reports public IPv4/`sslip.io` deployment endpoints, private-key markers, Bearer and
+Basic Authorization values, credentials embedded in HTTP URLs, API-key-like tokens and
+non-placeholder secret/proxy assignments. It permits loopback addresses, `example.invalid` and
+explicit placeholders.
+
+The scanner intentionally does **not** read gitignored runtime data or local credential files.
+The hook reads staged blobs from Git's index (therefore a force-staged `.env` is still blocked);
+`--all` reads tracked and non-ignored untracked worktree files, while skipping untracked `.env*`,
+private keys and certificate bundles. It does not rewrite Git history: that is an incident-response
+operation after rotation, not a normal documentation change.

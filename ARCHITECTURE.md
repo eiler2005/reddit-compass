@@ -136,14 +136,10 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
   ┌─────────────────────┐                  ┌─────────────────────┐
   │  fetch-and-sync.sh  │                  │  docker compose run  │
   │                     │                  │                     │
-  │  1. reddit fetch    │                  │  1. rss             │
-  │     (Playwright,    │                  │  2. hn              │
-  │      stealth,       │                  │  3. ladder          │
-  │      residential IP)│                  │  4. signals (Qwen)  │
-  │  2. hn (Algolia)   │                  │                     │
-  │  3. rss (6 фидов)  │                  │                     │
-  │  4. signals (Qwen) │                  │                     │
-  │  5. scp → VPS      │                  │                     │
+  │  1. reddit fetch    │                  │  1. rss/hn/ladder/ph│
+  │     (approved route)│                  │  2. finalize run    │
+  │  2. posts.jsonl     │                  │  3. engine shadow   │
+  │  3. scp artifact    │                  │  4. gated publish   │
   └────────┬────────────┘                  └────────┬────────────┘
            │                                        │
            ▼                                        ▼
@@ -239,12 +235,12 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 │  ├── data/snapshots/              ← локальные данные                │
 │  └── .env                         ← DASHSCOPE_API_KEY               │
 │                                                                     │
-│  Роль: Reddit fetch (домашний IP / IPRoyal по дням) + sync на VPS  │
+│  Роль: Reddit fetch (local approved route / proxy) + sync на VPS   │
 └─────────────────────────────────────────────────────────────────────┘
                               │
                               │ scp (после каждого прогона)
                               ▼
-┌─── VPS HostKey «Hermes» (204.168.239.217) ─────────────────────────┐
+┌─── VPS HostKey «Hermes» (${RC_DEPLOY_HOST}) ─────────────────────────┐
 │                                                                     │
 │  /opt/reddit-compass/                                               │
 │  ├── docker-compose.yml          ← 3 сервиса                       │
@@ -329,13 +325,13 @@ class SignalCard:
 без credentials). Это легально для личного research (публичные данные, read-only, rate-limited).
 
 При одобрении заявки — переход на `asyncpraw` (100 req/min, 100% ToS-чистота).
-До тех пор: Playwright + residential IP + stealth + proxy (для 429).
+До тех пор: Playwright + approved residential route + proxy (для 429).
 Создание script app на `reddit.com/prefs/apps` заблокировано для молодого
 аккаунта (повторить, когда аккаунт наберёт возраст/карму).
 
 **Статус на 2026-07-27 (проверено live):** Reddit выборочно блокирует
-анонимные `.json` — 403 зависит от репутации IP. С чистого residential IP
-голый aiohttp работает; с pool-IP ротационных proxy (IPRoyal) — почти всегда
+анонимные `.json` — 403 зависит от репутации маршрута. С approved residential route
+голый aiohttp работает; с pool-IP ротационных proxy — часто
 403, тогда как браузерный трафик (Playwright) обслуживается стабильно
 (goto 3/3, `.json` 200; редкие `Failed to fetch` — ротация exit IP
 по соединениям, лечится sticky-сессией провайдера + retry в движке).

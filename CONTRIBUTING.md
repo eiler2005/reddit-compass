@@ -18,11 +18,13 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy src          # strict mode
 uv run pytest            # 60% coverage minimum
+scripts/secret-scan --all # repo-specific IP/host/secret scan
 ```
 
 Pre-commit hooks run automatically on `git commit`:
 - ruff (lint + format)
 - check-json / check-toml / check-yaml
+- repo-local secret scan
 - detect-private-key
 - **detect-secrets** (blocks commits with leaked API keys/tokens)
 
@@ -31,7 +33,7 @@ Pre-commit hooks run automatically on `git commit`:
 - Conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
 - One logical change per commit
 - Explicit staging only — **no `git add .` or `git add -A`**
-- Never commit secrets (`.env`, tokens, keys)
+- Never commit secrets or production endpoints (`.env`, tokens, keys, public deploy IPs/hosts)
 
 ## Architecture Rules
 
@@ -56,7 +58,7 @@ Read [`AGENTS.md`](AGENTS.md) before contributing. Key boundaries:
 
 1. Fork → branch → commit → PR
 2. CI must pass (ruff + mypy + pytest)
-3. No secret-scan alerts
+3. No `scripts/secret-scan` or `detect-secrets` alerts
 4. Update CHANGELOG.md under `[Unreleased]`
 
 ## Questions?

@@ -29,16 +29,16 @@ analysis uses the cheaper off-peak rate.
 
 | Time (UTC / MSK) | What happens | Why you care |
 |---|---|---|
-| 14:00 / 17:00 | 227 articles from BBC, Guardian, Reuters, TechCrunch, Verge, Ars (RSS) | The mainstream narrative — what the masses hear tomorrow |
-| 14:10 / 17:10 | 197 stories from Hacker News (Algolia API, last 7 days) | What developers are building and arguing about |
-| 14:20 / 17:20 | 183 articles from NYT, WaPo, FT, Wired, Medium + 7 more (Ladder paywall proxy) | The *real* analysis behind the paywall |
-| 14:30 / 17:30 | 30 products from ProductHunt (GraphQL) | What's launching right now |
+| 14:00 / 17:00 | RSS sections from mainstream, business and tech/culture sources | The mainstream narrative — what the masses hear tomorrow |
+| 14:10 / 17:10 | Hacker News front/search snapshots | What developers are building and arguing about |
+| 14:20 / 17:20 | Optional Ladder-supported publisher listings | Extra headlines/abstracts from configured publisher pages |
+| 14:30 / 17:30 | ProductHunt pulse | What's launching right now |
 | 14:45 / 17:45 | Snapshot finalizer creates one raw run in `compass.db` | Completion is factual and does not depend on LLM |
 | 16:00 / 19:00 | Versioned Engine runs facets → stories → bounded Qwen → trends → quality → shadow | Repeat analysis without re-collecting |
 | manual | Operator inspects and publishes a complete gated version to `broad` | Radar never silently replaces a good version with a partial one |
 
-> Reddit (737 posts, 18 subreddits) is collected manually from a residential IP
-> (Reddit blocks datacenter IPs) and synced to the VPS.
+> Reddit is collected read-only from configured broad packs. If the server route is unavailable,
+> a local residential route can produce a JSONL artifact that is safely merged on the VPS.
 
 You wake up to a report that says:
 
@@ -53,26 +53,33 @@ You wake up to a report that says:
 > Агент вышел из-под контроля: кто несёт ответственность?
 > **Pain points:** AI safety failures, sandbox escape, AI feature bloat...
 
-### When you ask it
+### Current supported path
 
 ```bash
+# Network-free preview of the configured collection surface:
+reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph --dry-run
+
+# Collector: source adapters → JSONL snapshots → one raw run in compass.db.
 reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
+
+# Finalize a run from artifacts that were already collected (no network, no LLM):
 reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date YYYY-MM-DD
+
+# Engine: repeatable analysis over an immutable copy of that raw run.
 reddit-compass engine release create --run RUN_ID
 reddit-compass engine facets --release RELEASE_ID --profile broad
 reddit-compass engine stories propose --facet-release FACET_ID --limit 50
 reddit-compass engine trends propose --story-release STORY_ID --window 30d
-reddit-compass fetch --stealth     # Reddit: 40 subreddits, stealth mode
-reddit-compass hn                  # Hacker News: AI stories
-reddit-compass rss                 # RSS: 6 free sources
-reddit-compass ladder              # Paywall: 12 sources via Ladder
-reddit-compass ph                  # ProductHunt: top products
-reddit-compass signals             # LLM analysis (Qwen API, all sources)
+reddit-compass engine cycle --profile broad --window 7 --publish-channel shadow
+
+# Read the published UI.
 reddit-compass serve               # REST API + UI on :8900
-reddit-compass db rebuild          # Только legacy recovery, не Engine workflow
-reddit-compass db stats            # SQLite history
-reddit-compass fetch --dry-run     # Preview without network
 ```
+
+`fetch`, `hn`, `rss`, `ladder`, `ph`, `all` and `signals` remain compatibility commands for a
+single adapter or legacy artifacts. They are not the production publication path: current Radar
+is produced by `collect` and the versioned Engine. `db rebuild` is legacy recovery only, never a
+normal way to iterate on stories or trends.
 
 ### What it will NOT do — by design
 
@@ -81,14 +88,71 @@ Written into [`AGENTS.md`](AGENTS.md). The service refuses, by architecture:
 - **Post, vote, or comment** on Reddit. (Read-only. Always.)
 - **Bypass account bans** or impersonate users. (Proxy is for rate limits only.)
 - **Train ML models** on collected content. (Explicitly forbidden.)
-- **Expose secrets** in git, logs, or API responses. (detect-secrets pre-commit gate.)
+- **Expose secrets** in git, logs, or API responses. (`scripts/secret-scan` + detect-secrets gate.)
 - **Touch other services** on the VPS. (Isolated network + volume.)
 
 > **Trust is built in what a system *won't* do.** A scraper that posts is a liability. A scraper that *can't* post is a tool you can leave running at 3 AM.
 
 ---
 
-## Architecture
+## How it works
+
+reddit-compass has two jobs that are intentionally separated.
+
+```text
+public sources
+  → adapter snapshots (JSONL)
+  → Collector / compass.db             raw facts and source health
+  → immutable Data Release
+  → Trend Engine / trend_engine.db     facets → stories → trends → quality
+  → RadarPublication pointer
+  → News / Stories / Trends / Radar / Today, each with evidence links
+```
+
+1. **Collector builds the corpus.** Source adapters fetch public/read-only data from Reddit,
+   Hacker News, RSS/Atom feeds, optional Ladder-supported publisher pages and ProductHunt. Raw
+   materials, observations and source health go to `compass.db`; JSONL snapshots remain an
+   exchange/debug format.
+2. **Engine freezes a Data Release.** A finalized collection run is copied into
+   `trend_engine.db` as an immutable release. Later changes in `compass.db` cannot move old
+   experiments.
+3. **Facets classify items.** The Engine assigns domains, themes, entities, event frames,
+   source cluster, content scope and pain points. This is the layer that powers theme clouds and
+   domain drill-down.
+4. **Stories group concrete events.** URL canonicalization, Reddit target URLs, title/BM25
+   similarity, entities, temporal windows, embeddings and bounded Qwen review decide whether
+   items describe the same event. Stories keep direct evidence links.
+5. **Trends group repeated patterns.** Trend discovery runs over accepted stories, not raw
+   posts/articles. A trend needs multiple stories over time; reposts or syndicated copies should
+   not inflate it.
+6. **Quality gates decide publishability.** Engine releases are evaluated for overmerge risk,
+   domain balance, naming quality, evidence coverage and regression against the baseline.
+7. **Radar/Today read only publications.** UI does not read arbitrary experiments by default.
+   A manual `RadarPublication` pointer selects the Story/Trend release shown in `broad`,
+   `ai-native` or `shadow`. Rollback switches the pointer back.
+
+### What “ready” means
+
+| State | What is guaranteed | What UI can safely show |
+|---|---|---|
+| `collection complete` | Every requested source artifact was finalized into raw facts; source health is recorded. Qwen is not required. | A new immutable input can be created; it is not yet an editorial verdict. |
+| `Data Release finalized` | Exact rows, observations and health are copied with checksums. Later collection cannot alter the experiment. | Engine/preview diagnostics. |
+| `analysis evaluated` | Facets, stories, trends and the quality report exist for one immutable release. | Shadow/preview only until a human publishes it. |
+| `Radar published` | Input is complete, quality gates passed and a manual channel pointer selected the release. | `Today`, Radar and direct News/Story/Trend evidence links. |
+| `partial` / `failed` | A missing or failed source is visible; nothing is silently called complete. | Diagnostics or `shadow`; the last good Broad publication remains live. |
+
+### Read the mechanics, not just the summary
+
+| Need | Canonical reference |
+|---|---|
+| Collection handoff, completion stages, `/runs` journal and publish rules | [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md) |
+| End-to-end textual diagrams | [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) |
+| Both SQLite databases, tables and ownership boundary | [`docs/DATABASE_SCHEMA.md`](docs/DATABASE_SCHEMA.md) |
+| Story/trend algorithms, Golden Set, review, quality and rollback | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) |
+| Quality floors and regression gates | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) |
+| Source capability registry and sections | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) |
+
+## Architecture at a glance
 
 ```
     🌐 Reddit packs       💬 Hacker News      📰 RSS sections    🪜 Ladder optional  🚀 ProductHunt
@@ -106,7 +170,7 @@ Written into [`AGENTS.md`](AGENTS.md). The service refuses, by architecture:
     (exchange format)      (raw facts)             (immutable versions)   (FastAPI + OAuth2)
 ```
 
-**Sources → 5 source clusters → 12 broad domains → stories/trends → Today + Radar**
+**Sources → 6 source clusters → 12 broad domains → stories/trends → Today + Radar**
 
 Collection and analysis are separate runtimes. `collect` writes raw facts to `compass.db`;
 the versioned Engine freezes them into `trend_engine.db`. Radar reads only a manually published
@@ -130,7 +194,8 @@ climate/energy/infrastructure, security/privacy, and `other`.
 | **Business** | Reuters, FT, Fox Business, American Banker | RSS + Ladder fallback |
 | **Tech/Culture** | TechCrunch, Verge, Ars Technica, Wired, New Yorker, Vanity Fair | RSS + Ladder fallback |
 | **Voices** | Reddit broad packs, Medium | Public JSON/RSS + Ladder fallback |
-| **Developers / Pulse** | Hacker News, ProductHunt | Algolia + GraphQL/feed |
+| **Developers** | Hacker News | Algolia/search snapshots |
+| **Product pulse** | ProductHunt | GraphQL/feed |
 
 Implementation note: [`docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md).
 Prompt contracts: [`docs/RADAR_PROMPTS.md`](docs/RADAR_PROMPTS.md).
@@ -157,19 +222,22 @@ uv sync
 ### First run
 
 ```bash
-# Preview what will be collected (no network):
-uv run reddit-compass fetch --dry-run
+# See the configured broad surface without network access:
+uv run reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph --dry-run
 
-# Collect Reddit posts:
-uv run reddit-compass fetch
+# Create one raw collection run. This fetches only public/read-only sources.
+uv run reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
 
-# Collect everything (Reddit + HN + RSS):
-uv run reddit-compass all
+# Iterate on the same frozen input without collecting again.
+uv run reddit-compass engine cycle --profile broad --window 7 --publish-channel shadow
 
 # Start the API:
 uv run reddit-compass serve
 # → http://localhost:8900/docs (Swagger UI)
 ```
+
+Publishing to `broad` is deliberately manual after the quality gate. The exact release IDs,
+completion rules and rollback command are in [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 
 ### Optional residential proxy for Reddit
 
@@ -181,7 +249,7 @@ same configured proxy. Request pacing remains 4 seconds, with at most two 429
 retries separated by 10 seconds. Proxies are only for rate-limit mitigation —
 never for account bans, logins, posting, voting, or commenting.
 
-For rotating residential pools (e.g. IPRoyal) set `REDDIT_COMPASS_ENGINE=playwright`:
+For rotating residential pools set `REDDIT_COMPASS_ENGINE=playwright`:
 Reddit serves `.json` to full browser traffic but frequently rejects bare HTTP
 from pool IPs with 403 (verified 2026-07-27). If the provider offers a
 sticky-session endpoint (same exit IP for ~20 minutes), prefer it — per-connection
@@ -200,19 +268,18 @@ and runs the Engine in shadow at 16:00 UTC. The exact version-controlled schedul
 [`deploy/hostkey/README.md`](deploy/hostkey/README.md); the completion and publication rules are
 in [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 
-**Reddit** (residential IP) — collected from Mac (Reddit blocks datacenter IPs),
-then synced to the VPS. Nightly `scripts/fetch-and-sync.sh` (launchd, 03:17) alternates
-the route to avoid burning the home IP: even days — direct home IP, odd days — IPRoyal
-residential proxy with `REDDIT_COMPASS_ENGINE=playwright` (proxy from the gitignored
-`deploy/hostkey/.env.secrets`). Force a route with `RC_PROXY_MODE=on|off`:
+**Reddit** can be collected separately from a local approved route and synced to the VPS as a
+JSONL artifact. Nightly `scripts/fetch-and-sync.sh` (launchd, 03:17) chooses the route from
+gitignored config and supports an explicit `RC_PROXY_MODE=on|off` override:
 
 ```bash
 ./scripts/fetch-and-sync.sh               # fetch + sync (route chosen automatically)
 RC_PROXY_MODE=on ./scripts/fetch-and-sync.sh --fetch   # force proxy route
 # manual alternative:
-uv run reddit-compass fetch --stealth     # collect on Mac (~11 min)
-scp data/snapshots/$(date +%F)/posts.jsonl deploy@VPS:/tmp/
-ssh deploy@VPS "docker cp /tmp/posts.jsonl rc-api:/data/snapshots/$(date +%F)/"
+uv run reddit-compass fetch --stealth     # collect locally from approved route
+scp data/snapshots/$(date +%F)/posts.jsonl "${RC_DEPLOY_USER:-deploy}@${RC_DEPLOY_HOST:-reddit-compass-vps}:/tmp/"
+ssh "${RC_DEPLOY_USER:-deploy}@${RC_DEPLOY_HOST:-reddit-compass-vps}" \
+  "docker cp /tmp/posts.jsonl rc-api:/data/snapshots/$(date +%F)/"
 ```
 
 ### VPS deployment
@@ -220,7 +287,7 @@ ssh deploy@VPS "docker cp /tmp/posts.jsonl rc-api:/data/snapshots/$(date +%F)/"
 ```bash
 ./deploy/hostkey/deploy.sh
 # Deploys: API (FastAPI) + Caddy (reverse proxy) + batch collector
-# → http://VPS_IP:8900/health
+# Target host and public URL come from deploy/hostkey/.env.secrets
 ```
 
 ---
@@ -253,39 +320,39 @@ curl -H "Authorization: Bearer <token>" \
 
 ---
 
-## LLM Analysis (Qwen API)
+## LLM-assisted analysis
 
-Not just collection — **intelligence**. Analyzes **all available sources**
-(Reddit, HN, RSS, Ladder, ProductHunt) — works even without Reddit data.
+The Engine is deterministic first and LLM-assisted second. URL normalization, title/entity
+matching, temporal windows, embeddings and quality gates do the heavy lifting. Qwen is used for
+bounded grey-zone review, Russian naming/interpretation and project lenses; it does not cluster
+the whole corpus directly.
 
 ```bash
-export QWEN_TOKEN_PLAN_KEY=sk-...  # QwenCloud: https://home.qwencloud.com/api-keys
-uv run reddit-compass signals
+export DASHSCOPE_API_KEY=<qwen-api-key>
+uv run reddit-compass engine cycle --profile broad --window 7 --publish-channel shadow
 ```
 
-For each post, the LLM extracts:
-- **Pain points** — what problems people describe
-- **Buying intent** — is someone looking to buy an AI product?
-- **Business relevance** (1–10) — how relevant for enterprise AI
-- **Book relevance** (1–10) — how relevant for the narrative
-- **Themes** — key topics (1–3 per post)
+Engine facets and Qwen-reviewed outputs include:
 
-Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
-**narrative shifts**, **top-10 by book relevance**, **all pain points**.
+- **Domains/themes** — stable broad taxonomy plus narrower topic tags.
+- **Pain points** — problems people or institutions describe.
+- **Evidence refs** — every accepted story/trend points back to source items.
+- **Project scores** — book/RBC/business relevance can diverge by lens.
+- **Trend interpretation** — why a pattern matters after the candidate passed clustering gates.
 
 ### Model pyramid (price / quality)
 
 | Task | Model | Why |
 |---|---|---|
 | **Synthesis** (themes, column ideas, narrative shifts) | `qwen3.8-max-preview` | Complex, few calls, off-peak discount 17:00–03:00 MSK |
-| **Classification** (per-post pain points, relevance) | `qwen3.7-plus` | High volume, balanced price/quality |
+| **Classification / pair review** | `qwen3.6-flash` | High-volume bounded review and extraction |
 | **Simple tasks** (filtering, summarization) | `qwen3.6-flash` | Cheapest |
 
 ---
 
 ## Dashboard & Trend Radar
 
-Три режима, три сценария:
+Published UI workspaces:
 
 | View | URL | Purpose |
 |---|---|---|
@@ -318,11 +385,11 @@ Published Radar includes a cockpit section that links these layers.
 ```bash
 reddit-compass engine release create --run 2026-07-29:broad
 reddit-compass engine facets --release RELEASE_ID --profile broad
-reddit-compass engine embeddings --release RELEASE_ID --model lexical-hash-v1
+reddit-compass engine embeddings --release RELEASE_ID --model intfloat/multilingual-e5-small
 reddit-compass engine stories propose \
   --facet-release FACET_ID \
   --limit 50 \
-  --embedding-model lexical-hash-v1 \
+  --embedding-model intfloat/multilingual-e5-small \
   --dense-top-k 24 \
   --dense-threshold 0.55
 reddit-compass engine stories inspect --story-release STORY_ID
@@ -370,7 +437,7 @@ Auth: Basic Auth (credentials in `.env.secrets`), Let's Encrypt TLS.
 
 | Layer | Mechanism |
 |---|---|
-| **Secrets** | `.env.secrets` (gitignored) + `detect-secrets` pre-commit |
+| **Secrets** | `.env.secrets` (gitignored) + repo-local `scripts/secret-scan` + `detect-secrets` pre-commit |
 | **API auth** | OAuth2 client credentials → JWT (1h expiry) |
 | **Network** | Loopback only, Caddy reverse proxy |
 | **Containers** | `read_only`, `no-new-privileges`, `cap_drop: ALL` |
@@ -387,7 +454,8 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 |---|---|
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full system architecture with diagrams |
 | [`ROADMAP.md`](ROADMAP.md) | Phases 2–6, status |
-| [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | 21 sources, 5 clusters |
+| [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | Source capability registry and source-cluster plan |
+| [`docs/DATABASE_SCHEMA.md`](docs/DATABASE_SCHEMA.md) | SQLite schema: `compass.db`, Engine releases and publication pointers |
 | [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md) | Completion contract, Mac/VPS handoff, run stages, shadow/publish/rollback |
 | [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) | Text diagrams from source collection to News, Stories, Trends and Radar |
 | [`docs/DATA_FLOW_DIAGRAMS.md`](docs/DATA_FLOW_DIAGRAMS.md) | Mermaid-схемы: Reddit → stories → trends → Reddit Pulse → публикации |
@@ -399,6 +467,8 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`docs/COMPETITIVE_ANALYSIS.md`](docs/COMPETITIVE_ANALYSIS.md) | GitHub landscape, Ladder |
 | [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) | Ranked improvement plan |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog |
+| [`SECURITY.md`](SECURITY.md) | Secret handling, scan workflow and incident response |
+| [`docs/SECRET_SCANNING.md`](docs/SECRET_SCANNING.md) | Repo-local scanner rules and placeholders |
 | [`AGENTS.md`](AGENTS.md) | LLM agent contract |
 
 ---
@@ -413,7 +483,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | LLM | Qwen API — pyramid: qwen3.8-max-preview / qwen3.7-plus / qwen3.6-flash |
 | API | FastAPI + uvicorn + JWT |
 | Deploy | Docker + Caddy + host-cron |
-| Quality | ruff, mypy strict, pytest (84%), detect-secrets |
+| Quality | ruff, mypy strict, pytest coverage gate, repo-local secret scan + detect-secrets |
 | CI/CD | GitHub Actions → GHCR |
 
 ---

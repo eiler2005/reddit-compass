@@ -39,7 +39,10 @@ reddit-compass = "reddit_compass.cli:main"
 dev = [
   "httpx>=0.28,<1",
   "mypy>=1.16,<2",
-  "pre-commit>=4.2,<5",
+  # pre-commit 4.6 requires `git ls-files --deduplicate` (Git >= 2.35).
+  # The supported local macOS toolchain is Git 2.19, so keep the hook runner
+  # on the latest compatible 4.5 line instead of silently losing the gate.
+  "pre-commit>=4.2,<4.6",
   "pytest>=8.4,<9",
   "pytest-cov>=6.2,<7",
   "ruff>=0.12,<1",

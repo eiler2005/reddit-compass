@@ -45,7 +45,7 @@
 - **Pre-commit scan:** `detect-secrets` + `detect-private-key` — каждый коммит проходит проверку.
   Не обходить (`--no-verify` запрещено).
 - **Gitignore:** `.env`, `.env.*`, `deploy/**/.env*`, `*.pem`, `id_rsa*` — НЕ попадают в git.
-- **Перед пушем:** убедиться что `git diff --cached` не содержит паттернов:
+- **Перед пушем:** запустить `scripts/secret-scan --all` и убедиться что `git diff --cached` не содержит паттернов:
   `sk-`, `token=`, `password=`, `secret=`, `Bearer `, приватных ключей.
 - **Ключи API** (DASHSCOPE, TELEGRAM, RC_API_SECRET) — только в `.env.secrets` (gitignored)
   и на VPS. Никогда в коде, доках, тестах, логах.
@@ -61,7 +61,8 @@
 
 ## Деплой (разрешено автором)
 
-- VPS: `deploy@204.168.239.217` (HostKey «Hermes»), каталог `/opt/reddit-compass/`.
+- VPS: `${RC_DEPLOY_USER}@${RC_DEPLOY_HOST}` из gitignored `deploy/hostkey/.env.secrets`
+  или SSH alias `reddit-compass-vps`; каталог `/opt/reddit-compass/`.
 - Деплой через `deploy/hostkey/deploy.sh` (scp + docker compose up).
 - Секреты: `deploy/hostkey/.env.secrets` (gitignored, НЕ коммитить).
 - Разрешено: ssh/scp на VPS, docker compose up/down/restart, host-cron.

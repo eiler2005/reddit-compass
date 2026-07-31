@@ -30,6 +30,14 @@
 - **Same-cycle reviewed Engine**: валидные bounded Qwen pair reviews создают второй immutable
   StoryRelease в том же cycle; bounded trend review materializes финальный TrendRelease. Qwen
   pair labels используют тот же canonical pair key, что обучающий merge scorer.
+- **Bounded Qwen availability**: у pair/trend Engine-review теперь отдельный 75-second timeout.
+  Недоступность одного ответа фиксируется как диагностика конкретного attempt и не удерживает
+  frozen cycle, quality gate или предыдущую опубликованную версию интерфейса.
+- **README How it works + secret hygiene**: README теперь описывает полный путь
+  `sources → compass.db → immutable DataRelease → facets/stories/trends → RadarPublication → UI`
+  со ссылками на алгоритмы, БД и quality gates. Добавлен repo-local `scripts/secret-scan` по
+  образцу operational scanner из соседних проектов; tracked production IP/sslip/vendor route
+  details заменены на placeholders и gitignored env-переменные.
 
 - **Today: ежедневная лента и рабочие рубрики**: `/today` теперь показывает до 20 материалов
   для ежедневного чтения с прямыми безопасными ссылками. Отбор учитывает свежесть, профиль
@@ -41,7 +49,7 @@
 - **Продукт оживлён на проде (2026-07-30)**: `engine cycle` (embedding_v2 + model2vec)
   прогнан на свежих данных 24–30, **все полы качества зелёные** (overmerge 0, тренды без
   голых имён/дублей, таксономия сбалансирована, Pulse other 13.9%), канал `broad`
-  опубликован — `/today` больше не preview. Reddit собран с домашнего IP и смерджен в corpus
+  опубликован — `/today` больше не preview. Reddit собран с локального approved route и смерджен в corpus
   точечно по provider (без перезаписи VPS-БД; `scripts/ingest_snapshot_day.py` /
   `scripts/merge_reddit_corpus.py`). Ночной cron `16:00 UTC` запускает цикл с Qwen-дообучением серой
   зоны (`--review-limit 80`). Эталон качества: `config/quality_baselines.json`.
@@ -223,6 +231,13 @@
 
 ### Fixed
 
+- **Secret-scan cannot be bypassed by an `https` prefix**: placeholder recognition no longer
+  mistakes the `test` substring in `https` for a fake value. It now detects public-IP/`sslip`
+  endpoints, Basic/Bearer credentials, URL credentials and actual proxy assignments, while a
+  whole-tree audit avoids reading untracked local `.env*` files.
+- **Pre-commit runs on the supported Git 2.19 toolchain**: pin to the compatible 4.5 line,
+  restoring the required scanner, format, private-key and detect-secrets hooks instead of failing
+  before any hook runs on unsupported `git ls-files --deduplicate`.
 - **`/today` показывал пустой legacy briefing при наличии Engine-релиза**: если для `broad`
   ещё нет `RadarPublication`, Today теперь использует тот же latest evaluated preview fallback,
   что `/trends` и Radar API. Production publish также признаёт новые `Engine quality floors`,
@@ -279,11 +294,11 @@
 - **`REDDIT_COMPASS_ENGINE`** (`auto|playwright`): выбор движка Reddit-запросов.
   `playwright` пропускает aiohttp-попытку и сразу стартует Chromium — основной режим
   для ротационных residential proxy, где Reddit отдаёт 403 голому HTTP с pool-IP,
-  но обслуживает браузерный трафик (проверено на IPRoyal 2026-07-27).
-- **`fetch-and-sync.sh`**: страховка домашнего IP — чередование маршрута Reddit:
-  чётные дни = домашний IP, нечётные = IPRoyal proxy (движок playwright); скрипт
+но обслуживает браузерный трафик (проверено на residential provider 2026-07-27).
+- **`fetch-and-sync.sh`**: страховка local route — чередование маршрута Reddit:
+direct approved route / configured residential proxy (движок playwright); скрипт
   сам source'ит `deploy/hostkey/.env.secrets`. Override — `RC_PROXY_MODE=on|off`.
-- **ROADMAP Phase 7**: план переноса Reddit-fetch на VPS (whitelist/sticky IPRoyal,
+- **ROADMAP Phase 7**: план переноса Reddit-fetch на VPS (whitelist/sticky residential proxy,
   разнесение тегов образов api/collector, сборка collector в deploy.sh).
 - **Trend Radar v2** (`/runs/{date}/radar`): полноценный серверный рендер с LLM-аналитикой —
   карточки топ-тем с пояснениями, идеи для колонок, сдвиги нарратива, pain points (теги),
@@ -336,7 +351,7 @@
   все посты кликабельные, панель «📋 Статус запуска», навигация по якорям.
 - **Trend radar** (`reddit-compass radar`): автогенерация отчёта по кластерам с прямыми
   ссылками на каждый пост. Секция «🔥 Мега-тренды» (топ-15 через все источники).
-- **HTTPS-доступ** через хостовой Caddy: `https://rc.204.168.239.217.sslip.io/dashboard`
+- **HTTPS-доступ** через хостовой Caddy: public URL хранится только в gitignored deploy env.
   (Basic Auth, Let's Encrypt TLS, SNI).
 - **HN фильтр по дате:** `numericFilters=created_at_i>N` — только последние 7 дней
   (было: GPT-4 за 2023, стало: свежие stories).

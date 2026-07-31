@@ -1,7 +1,7 @@
 # reddit-compass → trend-radar: Мульти-источники
 
-> **Статус:** реализовано 2026-07-22. 21 источник, 5 кластеров, 4 адаптера.
-> Деплой: VPS HostKey `204.168.239.217:/opt/reddit-compass/`.
+> **Статус:** source capability registry; 21 configured source, 6 source clusters and 5 adapters.
+> Деплой: VPS target из gitignored `deploy/hostkey/.env.secrets`, каталог `/opt/reddit-compass/`.
 
 ---
 
@@ -11,47 +11,59 @@
 
 | # | Источник | Доступ | Страна | Зачем |
 |---|---|---|---|---|
-| 1 | **nytimes.com** | Ladder (Googlebot UA + cookie) | 🇺🇸 | Главный нарратив США |
-| 2 | **washingtonpost.com** | Ladder (JS paywall removal) | 🇺🇸 | Политика + tech, regulation |
-| 3 | **time.com** | Ladder (Googlebot UA) | 🇺🇸 | Массовый фрейминг |
-| 4 | **usatoday.com** | Ladder (ad removal) | 🇺🇸 | Пульс «средней Америки» |
-| 5 | **bbc.com** | RSS (бесплатно) | 🇬🇧 | Глобальный не-US взгляд |
-| 6 | **theguardian.com** | RSS + Open API (бесплатно) | 🇬🇧 | UK, расследования |
+| 1 | **nytimes.com** | RSS/Atom; official API when configured; optional listing | 🇺🇸 | Главный нарратив США |
+| 2 | **washingtonpost.com** | RSS/Atom; optional listing | 🇺🇸 | Политика + tech, regulation |
+| 3 | **time.com** | optional listing | 🇺🇸 | Массовый фрейминг |
+| 4 | **usatoday.com** | RSS/Atom | 🇺🇸 | Пульс «средней Америки» |
+| 5 | **bbc.com** | RSS/Atom | 🇬🇧 | Глобальный не-US взгляд |
+| 6 | **theguardian.com** | RSS/Atom | 🇬🇧 | UK, расследования |
+| 7 | **foxnews.com** | optional Ladder listing | 🇺🇸 | Контрастный массовый framing |
 
 ### 💰 Кластер 2: «Бизнес и финансы» (куда идут деньги)
 
 | # | Источник | Доступ | Страна | Зачем |
 |---|---|---|---|---|
-| 7 | **ft.com** | Ladder (referer t.co) | 🇬🇧 | Главный финансовый нарратив |
-| 8 | **americanbanker.com** | Ladder (gate removal) | 🇺🇸 | Банки + финтех + AI |
-| 9 | **foxbusiness.com** | Ladder (ad removal) | 🇺🇸 | Бизнес-консервативный взгляд |
-| 10 | **reuters.com** | RSS (бесплатно) | 🌐 | Мировые новости, «первый сигнал» |
+| 8 | **ft.com** | optional Ladder listing / RSS | 🇬🇧 | Главный финансовый нарратив |
+| 9 | **americanbanker.com** | optional Ladder listing | 🇺🇸 | Банки + финтех + AI |
+| 10 | **foxbusiness.com** | RSS/optional listing | 🇺🇸 | Бизнес-консервативный взгляд |
+| 11 | **reuters.com** | RSS/Atom | 🌐 | Мировые новости, «первый сигнал» |
 
 ### 🔬 Кластер 3: «Технологии и культура»
 
 | # | Источник | Доступ | Страна | Зачем |
 |---|---|---|---|---|
-| 11 | **wired.com** | Ladder (Condé Nast) | 🇺🇸 | Tech + общество, AI-тренды |
-| 12 | **newyorker.com** | Ladder (Condé Nast) | 🇺🇸 | Лонгриды, AI-этика |
-| 13 | **vanityfair.com** | Ladder (Condé Nast) | 🇺🇸 | Big Tech + власть + культура |
-| 14 | **techcrunch.com** | RSS (бесплатно) | 🇺🇸 | Стартапы, funding rounds |
-| 15 | **theverge.com** | RSS (бесплатно) | 🇺🇸 | Consumer tech, Big Tech |
-| 16 | **arstechnica.com** | RSS (бесплатно) | 🇺🇸 | Глубокая tech-аналитика |
+| 12 | **wired.com** | optional Ladder listing | 🇺🇸 | Tech + общество, AI-тренды |
+| 13 | **newyorker.com** | optional Ladder listing | 🇺🇸 | Лонгриды, AI-этика |
+| 14 | **vanityfair.com** | optional Ladder listing | 🇺🇸 | Big Tech + власть + культура |
+| 15 | **techcrunch.com** | RSS/Atom | 🇺🇸 | Стартапы, funding rounds |
+| 16 | **theverge.com** | RSS/Atom | 🇺🇸 | Consumer tech, Big Tech |
+| 17 | **arstechnica.com** | RSS/Atom | 🇺🇸 | Глубокая tech-аналитика |
 
 ### 🗣 Кластер 4: «Голоса» (что говорят люди)
 
 | # | Источник | Доступ | Страна | Зачем |
 |---|---|---|---|---|
-| 17 | **reddit.com** (18 сабреддитов) | Playwright JSON | 🌐 | Живые реакции, боли, кейсы |
-| 18 | **news.ycombinator.com** | Algolia API (бесплатно) | 🌐 | «Голос разработчика» |
-| 19 | **medium.com** | Ladder (referer t.co/amp) | 🌐 | Кейсы практиков, лонгриды |
+| 18 | **reddit.com** (profile packs) | Public read-only JSON/RSS fallback | 🌐 | Живые реакции, боли, кейсы |
+| 19 | **medium.com** | RSS/optional listing | 🌐 | Кейсы практиков, лонгриды |
 
-### 📊 Кластер 5: «Массовый пульс»
+### 💻 Кластер 5: «Разработчики»
 
 | # | Источник | Доступ | Страна | Зачем |
 |---|---|---|---|---|
-| 20 | **foxnews.com** | Ladder (ad removal) | 🇺🇸 | «Другая Америка» |
-| 21 | **producthunt.com** | GraphQL API (бесплатно) | 🌐 | Что запускают прямо сейчас |
+| 20 | **news.ycombinator.com** | Algolia/search API | 🌐 | Что разработчики строят и обсуждают |
+
+### 🚀 Кластер 6: «Продуктовый пульс»
+
+| # | Источник | Доступ | Страна | Зачем |
+|---|---|---|---|---|
+| 21 | **producthunt.com** | API/feed | 🌐 | Что запускают прямо сейчас |
+
+### Выключенные до credentials / отдельного решения
+
+| # | Источник | Статус | Причина |
+|---|---|---|---|
+| 21 | **NYT API** | `not_configured` by default | Нужен `NYT_API_KEY`; это official-first адаптер, не подмена RSS. |
+| 22 | **WSJ / Dow Jones** | `not_configured` | Нужны лицензированные credentials; источник не должен отображаться как собранный. |
 
 ---
 
@@ -59,11 +71,16 @@
 
 | Адаптер | Файл | Источников | CLI |
 |---|---|---|---|
-| **RSS** | `sources/rss.py` | 6 (BBC, Guardian, Reuters, TechCrunch, Verge, Ars) | `reddit-compass rss` |
-| **Ladder** | `sources/ladder.py` | 12 (NYT, WaPo, FT, Wired, Medium, Time, USA Today, Fox×2, New Yorker, VF, AmBanker) | `reddit-compass ladder` |
-| **Hacker News** | `sources/hackernews.py` | 1 (Algolia, 8 AI-запросов) | `reddit-compass hn` |
-| **ProductHunt** | `sources/producthunt.py` | 1 (GraphQL) | `reddit-compass ph` |
-| **Reddit** | `client.py` + `fetch_subreddits.py` | 18 сабреддитов | `reddit-compass fetch` |
+| **RSS/Atom** | `sources/rss.py` | 12 configured providers/sections; direct feeds plus Google News RSS where needed | `reddit-compass rss` |
+| **Ladder** | `sources/ladder.py` | 9 configured publisher listing sources | `reddit-compass ladder` |
+| **Hacker News** | `sources/hackernews.py` | front/search snapshots through Algolia | `reddit-compass hn` |
+| **ProductHunt** | `sources/producthunt.py` | product pulse | `reddit-compass ph` |
+| **Reddit** | `client.py` + `fetch_subreddits.py` | profile-defined broad packs | `reddit-compass fetch` |
+
+The capability registry in `sources/registry.py` is the source of truth for provider, source
+cluster, scope, expected freshness and credentials. A configured source is not automatically a
+collected source: the factual status and count for a day are recorded as `source_health` in the
+raw run and exposed in `/runs`.
 
 ---
 
@@ -71,19 +88,17 @@
 
 ```
 data/snapshots/YYYY-MM-DD/
-├── posts.jsonl          ← Reddit (18 сабреддитов)
-├── hackernews.jsonl     ← HN (Algolia)
-├── rss.jsonl            ← RSS (6 источников)
-├── ladder.jsonl         ← Ladder (12 paywall)
-├── producthunt.jsonl    ← ProductHunt
-├── virality.jsonl       ← Детекция виральности
-├── signals.jsonl        ← LLM-анализ (Qwen)
-├── trends-report.md     ← Trends analysis
-└── signals-report.md    ← LLM-синтез
+├── posts.jsonl          ← Reddit
+├── hackernews.jsonl     ← Hacker News
+├── rss.jsonl            ← RSS/Atom provider sections
+├── ladder.jsonl         ← optional listing fallback, only when it actually ran
+└── producthunt.jsonl    ← Product pulse
 ```
 
-Все в формате PostCard (единая схема), поле `subreddit` = имя источника,
-`monitoring_type` = "hot"|"top"|"search"|"rss"|"ladder"|"api".
+The Collector normalizes these artifacts into `ContentItem`/`Observation` rows in `compass.db`.
+Legacy `PostCard` JSONL remains compatible during the transition, but the versioned Engine consumes
+only an immutable copied `DataRelease` in `trend_engine.db`. Details and diagrams:
+[`COLLECTOR_TO_TRENDS_FLOW.md`](COLLECTOR_TO_TRENDS_FLOW.md).
 
 ---
 
@@ -99,20 +114,20 @@ data/snapshots/YYYY-MM-DD/
 ├── src/                   ← Исходники
 └── config/                ← Профили
 
-Host-cron:
-  17 3 * * *  reddit-compass nightly   (Reddit + trends + stealth)
-  30 3 * * *  reddit-compass rss       (RSS-источники)
-  45 3 * * *  reddit-compass hn        (Hacker News)
-  00 4 * * *  reddit-compass ladder    (Ladder, если задеплоен)
-  15 4 * * *  reddit-compass ph        (ProductHunt)
-  30 4 * * *  reddit-compass signals   (LLM-анализ)
+Host-cron uses separate Collector and Engine stages. The exact version-controlled schedule is
+documented in `deploy/hostkey/reddit-compass.cron`; completion, shadow publication and rollback
+are defined in [`COLLECTION_LIFECYCLE.md`](COLLECTION_LIFECYCLE.md). This document intentionally
+does not duplicate a volatile timetable.
 ```
 
 ---
 
-## 5. Ladder (инфраструктура для paywall)
+## 5. Ladder (optional publisher listing fallback)
 
-**Ladder** (⭐8.7k, Go) — self-hosted proxy, деплой на HostKey:
+**Ladder** is an optional adapter for configured publisher listing pages and personal research.
+It is not a claim that every publisher is available, and it is not a source of truth for a full
+paywalled article. The adapter stores title, canonical link and permitted excerpt/scope only; a
+failed or unavailable source is recorded as `error`/`not_configured`, never as collected.
 
 ```bash
 docker run -p 127.0.0.1:8080:8080 -d \
@@ -120,10 +135,9 @@ docker run -p 127.0.0.1:8080:8080 -d \
   --name ladder ghcr.io/everywall/ladder:latest
 ```
 
-Ruleset: 33 домена (мы используем 12). Per-domain правила: Googlebot UA,
-cookie-манипуляция, JS-инъекции, referer-трюки.
-
-**Чего НЕТ в Ladder (и не будет):** WSJ, Bloomberg, The Economist (серверный paywall).
+Use it only where terms, access and content scope permit. WSJ/Dow Jones remains `not_configured`
+without licensed credentials. The source definition and actual daily health are more authoritative
+than a static ruleset count.
 
 ---
 
@@ -131,21 +145,18 @@ cookie-манипуляция, JS-инъекции, referer-трюки.
 
 | Риск | Митигация |
 |---|---|
-| NYT/WaPo изменят paywall | Ladder ruleset — community-maintained, мониторить |
-| Cloudflare на СМИ | FlareSolverr (опциональный контейнер) |
-| WSJ/Bloomberg недоступны | RSS-заголовки или подписка |
-| Rate limit на RSS | 6 источников × 2 фида = 12 запросов, пауза не нужна |
-| ProductHunt API лимиты | 6250 запросов/15мин — более чем достаточно |
-| Юридический риск (paywall) | Только личный research, не публикуем сырые статьи |
+| Provider changes feed/listing | `source_health` exposes the failed provider/section; the run becomes partial when an expected input is absent |
+| WSJ/Dow Jones unavailable | Mark `not_configured`; use licensed API only after credentials and legal approval |
+| RSS/API rate limits | Adapter-specific pacing and error state; no green completion from a missing section |
+| Ladder access/content scope | Optional fallback only; retain links and permitted excerpts, not paid full text |
+| Reddit route unavailable | Use only an approved read-only route; JSONL handoff does not overwrite VPS corpus |
 
 ---
 
 ## 7. Метрики успеха
 
-- [ ] RSS: 50+ статей за прогон (6 источников)
-- [ ] HN: 50+ stories по AI-темам
-- [ ] Ladder: 10+ страниц из paywall-источников
-- [ ] ProductHunt: 20 продуктов
-- [ ] Reddit: 400+ постов (18 сабреддитов)
-- [ ] Перекрёстная валидация: ≥1 тема в 3+ источниках в nightly-отчёте
-- [ ] Время nightly (все источники): < 20 мин
+- [ ] `/runs` shows expected source/section health, count, freshness and error state for the raw run.
+- [ ] A `complete` raw run has all requested artifacts; a missing provider is explicit `partial`.
+- [ ] A frozen Data Release preserves the same source coverage after later collection changes.
+- [ ] Stories/trends are evaluated on releases and pass quality gates before a manual Broad publish.
+- [ ] UI publication has evidence links and can roll back by pointer without rebuilding raw data.

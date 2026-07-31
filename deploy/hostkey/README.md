@@ -5,7 +5,7 @@
 ## Архитектура: VPS + Mac
 
 ```
-┌─── VPS HostKey (204.168.239.217) — автоматически, cron ──────────────┐
+┌─── VPS HostKey (${RC_DEPLOY_HOST}) — автоматически, cron ──────────────┐
 │  Скидка Qwen 17:00–03:00 МСК = 14:00–00:00 UTC                        │
 │                                                                        │
 │  14:00 UTC  rss / hn / ladder / ph snapshots                          │
@@ -17,18 +17,17 @@
 │  rc-caddy   (reverse proxy, loopback)                                  │
 │  ladder     (paywall proxy, Docker network)                            │
 │                                                                        │
-│  Dashboard: https://rc.204.168.239.217.sslip.io/dashboard             │
-│             (Basic Auth, credentials in .env.secrets, Let's Encrypt)   │
+│  Dashboard: ${RC_PUBLIC_BASE_URL}/today                                │
+│             (Basic Auth, credentials in .env.secrets, TLS by proxy)     │
 └────────────────────────────────────────────────────────────────────────┘
 
 ┌─── Mac (residential IP) — вручную или launchd ─────────────────────────┐
 │                                                                        │
-│  reddit-compass fetch --stealth   → 737 постов Reddit (18 сабреддитов)│
-│  reddit-compass signals           → LLM-анализ (Qwen API)             │
+│  reddit-compass fetch --stealth   → Reddit snapshot из broad packs     │
+│  reddit-compass engine cycle      → versioned Story/Trend analysis     │
 │  scp data/ → VPS                  → sync на сервер                     │
 │                                                                        │
-│  Причина: Reddit блокирует датацентр-IP (403).                         │
-│  Только residential IP (Mac) работает для Reddit.                      │
+│  Reddit собирается отдельно, если серверный маршрут недоступен.         │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -77,7 +76,7 @@ partial Data Release или failed quality gate.
 INSTALL_CRON=1 ./deploy/hostkey/deploy.sh
 ```
 
-Reddit поступает с Mac (residential IP) как `posts.jsonl` в Docker volume. Локальный
+Reddit поступает с local approved route как `posts.jsonl` в Docker volume. Локальный
 `compass.db` никогда не копируется на VPS. Полный completion/publish contract:
 [`docs/COLLECTION_LIFECYCLE.md`](../../docs/COLLECTION_LIFECYCLE.md).
 
@@ -91,15 +90,15 @@ Reddit поступает с Mac (residential IP) как `posts.jsonl` в Docker
 
 ## HTTPS-доступ (Caddy на хосте)
 
-```
-/etc/caddy/Caddyfile:
-  https://rc.204.168.239.217.sslip.io {
-      basicauth { admin <bcrypt-hash> }
-      reverse_proxy 127.0.0.1:8900
-  }
+```caddy
+# /etc/caddy/Caddyfile
+{$RC_PUBLIC_BASE_URL_HOST} {
+    basicauth { admin <bcrypt-hash> }
+    reverse_proxy 127.0.0.1:8900
+}
 ```
 
-- DNS: sslip.io (автоматически, без настройки)
+- DNS: configured outside tracked docs
 - TLS: Let's Encrypt (авто)
 - Auth: Basic Auth (credentials in `.env.secrets`)
 
@@ -120,7 +119,7 @@ docker network connect reddit-compass_net ladder
 
 1. Только `vps-hostkey-hermes`. Hetzner и другие стеки не трогать.
 2. Изолированный стек `/opt/reddit-compass` (своя сеть + volume).
-3. Reddit fetch — **только с Mac** (residential IP). С VPS — 403.
+3. Reddit fetch — read-only public data; при проблемах серверного маршрута используется локальный residential route.
 4. UFW: порт 8900 открыт. Остальное — default deny.
 5. Секреты в `.env` (gitignored). Никогда в git.
 
@@ -128,16 +127,16 @@ docker network connect reddit-compass_net ladder
 
 ```bash
 # Health (credentials из .env.secrets)
-curl -u "$RC_BASIC_AUTH" https://rc.204.168.239.217.sslip.io/health
+curl -u "$RC_BASIC_AUTH" "${RC_PUBLIC_BASE_URL}/health"
 
 # Dashboard
-open https://rc.204.168.239.217.sslip.io/dashboard
+open "${RC_PUBLIC_BASE_URL}/today"
 
 # Логи
-ssh deploy@204.168.239.217 "tail -5 /var/log/reddit-compass/rss.log"
+ssh "${RC_DEPLOY_USER:-deploy}@${RC_DEPLOY_HOST:-reddit-compass-vps}" "tail -5 /var/log/reddit-compass/rss.log"
 
 # Данные
-ssh deploy@204.168.239.217 "docker exec rc-api ls /data/snapshots/"
+ssh "${RC_DEPLOY_USER:-deploy}@${RC_DEPLOY_HOST:-reddit-compass-vps}" "docker exec rc-api ls /data/snapshots/"
 ```
 
 ## Резервные копии

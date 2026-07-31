@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# deploy.sh — деплой reddit-compass на VPS HostKey «Hermes».
+# deploy.sh — деплой reddit-compass на выделенный VPS.
 # Запуск: ./deploy/hostkey/deploy.sh
 #
 # Требования:
-#   - SSH-доступ: deploy@204.168.239.217 (ключ ~/.ssh/id_rsa)
+#   - SSH-доступ: `${RC_DEPLOY_USER}@${RC_DEPLOY_HOST}` из .env.secrets
+#     или SSH alias `reddit-compass-vps`
 #   - Docker + docker compose на VPS
 #   - .env.secrets заполнен (deploy/hostkey/.env.secrets)
 #
@@ -15,25 +16,29 @@
 
 set -euo pipefail
 
-VPS_HOST="204.168.239.217"
-VPS_USER="deploy"
 REMOTE_DIR="/opt/reddit-compass"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+SECRETS_FILE="${SCRIPT_DIR}/.env.secrets"
 
-echo "🚀 Деплой reddit-compass на ${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}"
-echo "============================================================"
-
-# Проверка: .env.secrets существует
-if [[ ! -f "${SCRIPT_DIR}/.env.secrets" ]]; then
+if [[ ! -f "${SECRETS_FILE}" ]]; then
     echo "❌ .env.secrets не найден. Создайте из .env.secrets.example"
     exit 1
 fi
 
-# 1. Создаём каталог на VPS
+set -a
+# shellcheck source=/dev/null
+. "${SECRETS_FILE}"
+set +a
+
+VPS_HOST="${RC_DEPLOY_HOST:-reddit-compass-vps}"
+VPS_USER="${RC_DEPLOY_USER:-deploy}"
+PUBLIC_BASE_URL="${RC_PUBLIC_BASE_URL:-http://localhost:8900}"
+
+echo "🚀 Деплой reddit-compass на ${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}"
+
 echo "📁 Создаю ${REMOTE_DIR} на VPS..."
 ssh "${VPS_USER}@${VPS_HOST}" "sudo mkdir -p ${REMOTE_DIR} && sudo chown ${VPS_USER}:${VPS_USER} ${REMOTE_DIR}"
 
-# 2. Копируем файлы (build context + compose + secrets)
 echo "📦 Копирую исходники + compose + Caddyfile + secrets..."
 ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/src ${REMOTE_DIR}/config"
 scp "${SCRIPT_DIR}/docker-compose.yml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
@@ -41,28 +46,21 @@ scp "${SCRIPT_DIR}/Caddyfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/Dockerfile.api" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/reddit-compass.cron" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/install-cron.sh" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
-scp "${SCRIPT_DIR}/.env.secrets" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.env"
-# Build context для Docker
+scp "${SECRETS_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.env"
+
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 scp "${PROJECT_ROOT}/Dockerfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/README.md" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp -r "${PROJECT_ROOT}/src/reddit_compass" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/src/"
-# Dockerfile copies the complete config directory: profiles plus quality baselines
-# must travel together or a freshly rebuilt collector cannot evaluate a release.
 scp -r "${PROJECT_ROOT}/config/." "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/config/"
 
-# 3. Собираем образы (api slim + collector с Chromium) и запускаем сервисы.
-# Теги разнесены (reddit-compass-api / reddit-compass-collector): раньше оба
-# сервиса делили reddit-compass:latest, и up -d api перезаписывал collector-тег
-# slim-образом без Chromium.
 echo "🐳 Собираю образы api + collector (первый раз — долго: базовый Playwright)..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose build api reddit-compass"
 
 echo "🐳 Запускаю api + caddy..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api caddy"
 
-# 3.5. Рестарт Caddy для обновления Docker DNS (иначе 502 после пересборки api)
 echo "🔄 Рестарт Caddy (Docker DNS refresh)..."
 ssh "${VPS_USER}@${VPS_HOST}" "docker restart rc-caddy"
 
@@ -71,16 +69,15 @@ if [[ "${INSTALL_CRON:-0}" == "1" ]]; then
     ssh "${VPS_USER}@${VPS_HOST}" "chmod +x ${REMOTE_DIR}/install-cron.sh && ${REMOTE_DIR}/install-cron.sh"
 fi
 
-# 4. Проверяем health
 echo "🏥 Проверяю health..."
 sleep 3
 ssh "${VPS_USER}@${VPS_HOST}" "curl -s http://127.0.0.1:8900/health" && echo ""
 
 echo ""
 echo "✅ Деплой завершён!"
-echo "   API: http://${VPS_HOST}:8900 (loopback)"
-echo "   Dashboard: http://${VPS_HOST}:8900/dashboard"
-echo "   Docs: http://${VPS_HOST}:8900/docs"
+echo "   API: ${PUBLIC_BASE_URL}/health"
+echo "   Today: ${PUBLIC_BASE_URL}/today"
+echo "   Docs: ${PUBLIC_BASE_URL}/docs"
 echo ""
 echo "📋 Для version-controlled nightly cron:"
 echo "   INSTALL_CRON=1 ./deploy/hostkey/deploy.sh"

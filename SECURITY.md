@@ -18,7 +18,7 @@ It collects public data from 21 sources and serves it via a local API.
 
 | Threat | Mitigation |
 |---|---|
-| Secret leak via git | `detect-secrets` pre-commit + `detect-private-key` + gitignore |
+| Secret leak via git | repo-local `scripts/secret-scan` + `detect-secrets` + `detect-private-key` + gitignore |
 | Unauthorized API access | OAuth2 client credentials → JWT (1h expiry) |
 | Network exposure | Loopback only (127.0.0.1), Caddy reverse proxy, no public ports |
 | Container escape | `read_only`, `no-new-privileges`, `cap_drop: ALL`, `pids_limit` |
@@ -55,5 +55,18 @@ If a key is compromised:
 ## Dependencies
 
 - Locked via `uv.lock` — no floating versions in production
-- CI runs on every push: ruff + mypy strict + pytest + detect-secrets
+- CI/pre-commit run: ruff + mypy strict + pytest + repo-local secret scan + detect-secrets
 - Docker images built from locked dependencies
+
+## Secret Scan Workflow
+
+Run before pushing:
+
+```bash
+scripts/secret-scan --all
+uv run pre-commit run --all-files
+```
+
+Real deployment hosts, public URLs with embedded IPs, Basic Auth credentials, API keys and proxy
+credentials must stay in gitignored `.env*` files or SSH config. Tracked docs must use neutral
+placeholders. Details: [`docs/SECRET_SCANNING.md`](docs/SECRET_SCANNING.md).

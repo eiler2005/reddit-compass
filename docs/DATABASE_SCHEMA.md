@@ -1,23 +1,37 @@
-# SQLite Schema Reference — reddit-compass
+# SQLite schema reference — reddit-compass
 
-> Автогенерировано из production БД. Последнее обновление: 2026-07-28.
-> Файл: `data/compass.db` · Engine: SQLite 3 · WAL mode
+> Актуальный контракт хранения. Это не дамп одной production-БД: количество строк и IDs меняются
+> с каждым run, а ownership таблиц остаётся стабильным. Последняя схема кода —
+> `intelligence/migrations.py` для raw corpus и `intelligence/engine.py` для Engine.
 
-## Обзор
+## Два независимых хранилища
 
+```text
+public sources → JSONL snapshots → compass.db (Collector owns writes)
+                                      │ read-only, one snapshot transaction
+                                      ▼
+                         trend_engine.db (Engine owns writes)
+                         DataRelease → FacetRelease → StoryRelease
+                                      → TrendRelease → RadarPublication
+                                      → published_channels[channel]
+                                      ▼
+                         News / Stories / Trends / Radar / Today
 ```
-sources → items → observations → stories → story_metrics → briefings
-                         ↓              ↓
-                    story_items    item_signals
-                         ↓
-                   research_state
-```
 
-**14 таблиц**, ~50K rows на VPS (7 дат, 9K items, 14K stories).
+| Store | Owner | Purpose | Mutation rule |
+|---|---|---|---|
+| `data/compass.db` | Collector | Normalized raw materials, observations, source health and one factual collection run | Engine opens it `mode=ro` + `query_only`; current Collector keeps legacy projections only for transition compatibility. |
+| `data/trend_engine.db` | Trend Engine | Frozen corpus releases, facets, story/trend attempts, labels, reviews, quality outcomes and publication pointers | A finalized Data Release is immutable; experiments create new release attempts, never rewrite raw data. |
+| `data/snapshots/YYYY-MM-DD/*.jsonl` | Collector / handoff | Exchange, debug and recovery artifacts per source | Finalizer reads them into the raw corpus; they are not the UI source of truth. |
+
+`db rebuild` applies only to legacy raw-corpus recovery. It is **not** a way to develop stories or
+trends, and it does not re-create an Engine publication. For the completion contract, see
+[`COLLECTION_LIFECYCLE.md`](COLLECTION_LIFECYCLE.md); for algorithmic rules, see
+[`TREND_ENGINE.md`](TREND_ENGINE.md).
 
 ---
 
-## Таблицы
+## `compass.db`: raw corpus tables
 
 ### `runs` — запуски
 
@@ -196,6 +210,45 @@ sources → items → observations → stories → story_metrics → briefings
 
 ---
 
+## `trend_engine.db`: immutable analysis and publication
+
+The Engine database deliberately duplicates the rows needed for analysis. A `DataRelease` is a
+full frozen copy of its selected raw rows; a later collector run cannot change its checksum or a
+previous result. Every Facet/Story/Trend run has a parent ID, method/parameter hash, Git SHA,
+metrics and status (`building`, `evaluated`, `rejected`, `published`).
+
+| Table group | Main tables | What it records |
+|---|---|---|
+| Frozen input | `data_releases`, `release_items`, `release_observations`, `release_source_health` | Release ID, input/checksums, complete/partial status, copied URLs (canonical/target/discussion), source coverage and source health. SQLite triggers block mutation of finalized release rows. |
+| Facets | `facet_releases`, `item_facets` | Stable domains/themes, pains, typed entities, event frames, project relevance, Russian summaries and evidence scope. |
+| Stories | `story_releases`, `story_candidate_pairs`, `engine_stories`, `engine_story_items`, `story_redirects` | Candidate features/decision provenance, constrained membership, cross-source counts and merge/split redirects. |
+| Trends | `trend_releases`, `engine_trends`, `engine_trend_stories` | A repeated pattern across distinct stories, lifecycle/history status, evidence story IDs, counterpoints, confidence and source scope. |
+| Human/LLM review | `engine_labels`, `llm_reviews` | Version-scoped manual labels and validated bounded-Qwen responses. Invalid JSON/evidence never becomes a merge. |
+| Quality/embeddings | `engine_quality_reports`, `embedding_vectors`, `item_embedding_refs` | Quality-gate audit outcome plus cached local vector provenance. |
+| Publication | `radar_publications`, `published_channels`, `publication_history` | Immutable Story+Trend combination and the single channel pointer used by UI. Rollback changes only this pointer. |
+| Reddit-native signals | `signal_releases`, `community_signals` | Separate community/Pulse layer: within-subreddit percentile, velocity, discussion depth and perspective gap. |
+| Compatibility | `legacy_lab_imports` | Provenance when an older Cluster Lab record was safely imported; it is never treated as a current publication. |
+
+### Version graph and status semantics
+
+```text
+DataRelease (finalized + checksum)
+  └─ FacetRelease (evaluated)
+       └─ StoryRelease (evaluated/reviewed)
+            └─ TrendRelease (evaluated/reviewed)
+                 └─ RadarPublication (manual)
+                      └─ published_channels["broad" | "ai-native" | "shadow"]
+```
+
+- `input_status=complete` means the selected raw collection reached all expected source inputs;
+  `partial` is available only for inspect/preview/shadow, never silently promoted to Broad.
+- A quality report is keyed by **Data + Story + Trend** release, so `/runs` can show the stored
+  outcome without recomputing an expensive historic taxonomy during a web request.
+- The UI reads a publication pointer, not the most recently created experiment. If a new attempt
+  fails quality or Qwen review, the previous good publication stays available.
+
+---
+
 ### Legacy таблицы (v1, не используются в v2/v3)
 
 | Table | Description |
@@ -289,4 +342,7 @@ ORDER BY r.snapshot_date;
 | 1→2 | Intelligence tables: runs, items, observations, stories, story_items, story_metrics, item_signals, briefings, research_state, source_health |
 | 2→3 | Added: `domain_ids`, `trend_id`, `lifecycle`, `project_scores` columns |
 
-Миграции идемпотентны через `PRAGMA user_version`. Rebuild: `reddit-compass db rebuild`.
+Raw-corpus migrations are idempotent through `PRAGMA user_version`. Engine schema initialization
+is also idempotent, but finalization triggers preserve immutable releases. Use
+`reddit-compass db rebuild` only for documented legacy recovery; use `engine release create`,
+then a new Facet/Story/Trend attempt for analytical iterations.
