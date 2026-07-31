@@ -1,7 +1,7 @@
 # Cluster Lab compatibility guide
 
 > Deprecated for new work. The canonical laboratory is the versioned Story/Trend Engine described
-> in [`TREND_ENGINE.md`](TREND_ENGINE.md).
+> in [`TREND_ENGINE.md`](../TREND_ENGINE.md).
 
 `cluster_lab.db` was the first sandbox for testing canonical URLs, title guards and heuristic
 proposals without mutating production story tables. It established the correct development rule:

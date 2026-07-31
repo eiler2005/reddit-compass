@@ -4,7 +4,7 @@ reddit-compass растёт от автономного коллектора т�
 порядок — ориентир, не жёсткая последовательность.
 
 > Ранжированный план улучшений (анализ конкурентов, источники, rationale) —
-> в [docs/IMPROVEMENTS.md](docs/IMPROVEMENTS.md). Конкурентный анализ (ландшафт GitHub,
+> в [docs/archive/IMPROVEMENTS.md](docs/archive/IMPROVEMENTS.md). Конкурентный анализ (ландшафт GitHub,
 > таблицы фич) — в [docs/COMPETITIVE_ANALYSIS.md](docs/COMPETITIVE_ANALYSIS.md).
 
 ## v0.1 — ядро (готово)

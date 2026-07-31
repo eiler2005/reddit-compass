@@ -17,7 +17,7 @@ reddit-compass — **компас общественных настроений*
 
 **1. Что происходит в мире.** Широкая картина по всем рубрикам проекта, а не только
 по технологиям. В коде это **12 доменов**
-([taxonomy.py](src/reddit_compass/intelligence/taxonomy.py)):
+([taxonomy.py](../src/reddit_compass/intelligence/taxonomy.py)):
 
 | | | |
 |---|---|---|
@@ -26,7 +26,7 @@ reddit-compass — **компас общественных настроений*
 | Труд и карьера | Мировые тренды | Климат и инфраструктура |
 | Безопасность и приватность | Спорт | Другое |
 
-и **12 тем** в профиле `broad` ([config/profiles/broad.json](config/profiles/broad.json)),
+и **12 тем** в профиле `broad` ([config/profiles/broad.json](../config/profiles/broad.json)),
 которые разрезают то же поле мельче и местами точнее:
 
 | | | |
@@ -76,25 +76,25 @@ flock, camera, palantir, ice, eminent domain).
 ## 1. Что уже реализовано (прочитать до передачи ТЗ другой LLM)
 
 Черновое ТЗ на ~85% описывает код, который уже есть в
-[intelligence/engine.py](src/reddit_compass/intelligence/engine.py) (5 320 строк).
+[intelligence/engine.py](../src/reddit_compass/intelligence/engine.py) (5 320 строк).
 
 | Фаза ТЗ | Статус | Где живёт |
 |---|---|---|
-| 1. Audit + `engine diagnose` | **Есть** | [cli.py:748](src/reddit_compass/cli.py#L748), [cli.py:1699](src/reddit_compass/cli.py#L1699) |
-| 2. Candidate generation (URL / title / token / entity / dense / temporal) | **Есть** | `generate_story_candidates`, [engine.py:1982](src/reddit_compass/intelligence/engine.py#L1982) — 4 инвертированных индекса + top-K cosine, без all-pairs |
-| 3. Pair scorer + hard conflicts | **Есть** | `_score_story_pair`, [engine.py:2247-2538](src/reddit_compass/intelligence/engine.py#L2247-L2538) — ровно твои конфликты person/location/number + `GENERIC_ANCHORS` |
-| 4. Qwen только на серой зоне | **Есть** | `engine stories review`, [engine_reviews.py](src/reddit_compass/intelligence/engine_reviews.py), таблица `llm_reviews` с флагом `valid`, отказ по unknown evidence ID |
-| 5. Constrained clustering (не union-find) | **Есть** | `_constrained_story_groups` + `_valid_group_against_medoid`, [engine.py:2541-2622](src/reddit_compass/intelligence/engine.py#L2541-L2622) |
-| 6. Golden Set + метрики + гейты | **Есть** | `engine golden export/import`, `evaluate_story_release`. Гейты в коде совпадают с твоими цифрами **до знака**: 95 / 75 / 3 / 75 / 100 / 15 ([engine.py:4332](src/reddit_compass/intelligence/engine.py#L4332)) |
-| 7. Trends поверх stories | **Есть, но плохо работает** | `_discover_trends_graph`, [engine.py:3291](src/reddit_compass/intelligence/engine.py#L3291) — см. §3.4 |
-| 8. Разделение UI News/Stories/Trends/Radar + preview | **Есть** | [api/ui.py](src/reddit_compass/api/ui.py), `preview=true` в ответах v2 |
+| 1. Audit + `engine diagnose` | **Есть** | [cli.py:748](../src/reddit_compass/cli.py#L748), [cli.py:1699](../src/reddit_compass/cli.py#L1699) |
+| 2. Candidate generation (URL / title / token / entity / dense / temporal) | **Есть** | `generate_story_candidates`, [engine.py:1982](../src/reddit_compass/intelligence/engine.py#L1982) — 4 инвертированных индекса + top-K cosine, без all-pairs |
+| 3. Pair scorer + hard conflicts | **Есть** | `_score_story_pair`, [engine.py:2247-2538](../src/reddit_compass/intelligence/engine.py#L2247-L2538) — ровно твои конфликты person/location/number + `GENERIC_ANCHORS` |
+| 4. Qwen только на серой зоне | **Есть** | `engine stories review`, [engine_reviews.py](../src/reddit_compass/intelligence/engine_reviews.py), таблица `llm_reviews` с флагом `valid`, отказ по unknown evidence ID |
+| 5. Constrained clustering (не union-find) | **Есть** | `_constrained_story_groups` + `_valid_group_against_medoid`, [engine.py:2541-2622](../src/reddit_compass/intelligence/engine.py#L2541-L2622) |
+| 6. Golden Set + метрики + гейты | **Есть** | `engine golden export/import`, `evaluate_story_release`. Гейты в коде совпадают с твоими цифрами **до знака**: 95 / 75 / 3 / 75 / 100 / 15 ([engine.py:4332](../src/reddit_compass/intelligence/engine.py#L4332)) |
+| 7. Trends поверх stories | **Есть, но плохо работает** | `_discover_trends_graph`, [engine.py:3291](../src/reddit_compass/intelligence/engine.py#L3291) — см. §3.4 |
+| 8. Разделение UI News/Stories/Trends/Radar + preview | **Есть** | [api/ui.py](../src/reddit_compass/api/ui.py), `preview=true` в ответах v2 |
 | 9. Publish / rollback | **Есть** | `publish_radar`, `rollback_publication`, `--allow-partial`, audit-строка в `publication_history` |
-| 10. Тесты из списка | **Есть ~80%** | [tests/test_trend_engine.py](tests/test_trend_engine.py) (716 строк) покрывает URL-merge, HF-волны, near-dup, generic-phrase reject, golden scoping, publish/rollback, гейты |
+| 10. Тесты из списка | **Есть ~80%** | [tests/test_trend_engine.py](../tests/test_trend_engine.py) (716 строк) покрывает URL-merge, HF-волны, near-dup, generic-phrase reject, golden scoping, publish/rollback, гейты |
 
 Реально нового в ТЗ почти не остаётся. Экспорт `candidates.jsonl` — единственный пункт,
 который на момент начала ревью отсутствовал, — **уже появился в рабочем дереве**:
 `engine stories candidates --facet-release … --output …`
-([cli.py:1713-1731](src/reddit_compass/cli.py#L1713-L1731), пока не закоммичено).
+([cli.py:1713-1731](../src/reddit_compass/cli.py#L1713-L1731), пока не закоммичено).
 Остаётся `scored_pairs.jsonl` (эти данные уже лежат в `story_candidate_pairs`, 548k строк)
 и BM25 вместо token Jaccard. Итоговое перекрытие — ~90%.
 
@@ -166,7 +166,7 @@ history_status       = insufficient_history (нужно 7 DataRelease, есть 
 
 86% историй склеены сигналом, про который собственный код проекта пишет:
 *«E5 semantic similarity alone is NOT enough for verification»*
-([verified_stories.py:11](src/reddit_compass/intelligence/verified_stories.py#L11)).
+([verified_stories.py:11](../src/reddit_compass/intelligence/verified_stories.py#L11)).
 
 ---
 
@@ -183,7 +183,7 @@ history_status       = insufficient_history (нужно 7 DataRelease, есть 
 источник *опросили без ошибки*, но не фиксирует, что он *ничего не дал*.
 
 Само понятие ожидаемого объёма отсутствует: в
-[sources/registry.py](src/reddit_compass/sources/registry.py) у `SourceDefinition` есть
+[sources/registry.py](../src/reddit_compass/sources/registry.py) у `SourceDefinition` есть
 `expected_freshness_hours`, но нет ожидаемого количества items и сравнения с историей.
 
 ### 3.2 Шесть параллельных систем категорий, ни одна не работает на выдаче
@@ -193,14 +193,14 @@ history_status       = insufficient_history (нужно 7 DataRelease, есть 
 
 | # | Набор | Кол-во | Где | Статус |
 |---|---|---|---|---|
-| 1 | **Домены** (`BROAD_DOMAINS`) | 12 | [taxonomy.py:39](src/reddit_compass/intelligence/taxonomy.py#L39) | канонический, пишется в `item_facets.domain_ids` |
-| 2 | **Темы профиля** `broad` | 12 | [config/profiles/broad.json](config/profiles/broad.json) | другая нарезка: `markets_capital` ≠ `business_models`, `regulation` ≠ `geopolitics` |
-| 3 | **Темы профиля** `ai-native` | 6 | [config/profiles/ai-native.json](config/profiles/ai-native.json) | третий набор имён (`startups`, `open_source`) |
+| 1 | **Домены** (`BROAD_DOMAINS`) | 12 | [taxonomy.py:39](../src/reddit_compass/intelligence/taxonomy.py#L39) | канонический, пишется в `item_facets.domain_ids` |
+| 2 | **Темы профиля** `broad` | 12 | [config/profiles/broad.json](../config/profiles/broad.json) | другая нарезка: `markets_capital` ≠ `business_models`, `regulation` ≠ `geopolitics` |
+| 3 | **Темы профиля** `ai-native` | 6 | [config/profiles/ai-native.json](../config/profiles/ai-native.json) | третий набор имён (`startups`, `open_source`) |
 | 4 | **Subreddit-кластеры** `broad` | 11 | `broad.json → subreddits` | имена почти как домены, но не совпадают |
 | 5 | **Subreddit-кластеры** `ai-native` | 9 | `ai-native.json → subreddits` | четвёртый набор (`ai_core`, `vibe_coding`) |
-| 6 | **Source clusters** | 6 | [sources/registry.py](src/reddit_compass/sources/registry.py) | `mainstream`, `voices`, `developers`, `business`, `tech_culture`, `product_pulse` (тип допускает 7) |
+| 6 | **Source clusters** | 6 | [sources/registry.py](../src/reddit_compass/sources/registry.py) | `mainstream`, `voices`, `developers`, `business`, `tech_culture`, `product_pulse` (тип допускает 7) |
 
-Плюс в legacy-радаре ([signals.py:582](src/reddit_compass/signals.py#L582)) была **седьмая**,
+Плюс в legacy-радаре ([signals.py:582](../src/reddit_compass/signals.py#L582)) была **седьмая**,
 самая читаемая версия — 5 рубрик с эмодзи:
 
 ```
@@ -220,7 +220,7 @@ history_status       = insufficient_history (нужно 7 DataRelease, есть 
 информации: фильтр по нему вернёт весь корпус, а «Общество и политика», «Культура»,
 «Мировые тренды» под ним тонут.
 
-Причина в определении домена ([taxonomy.py:42](src/reddit_compass/intelligence/taxonomy.py#L42)):
+Причина в определении домена ([taxonomy.py:42](../src/reddit_compass/intelligence/taxonomy.py#L42)):
 в `keywords` попали универсальные слова (`model`, `product`, `startup`, `code`, `software`,
 `developer`, `agent`), а в `source_hints` — `technology`, `tech`, `hackernews`. То есть
 **любой item с HN или из r/technology получает домен автоматически**, независимо от содержания.
@@ -278,7 +278,7 @@ Show HN: ride-recap, teaching a LLM my taste for cycling highlights
 про сборы 49ers — травмы, waiver, депт-чарт, прогнозы. Одна «история».
 
 Защита в коде **есть, но обходится**: guard `_same_provider_hn`
-([engine.py:3056-3064](src/reddit_compass/intelligence/engine.py#L3056-L3064)) требует
+([engine.py:3056-3064](../src/reddit_compass/intelligence/engine.py#L3056-L3064)) требует
 `not shared_urls and not near_duplicate_title_match` — любой общий landing-URL (корень GitHub)
 или сработавший fingerprint отключает guard целиком. И guard знает только про `hackernews` —
 для `usatoday` его нет вообще.
@@ -310,7 +310,7 @@ Show HN: ride-recap, teaching a LLM my taste for cycling highlights
 Четыре независимых дефекта:
 
 1. **Имя = один feature-key.** Рёбра графа требуют составной паттерн
-   (`has_specific_pattern`, [engine.py:3344](src/reddit_compass/intelligence/engine.py#L3344)),
+   (`has_specific_pattern`, [engine.py:3344](../src/reddit_compass/intelligence/engine.py#L3344)),
    но подпись берётся из одного доминирующего ключа → `Паттерн: fall`.
    Голые глаголы не отсекаются: блок-лист `_GENERIC_TREND_PATTERNS` содержит только
    биграммы вроде `ai agent`, `open source`.
@@ -326,8 +326,8 @@ Show HN: ride-recap, teaching a LLM my taste for cycling highlights
 в схеме.
 
 Мёртвый код: `history_status` вычисляется дважды, первое значение выбрасывается
-([engine.py:3405](src/reddit_compass/intelligence/engine.py#L3405) vs
-[engine.py:2896](src/reddit_compass/intelligence/engine.py#L2896)); `fading` и `resurfacing`
+([engine.py:3405](../src/reddit_compass/intelligence/engine.py#L3405) vs
+[engine.py:2896](../src/reddit_compass/intelligence/engine.py#L2896)); `fading` и `resurfacing`
 описаны в доках, но `_trend_lifecycle` их не возвращает никогда.
 
 ### 3.6 Пороги калиброваны против нуля меток
@@ -361,13 +361,13 @@ Show HN: ride-recap, teaching a LLM my taste for cycling highlights
 
 | Модуль | строк | статус |
 |---|---|---|
-| [intelligence/lab.py](src/reddit_compass/intelligence/lab.py) | 1 090 | deprecated собственными доками |
-| [intelligence/clustering.py](src/reddit_compass/intelligence/clustering.py) | 888 | legacy `StoryClusterer` |
-| [api/dashboard.py](src/reddit_compass/api/dashboard.py) | 863 | legacy HTML-генератор |
-| [signals.py](src/reddit_compass/signals.py) | 803 | legacy Qwen; нужен только `call_qwen_json` |
-| [intelligence/rebuild.py](src/reddit_compass/intelligence/rebuild.py) | 318 | legacy recovery |
-| [trend_strength.py](src/reddit_compass/trend_strength.py) | 293 | legacy |
-| [trends_analysis.py](src/reddit_compass/trends_analysis.py) | 271 | legacy |
+| [intelligence/lab.py](../src/reddit_compass/intelligence/lab.py) | 1 090 | deprecated собственными доками |
+| [intelligence/clustering.py](../src/reddit_compass/intelligence/clustering.py) | 888 | legacy `StoryClusterer` |
+| `api/dashboard.py` (удалён) | 863 | legacy HTML-генератор |
+| [signals.py](../src/reddit_compass/signals.py) | 803 | legacy Qwen; нужен только `call_qwen_json` |
+| [intelligence/rebuild.py](../src/reddit_compass/intelligence/rebuild.py) | 318 | legacy recovery |
+| [trend_strength.py](../src/reddit_compass/trend_strength.py) | 293 | legacy |
+| [trends_analysis.py](../src/reddit_compass/trends_analysis.py) | 271 | legacy |
 | **итого** | **~4 500** | |
 
 Плюс `engine.py` на 5 320 строк одним файлом и 19 планов в `docs/` на 9 365 строк
@@ -459,7 +459,7 @@ GDELT — что таксономия должна быть многоуровн
 - подтверждение Qwen / ручная метка.
 
 Это ровно то определение, что уже записано в
-[verified_stories.py](src/reddit_compass/intelligence/verified_stories.py). Перенести его
+[verified_stories.py](../src/reddit_compass/intelligence/verified_stories.py). Перенести его
 в `_score_story_pair` и **удалить `verified_stories.py` как отдельный слой** — одно определение
 «проверено», а не два.
 
@@ -467,7 +467,7 @@ GDELT — что таксономия должна быть многоуровн
 
 - Guard против одно-провайдерных семантических слияний **для всех провайдеров**, не только HN.
   Убрать лазейки `not shared_urls` / `not near_duplicate_title_match`
-  ([engine.py:3056](src/reddit_compass/intelligence/engine.py#L3056)): общий *landing*-URL
+  ([engine.py:3056](../src/reddit_compass/intelligence/engine.py#L3056)): общий *landing*-URL
   не должен отключать guard.
 - Жёсткий предел: история с `source_count = 1` и `item_count > 3` без общего event-URL
   не собирается.
@@ -540,7 +540,7 @@ GDELT — что таксономия должна быть многоуровн
    Без динамики — это рубрика, и её место в /stories.
 5. **Confidence разложить на компоненты** (объём, кросс-источники, устойчивость по дням,
    доля verified-историй) и показывать их, а не одно насыщенное число. Формулу
-   [engine.py:4200](src/reddit_compass/intelligence/engine.py#L4200) выбросить.
+   [engine.py:4200](../src/reddit_compass/intelligence/engine.py#L4200) выбросить.
 6. **Специфичность паттерна:** запретить одно-токенные паттерны и голые глаголы.
    Взять словарь событий из CAMEO вместо самописного списка.
 7. **`source_scope` — обязательное поле карточки тренда**, не служебное.
@@ -562,7 +562,7 @@ GDELT — что таксономия должна быть многоуровн
 
 - **Верхний уровень — 5–7 читаемых рубрик для `/today` и навигации.** Взять за основу
   ту версию, которая исторически работала как продукт (legacy-радар,
-  [signals.py:582](src/reddit_compass/signals.py#L582)), и расширить до нужного охвата:
+  [signals.py:582](../src/reddit_compass/signals.py#L582)), и расширить до нужного охвата:
 
   ```
   🤖 AI и технологии          👁 Слежка и приватность      💼 Труд и карьера
@@ -572,7 +572,7 @@ GDELT — что таксономия должна быть многоуровн
 
   Наука/здоровье, климат, финансы и спорт — второй уровень, а не отдельные блоки на главной.
 
-- **Второй уровень — 12 тем профиля** ([broad.json](config/profiles/broad.json)) как фасет
+- **Второй уровень — 12 тем профиля** ([broad.json](../config/profiles/broad.json)) как фасет
   для фильтрации внутри рубрики. Они богаче доменов и уже настроены под профиль:
   `Бизнес-модели` ≠ `Рынки и капитал`, `Регулирование` ≠ `Геополитика`.
 

@@ -3,7 +3,7 @@
 > **Статус:** сформирован 2026-07-22 по итогам анализа конкурентов, текущего ROADMAP и рабочего
 > контекста монорепо книги. Живой документ — обновлять по мере реализации.
 > Полный конкурентный анализ (ландшафт GitHub, таблицы фич, направления для изучения) —
-> в [COMPETITIVE_ANALYSIS.md](COMPETITIVE_ANALYSIS.md).
+> в [COMPETITIVE_ANALYSIS.md](../COMPETITIVE_ANALYSIS.md).
 
 ---
 
@@ -86,7 +86,7 @@
 
 ## Источники анализа
 
-- **Полный конкурентный анализ:** [COMPETITIVE_ANALYSIS.md](COMPETITIVE_ANALYSIS.md) — ландшафт
+- **Полный конкурентный анализ:** [COMPETITIVE_ANALYSIS.md](../COMPETITIVE_ANALYSIS.md) — ландшафт
   GitHub (2454 репо), таблицы фич по 3 проектам, направления для дальнейшего изучения.
 - **reddit-universal-scraper** (⭐569): plugin system, scheduled scraping, notifications, parquet,
   SQLite, dry run, proxies, REST API, Docker CI/CD.

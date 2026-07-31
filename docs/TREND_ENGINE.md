@@ -113,13 +113,29 @@ eligible for Qwen/manual review.
 
 Cluster construction is constrained agglomeration:
 
-- each new member must match the cluster medoid;
+- each new member must have a direct edge to the cluster medoid scoring at least
+  `medoid_min_score` (default **0.55**, a release parameter that enters `params_hash`);
 - numbers, people and geography cannot have hard conflicts;
 - a transitive bridge cannot merge two groups if members fail the medoid threshold;
 - large same-provider groups without shared event URLs are blocked to avoid single-provider
   semantic overmerge;
 - story IDs are reconciled with the previous accepted attempt by item overlap;
 - merge/split redirects retain provenance.
+
+`medoid_min_score` is a full-strength gate, not a tie-breaker. It was hardcoded at 0.72 —
+above the entire grey zone (0.45–0.65) — so a pair promoted to `auto_merge` by Qwen review or by
+the merge model was still discarded here, and neither labelling nor training could change the
+outcome. Measured on a 7-day broad release, lowering it recovers merges without any overmerge:
+
+| threshold | compression | multi/1k | cross-source/1k | single-provider ≥5 items |
+|---|---|---|---|---|
+| 0.72 | 0.9434 | 45 | 16 | 0 |
+| 0.60 | 0.9186 | 55 | 27 | 0 |
+| 0.55 | 0.9113 | 57 | 29 | 0 |
+| 0.50 | 0.9101 | 58 | 30 | 0 |
+
+Merging is capped by three independent limits — dense thresholds, the merge-model threshold and
+this one. Diagnose all three before concluding that a layer is at fault.
 
 ### TrendRelease
 
@@ -144,18 +160,54 @@ profile. Later attempts compare the stable trend ID and event velocity to produc
 
 ## 3. Local workflow
 
+The author's Mac (Apple M5 Pro, 18 cores, 64 GB RAM) is substantially faster than the VPS and
+is the primary place to run Engine experiments — threshold calibration, story-release A/B,
+embedding work. Caching `potion-base-8M` vectors for 5 000 items takes about ten seconds
+including the model download; a full 7-day broad story release takes minutes. Only what cannot
+be reproduced locally — the real nightly cron, publication — belongs on the VPS.
+
+Run experiments against a **copy** of the engine DB in a scratch directory rather than
+`data/*.db`: releases are immutable, but experiments still clutter the ledger.
+
 Install the standard environment:
 
 ```bash
 uv sync --dev
 ```
 
-Optional local embeddings and spaCy:
+Torch-free embeddings for the production path (`engine cycle` defaults to model2vec):
+
+```bash
+uv sync --extra embed
+```
+
+Optional E5 embeddings and spaCy (heavier; only needed for the reference model):
 
 ```bash
 uv sync --dev --extra engine
 uv run python -m spacy download en_core_web_sm
 ```
+
+Dense-similarity thresholds are a property of the embedding model, not global constants:
+E5 puts unrelated pairs around cosine 0.78, `potion-base-8M` around 0.13. Reusing one set of
+constants across models silently disables merging. Profiles live in
+`embeddings.DENSE_THRESHOLD_PROFILES` and are resolved into the release `params` before
+`params_hash`, so a release stays reproducible even if a profile changes later.
+
+Calibrate a new model without any manual labels — provenance supplies the anchor pairs
+(shared non-landing URL, identical normalized title). Quantiles, not absolute values, are what
+transfers between models:
+
+```bash
+reddit-compass engine calibrate \
+  --release RELEASE_ID \
+  --model minishlab/potion-base-8M \
+  --reference-model intfloat/multilingual-e5-small \
+  --max-negative-pairs 150000
+```
+
+Check `negative_tail_support` in the output: the strict thresholds are read off the tail of the
+negative distribution, so a handful of supporting samples means the estimate is not yet stable.
 
 Collection is independent:
 
@@ -358,6 +410,46 @@ reddit-compass engine golden import --input data/review/story-golden.json
 reddit-compass engine stories eval --story-release STORY_ID
 reddit-compass engine trends eval --trend-release TREND_ID
 ```
+
+### Labelling the grey zone, not the corpus
+
+A random sample of the corpus is almost useless: the deterministic ladder already decides
+`auto_merge` and `reject` on its own, and a label there only restates the rule. Measured on a
+7-day broad release the auto-labeller covers **100% of `auto_merge`/`reject` and 3.1% of the
+grey zone** — it teaches what is already known and stays silent where the decision is open.
+Labels only carry information where the ladder is undecided, and `informative()` drops the rest
+from both training and evaluation.
+
+The compression headroom sits at pair score **0.5–0.6**, so that is where sampling must
+concentrate:
+
+```bash
+reddit-compass engine golden export \
+  --story-release STORY_ID --sample 200 --format review \
+  --seed 13 --output data/review/pairs.jsonl
+```
+
+`--format review` writes one JSONL record per `decision='review'` pair with everything needed to
+judge without opening the database. Sampling is deterministic for a given `--seed`, keeps at
+least half the batch inside the 0.45–0.65 window and reserves a quota for `voices ↔ mainstream`
+pairs — the cross-source cases the product exists for and the rarest in a random draw.
+
+Import a labelled batch with its source. Priority when sources disagree is
+`human > claude_review > qwen_review > auto_label`; the source is the prefix of `note`, so a
+rationale survives alongside it:
+
+```bash
+reddit-compass engine golden import \
+  --input data/review/labels.jsonl \
+  --story-release STORY_ID \
+  --note claude_review
+```
+
+Trusting a model labeller requires measuring it rather than assuming it. A small human anchor
+(~30 pairs, ~15 minutes) is enough to tell 0.95 agreement from 0.6; the measured
+human↔claude agreement on this corpus was **96.6%** (28/29), which is what makes the 200-pair
+calibration set usable. `engine stories eval` prints `label_source`, `label_composition` and
+`labels_are_circular` so a release never silently reports precision measured against its own rules.
 
 Production Story gate:
 

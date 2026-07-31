@@ -170,13 +170,19 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
   │                                                                  │
   │  GET /health              GET /api/v1/posts?date=&subreddit=     │
   │  GET /today               GET /api/v1/signals?date=              │
-  │  GET /radar               GET /api/v1/stats                      │
-  │  GET /runs/{date}/radar   GET /api/v2/briefings/{date}           │
-  │  GET /explore             GET /api/v2/stories                    │
+  │  GET /news                GET /api/v1/stats                      │
+  │  GET /trends              GET /api/v2/briefings/{date}           │
+  │  GET /pulse               GET /api/v2/stories                    │
   │  GET /stories/{id}        GET /api/v2/runs                       │
-  │  GET /runs                PATCH /api/v2/stories/{id}/research    │
-  │  GET /docs (Swagger)      POST /oauth/token                      │
-  │  GET /legacy/dashboard    GET /api/v1/snapshots                  │
+  │  GET /trends/{id}         PATCH /api/v2/stories/{id}/research    │
+  │  GET /runs/{date}/radar   GET /api/v1/snapshots                  │
+  │  GET /runs · /engine      POST /oauth/token                      │
+  │  GET /docs (Swagger)                                             │
+  │                                                                  │
+  │  UI-фрагменты для догрузки (HTML, не JSON):                      │
+  │  GET /ui/today-changes    GET /ui/today-reading                  │
+  │                                                                  │
+  │  Редиректы: /explore → /news · /dashboard → /today               │
   │                                                                  │
   │  Auth: OAuth2 client credentials → JWT (1h)                      │
   │  CORS: cheap-intelligence.vercel.app (Practicum)                 │
@@ -199,11 +205,21 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 
 ### UI drill-down contract
 
-- Radar chips are navigational, not decorative: stable themes, emerging themes and pain points link to `/explore`.
+- Navigation is four sections: **Сегодня · Лента · Тренды · Reddit Pulse**. Everything else is
+  reachable through card links and `/runs`.
+- Radar chips are navigational, not decorative: stable themes, emerging themes and pain points
+  link into `/news` with the filter applied.
 - Drill-down links preserve run context: `date` + `profile`.
 - Theme filters use `theme=<theme_id>`; candidate theme filters use `candidate_theme=<candidate label>`; pain filters use `pain=<normalized pain label>`.
-- `/explore` and `/api/v2/stories` resolve `theme`, `candidate_theme` and `pain` through
+- `/news` and `/api/v2/stories` resolve `theme`, `candidate_theme` and `pain` through
   `story_items → item_signals`, so the UI returns deduplicated stories, not raw item duplicates.
+- **Every page reads only a published release.** With no publication a page says so and points at
+  `engine cycle`; there is no second projection built straight from `compass.db`. The legacy
+  dashboard, its routes and its templates were removed — they showed a picture that never passed
+  the quality gates.
+- Card markup lives in Jinja only. `/ui/today-changes` and `/ui/today-reading` return HTML
+  fragments rendered from the same partials as the first page, so the browser appends markup
+  instead of rebuilding it in JavaScript.
 
 ### Story/Trend Engine contract
 
@@ -217,7 +233,26 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 - Если для Pulse указан `--story-release`, engine связывает Reddit-сигналы с уже построенными
   stories и считает mainstream coverage из `release_items`; если истории нет, novelty становится
   нейтральной, а UI не должен выдавать это за подтверждённую динамику.
-- `broad`/`ai-native` публикуются только после Golden Set gates и ручного решения.
+- **Пороги плотного сходства — свойство модели эмбеддингов, а не глобальные константы.**
+  У E5 медиана косинуса на несвязанных парах ≈ 0.78, у `potion-base-8M` ≈ 0.13: один набор
+  чисел на обе модели молча отключает слияние на одной из них. Профили лежат в
+  `embeddings.DENSE_THRESHOLD_PROFILES` и подставляются в `params` релиза **до** вычисления
+  `params_hash`, поэтому релиз воспроизводим даже после изменения таблицы. Новая модель
+  калибруется без разметки: `engine calibrate` переносит не абсолютные значения, а квантили
+  распределения на заведомо несвязанных парах.
+- **Сборка групп ограничена медоидом** (`medoid_min_score`, дефолт 0.55): каждый член группы
+  обязан иметь прямое ребро к медоиду. Порог — параметр релиза; жёстко зашитое 0.72 лежало
+  выше всей серой зоны и обесточивало слой ревью целиком.
+- **Приоритет источников меток**: `human > claude_review > qwen_review > auto_label`. Авто-метки
+  на парах, которые лестница правил уже решила детерминированно, исключаются и из обучения,
+  и из оценки: они пересказывают правило, а не судят независимо. Метрики релиза несут
+  `label_source` и `labels_are_circular`, а label-гейт требует не-циркулярных меток.
+- Дефолтный метод трендов совпадает с прод-путём (`embedding_v2`): расхождение давало результат,
+  не проходящий полы качества, которые ночной прогон проходит.
+- `broad`/`ai-native` публикуются только после quality gates и ручного решения. Гейт пропускает
+  релиз либо по label-гейтам, либо по абсолютным полам качества (`quality.QUALITY_FLOORS`),
+  среди которых есть полы **полноты** — иначе система оптимизируется в вырожденное состояние,
+  где не сливается ничего.
 - Publish/rollback атомарно переключают immutable pointer.
 - Старый `cluster_lab.db` и `lab` CLI — compatibility alias на один релиз.
 
@@ -389,7 +424,7 @@ reddit-compass serve                           REST API (FastAPI :8900)
 | Документ | Тема |
 |---|---|
 | [`docs/DATABASE_SCHEMA.md`](docs/DATABASE_SCHEMA.md) | Полная схема SQLite: таблицы, колонки, индексы, примеры запросов |
-| [`docs/PRODUCT_IMPLEMENTATION_PLAN.md`](docs/PRODUCT_IMPLEMENTATION_PLAN.md) | Продуктовый план: модели, ranking, UI, API |
-| [`docs/TRENDWATCHING_DEEP_REVIEW_AND_V2_PLAN.md`](docs/TRENDWATCHING_DEEP_REVIEW_AND_V2_PLAN.md) | Глубокое ревью trendwatching + план V2 |
-| [`docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md) | Реализация broad Radar |
+| [`docs/archive/PRODUCT_IMPLEMENTATION_PLAN.md`](docs/archive/PRODUCT_IMPLEMENTATION_PLAN.md) | Продуктовый план: модели, ranking, UI, API |
+| [`docs/archive/TRENDWATCHING_DEEP_REVIEW_AND_V2_PLAN.md`](docs/archive/TRENDWATCHING_DEEP_REVIEW_AND_V2_PLAN.md) | Глубокое ревью trendwatching + план V2 |
+| [`docs/archive/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/archive/RADAR_TRENDWATCHING_IMPLEMENTATION.md) | Реализация broad Radar |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog |

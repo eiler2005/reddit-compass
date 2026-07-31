@@ -197,7 +197,7 @@ climate/energy/infrastructure, security/privacy, and `other`.
 | **Developers** | Hacker News | Algolia/search snapshots |
 | **Product pulse** | ProductHunt | GraphQL/feed |
 
-Implementation note: [`docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/RADAR_TRENDWATCHING_IMPLEMENTATION.md).
+Implementation note: [`docs/archive/RADAR_TRENDWATCHING_IMPLEMENTATION.md`](docs/archive/RADAR_TRENDWATCHING_IMPLEMENTATION.md).
 Prompt contracts: [`docs/RADAR_PROMPTS.md`](docs/RADAR_PROMPTS.md).
 Full source map: [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md)
 
@@ -363,12 +363,17 @@ Published UI workspaces:
 | **Pulse** | `/pulse` | Reddit-native community signals: percentile внутри саба, velocity, discussion depth, gaps |
 | **Radar** | `/radar` → `/runs/{date}/radar` | Полный аналитический workspace: landscape, shelves, coverage, project panels |
 | **Project Lens** | `/projects/rbc`, `/projects/book` | Книга/РБК/business поверх опубликованных stories/trends |
-| **Explore** | `/explore` | Legacy/compat search по старой projection |
-| **Story detail** | `/stories/{id}` | Published Engine story evidence; falls back to legacy detail if needed |
+| **Story detail** | `/stories/{id}` | Evidence опубликованного Engine story |
 | **Trend detail** | `/trends/{id}` | Published trend pattern, member stories and evidence |
 | **Runs** | `/runs` | История запусков с реальными counts |
 
-Legacy (один переходный релиз): `/legacy/dashboard`, `/legacy/runs/{date}/radar`
+Навигация — четыре раздела: **Сегодня · Лента · Тренды · Reddit Pulse**. Остальное
+достижимо по прямым ссылкам с карточек и из `/runs`.
+
+Все страницы читают **только опубликованный релиз**. Если публикации нет, страница честно
+говорит об этом и предлагает `engine cycle` — параллельной проекции из сырого `compass.db`
+больше не существует. Старые адреса сохранены редиректами: `/explore` → `/news` (с переносом
+строки запроса), `/dashboard` → `/today`.
 
 ### Versioned Story/Trend Engine
 
@@ -423,10 +428,10 @@ Title → прямой переход на самый значимый исто�
 
 ```
 http://127.0.0.1:8900/today              # утренний бриф
-http://127.0.0.1:8900/radar              # полный Radar
-http://127.0.0.1:8900/explore            # поиск + фильтры
-http://127.0.0.1:8900/explore?date=2026-07-28&profile=broad&pain=security+breach
-http://127.0.0.1:8900/legacy/dashboard   # legacy
+http://127.0.0.1:8900/news               # лента выпуска + фильтры
+http://127.0.0.1:8900/trends             # тренды поверх stories
+http://127.0.0.1:8900/pulse              # Reddit-native сигналы
+http://127.0.0.1:8900/radar              # полный аналитический Radar
 ```
 
 Auth: Basic Auth (credentials in `.env.secrets`), Let's Encrypt TLS.
@@ -462,10 +467,10 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) | Полы качества + регрессионный harness (`engine quality report/check/snapshot`) |
 | [`docs/ENGINE_REVIEW_V3.md`](docs/ENGINE_REVIEW_V3.md) | Ревью Engine v3 + план фаз 1–8 со статусом реализации |
 | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) | Canonical immutable Engine workflow, gates and rollback |
-| [`docs/CLUSTER_LAB.md`](docs/CLUSTER_LAB.md) | Deprecated Cluster Lab compatibility guide |
+| [`docs/archive/CLUSTER_LAB.md`](docs/archive/CLUSTER_LAB.md) | Deprecated Cluster Lab compatibility guide |
 | [`docs/STORY_TREND_CLUSTERING_RESEARCH.md`](docs/STORY_TREND_CLUSTERING_RESEARCH.md) | Research-backed story/trend clustering roadmap |
 | [`docs/COMPETITIVE_ANALYSIS.md`](docs/COMPETITIVE_ANALYSIS.md) | GitHub landscape, Ladder |
-| [`docs/IMPROVEMENTS.md`](docs/IMPROVEMENTS.md) | Ranked improvement plan |
+| [`docs/archive/IMPROVEMENTS.md`](docs/archive/IMPROVEMENTS.md) | Ranked improvement plan |
 | [`CHANGELOG.md`](CHANGELOG.md) | Keep a Changelog |
 | [`SECURITY.md`](SECURITY.md) | Secret handling, scan workflow and incident response |
 | [`docs/SECRET_SCANNING.md`](docs/SECRET_SCANNING.md) | Repo-local scanner rules and placeholders |
