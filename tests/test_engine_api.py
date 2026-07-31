@@ -400,6 +400,32 @@ def test_radar_reads_only_current_publication(engine_client: TestClient) -> None
     assert payload["trend_release_id"] == "trend_test"
     assert payload["history_status"] == "ready"
     assert payload["shelves"]["growing"][0]["trend_id"] == "trend_1"
+    assert payload["candidate_count"] == 1
+    assert payload["confirmed_count"] == 1
+
+
+def test_radar_rubric_uses_member_story_domains_not_broad_trend_array(
+    engine_client: TestClient,
+) -> None:
+    """A broad legacy trend domain array must not make every tab identical."""
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    conn.execute(
+        "UPDATE engine_trends SET domain_ids = ? WHERE trend_release_id = ? AND trend_id = ?",
+        ('["ai_technology", "business_markets", "world_geopolitics"]', "trend_test", "trend_1"),
+    )
+    conn.commit()
+    conn.close()
+
+    ai_response = engine_client.get("/api/v2/radar/2026-07-29?channel=broad&domain=ai_technology")
+    world_response = engine_client.get(
+        "/api/v2/radar/2026-07-29?channel=broad&domain=world_geopolitics"
+    )
+
+    assert ai_response.status_code == 200
+    assert world_response.status_code == 200
+    assert ai_response.json()["shelves"] == {}
+    assert world_response.json()["shelves"]["growing"][0]["trend_id"] == "trend_1"
 
 
 def test_unpublished_engine_pages_show_latest_evaluated_preview(
@@ -415,6 +441,7 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     radar_response = engine_client.get("/api/v2/radar/2026-07-29?channel=broad")
     trends_response = engine_client.get("/api/v2/engine/trends?channel=broad")
     trends_page = engine_client.get("/trends")
+    radar_page = engine_client.get("/runs/2026-07-29/radar?channel=broad")
     today_page = engine_client.get("/today")
     changes_response = engine_client.get("/ui/today-changes?date=2026-07-29")
 
@@ -428,6 +455,10 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     assert trends_page.status_code == 200
     assert "Preview mode" in trends_page.text
     assert "Проверяемый тренд" in trends_page.text
+    assert radar_page.status_code == 200
+    assert "Кандидаты trendwatching" in radar_page.text
+    assert "Кандидатов в release: 1" in radar_page.text
+    assert "pending" in radar_page.text or "confirmed" in radar_page.text
     assert today_page.status_code == 200
     assert changes_response.status_code == 200
     assert "Preview mode" in today_page.text

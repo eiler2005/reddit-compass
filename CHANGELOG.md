@@ -7,6 +7,11 @@
 
 ### Added
 
+- **Radar candidate preview and rubric filtering**: evaluated releases now expose every trend
+  candidate in the analytical Radar with explicit pending/Qwen/confirmed labels. Rubric tabs derive
+  membership from evidence story domains, so an old broad trend label no longer appears unchanged in
+  every category. Production publication remains manual and unchanged.
+
 - **Операционный completion contract**: `collect --from-snapshots` превращает уже собранные
   JSONL в один factual raw run без сети и LLM. Добавлены `docs/COLLECTION_LIFECYCLE.md`,
   version-controlled host-cron и безопасный Reddit-only Mac→VPS handoff: локальный

@@ -387,6 +387,20 @@ Preview before publication:
 - preview is read-only inspection and does not create or move a publication pointer;
 - production `broad`/`ai-native` still require the gates above and manual `engine publish`.
 
+### Evaluated candidates in Radar
+
+Preview Radar deliberately shows **all** rows from the latest evaluated `TrendRelease`, not only
+rows that have already passed the production gate. The UI labels each row as `pending`,
+`qwen_coherent`, `qwen_rejected` or `confirmed` and shows the Qwen decision when one exists. This
+keeps the 19 current candidates available for research while making their non-production status
+explicit; `/today` continues to select only confirmed trends with usable names.
+
+Rubric tabs are evidence-driven. Older trend rows may have an over-broad `domain_ids` array produced
+by an earlier classifier. Radar therefore derives the tab membership from the domains of the trend's
+member stories (the three most frequent domains), falling back to the stored array only when the
+release has no membership rows. Selecting a rubric consequently changes the candidate shelf instead
+of repeating the same all-domain list.
+
 ```bash
 reddit-compass engine publish \
   --story-release STORY_ID \

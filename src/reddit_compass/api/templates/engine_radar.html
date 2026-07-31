@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Published Trend Radar {{ radar.date }} — reddit-compass{% endblock %}
+{% block title %}Trend Radar {{ radar.date }} — reddit-compass{% endblock %}
 
 {% block content %}
 <div class="container">
@@ -96,7 +96,16 @@
     {% endif %}
 
     <section class="section">
+        {% if radar.preview %}
+        <h2>Кандидаты trendwatching</h2>
+        <p class="section-note">
+            Кандидатов в release: {{ radar.candidate_count }}. Они доступны для
+            исследования, но не считаются production-трендами до ручного review и публикации.
+            Подтверждено: {{ radar.confirmed_count }}.
+        </p>
+        {% else %}
         <h2>Опубликованные тренды</h2>
+        {% endif %}
         {% if radar.shelves %}
         {% for lifecycle, trends in radar.shelves.items() %}
         <h3>{{ lifecycle }}</h3>
@@ -105,6 +114,10 @@
             <article class="story-card">
                 <div class="story-meta">
                     <span class="direction-badge">{{ trend.lifecycle }}</span>
+                    {% if radar.preview %}
+                    <span class="direction-badge">{{ trend.candidate_status }}</span>
+                    {% if trend.llm_decision %}<span>{{ trend.llm_decision }}</span>{% endif %}
+                    {% endif %}
                     <span>{{ "%.0f"|format(trend.confidence * 100) }}% confidence</span>
                 </div>
                 <h3><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h3>
@@ -118,7 +131,11 @@
         </div>
         {% endfor %}
         {% else %}
+        {% if radar.preview %}
+        <p class="section-note">В evaluated release нет кандидатов для выбранной рубрики.</p>
+        {% else %}
         <p class="section-note">В этой опубликованной версии нет принятых trends.</p>
+        {% endif %}
         {% endif %}
     </section>
 

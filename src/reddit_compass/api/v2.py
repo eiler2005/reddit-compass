@@ -174,6 +174,8 @@ class RadarOut(BaseModel):
     published_at: str = ""
     serving_previous_publication: bool = False
     preview: bool = False
+    candidate_count: int = 0
+    confirmed_count: int = 0
 
 
 class NewsItemOut(BaseModel):
@@ -819,6 +821,47 @@ def _trend_stories(
     return [_published_story_out(row) for row in rows]
 
 
+def _trend_domains_for_radar(
+    conn: sqlite3.Connection,
+    *,
+    trend_release_id: str,
+    story_release_id: str,
+    trend_id: str,
+    fallback: list[str],
+) -> list[str]:
+    """Return a small, evidence-derived domain set for Radar filtering.
+
+    Stored trend domain arrays are intentionally broad in older releases and
+    can contain nearly the whole taxonomy.  Radar needs the domains actually
+    represented by the member stories, otherwise every rubric tab renders the
+    same candidates.  Keep the three most frequent story domains and fall
+    back to the stored value when the release has no membership rows.
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT s.domain_ids
+            FROM engine_trend_stories AS ts
+            JOIN engine_stories AS s
+              ON s.story_release_id = ?
+             AND s.story_id = ts.story_id
+            WHERE ts.trend_release_id = ?
+              AND ts.trend_id = ?
+            """,
+            (story_release_id, trend_release_id, trend_id),
+        ).fetchall()
+    except sqlite3.Error:
+        return fallback or ["other"]
+
+    counts: dict[str, int] = {}
+    for row in rows:
+        for domain_id in _json_list(row["domain_ids"], fallback=["other"]):
+            counts[domain_id] = counts.get(domain_id, 0) + 1
+    if not counts:
+        return fallback or ["other"]
+    return [domain_id for domain_id, _ in sorted(counts.items(), key=lambda p: (-p[1], p[0]))[:3]]
+
+
 def _engine_trends(
     conn: sqlite3.Connection,
     *,
@@ -1083,12 +1126,64 @@ def _engine_radar(
         """,
         (trend_release.trend_release_id,),
     ).fetchall()
+    candidate_count = len(trend_rows)
+    confirmed_count = sum(
+        1
+        for row in trend_rows
+        if str(_row_value(row, "review_status", "pending") or "pending")
+        in {"confirmed", "accepted"}
+    )
+
+    # A trend release can have several Qwen reviews over its lifetime.  Use
+    # the newest review only, but keep it separate from ``review_status``:
+    # evaluated candidates are useful in preview even when they are not yet
+    # accepted for production publication.
+    trend_reviews: dict[str, dict[str, Any]] = {}
+    try:
+        review_rows = conn.execute(
+            """
+            SELECT target_id, decision, valid, created_at, review_id
+            FROM llm_reviews
+            WHERE target_kind = 'trend'
+            ORDER BY created_at DESC, review_id DESC
+            """
+        ).fetchall()
+        for review_row in review_rows:
+            target_id = str(review_row["target_id"])
+            if target_id not in trend_reviews:
+                trend_reviews[target_id] = {
+                    "decision": str(review_row["decision"] or ""),
+                    "valid": bool(review_row["valid"]),
+                }
+    except sqlite3.Error:
+        # Older engine databases do not have the review table yet.  The
+        # candidate view remains usable without the optional Qwen metadata.
+        pass
+
     shelves: dict[str, list[dict[str, Any]]] = {}
     for row in trend_rows:
-        domain_ids = _json_list(row["domain_ids"], fallback=["other"])
+        stored_domain_ids = _json_list(row["domain_ids"], fallback=["other"])
+        domain_ids = _trend_domains_for_radar(
+            conn,
+            trend_release_id=trend_release.trend_release_id,
+            story_release_id=story_release.story_release_id,
+            trend_id=str(row["trend_id"]),
+            fallback=stored_domain_ids,
+        )
         if selected_domain and selected_domain not in domain_ids:
             continue
         lifecycle = str(row["lifecycle"] or "insufficient_history")
+        review_status = str(_row_value(row, "review_status", "pending") or "pending")
+        review = trend_reviews.get(str(row["trend_id"]), {})
+        llm_decision = str(review.get("decision") or "")
+        if review_status in {"confirmed", "accepted"}:
+            candidate_status = "confirmed"
+        elif review.get("valid") and llm_decision == "coherent_trend":
+            candidate_status = "qwen_coherent"
+        elif review.get("valid") and llm_decision == "reject":
+            candidate_status = "qwen_rejected"
+        else:
+            candidate_status = "pending"
         shelves.setdefault(lifecycle, []).append(
             {
                 "trend_id": row["trend_id"],
@@ -1105,7 +1200,10 @@ def _engine_radar(
                 "project_scores": _json_int_dict(row["project_scores"]),
                 "evidence_story_ids": _json_list(row["evidence_story_ids"]),
                 "counterpoints": _json_list(row["counterpoints"]),
-                "review_status": dict(row).get("review_status", "legacy"),
+                "review_status": review_status,
+                "candidate_status": candidate_status,
+                "llm_decision": llm_decision,
+                "llm_valid": bool(review.get("valid")),
             }
         )
 
@@ -1160,7 +1258,7 @@ def _engine_radar(
         profile=profile,
         mode=mode,
         channel=channel,
-        selected_domain=domain,
+        selected_domain=selected_domain,
         run={
             "run_id": collection_run_id,
             "status": data_release.input_status,
@@ -1202,6 +1300,8 @@ def _engine_radar(
         published_at=publication.created_at,
         serving_previous_publication=serving_previous,
         preview=preview,
+        candidate_count=candidate_count,
+        confirmed_count=confirmed_count,
     )
 
 
