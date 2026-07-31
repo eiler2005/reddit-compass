@@ -129,6 +129,23 @@ QUALITY_FLOORS: dict[str, dict[str, Any]] = {
         "value": 35.0,
         "desc": "Pulse signals classified as other, %",
     },
+    # Полы полноты: нормированы на 1000 items, чтобы релизы разного размера
+    # были сравнимы. Ориентир — состояние v3 (122 multi/1k, 45 cross/1k) с запасом ~25%.
+    "stories_multi_per_1k": {
+        "op": "min",
+        "value": 90,
+        "desc": "multi-item stories per 1000 items",
+    },
+    "stories_cross_source_per_1k": {
+        "op": "min",
+        "value": 35,
+        "desc": "cross-source stories per 1000 items",
+    },
+    "stories_compression": {
+        "op": "max",
+        "value": 0.85,
+        "desc": "story/item ratio (lower = more merging)",
+    },
 }
 
 
@@ -202,6 +219,8 @@ def compute_quality(
         "stories_overmerge_ge5": overmerge_ge5,
         "stories_overmerge_ge8": overmerge_ge8,
         "stories_compression": round(total / n, 4) if n else 0.0,
+        "stories_multi_per_1k": round(1000 * multi / n, 1) if n else 0.0,
+        "stories_cross_source_per_1k": round(1000 * cross / n, 1) if n else 0.0,
         "taxonomy_items": n,
         "taxonomy_ai_tech_share": round(100 * dom.get("ai_technology", 0) / n, 2) if n else 0.0,
         "taxonomy_other_share": round(100 * dom.get("other", 0) / n, 2) if n else 0.0,
@@ -280,6 +299,8 @@ REGRESSION_METRICS: dict[str, float] = {
     "stories_overmerge_ge5": 0,
     "stories_overmerge_ge8": 0,
     "stories_cross_source": 10,  # падение кросс-источниковых историй сверх допуска
+    "stories_multi_per_1k": 20,  # падение multi-item/1k сверх допуска
+    "stories_cross_source_per_1k": 10,  # падение cross-source/1k сверх допуска
     "taxonomy_ai_tech_share": 5,
     "taxonomy_other_share": 5,
     "trends_bad_name_count": 0,
@@ -289,20 +310,19 @@ REGRESSION_METRICS: dict[str, float] = {
 
 def evaluate_regressions(metrics: dict[str, Any], baseline: dict[str, Any]) -> list[dict[str, Any]]:
     """Сравнивает метрики со снимком: для 'меньше=лучше' рост сверх допуска = регрессия;
-    для cross_source — падение сверх допуска."""
+    для cross_source и per-1k полноты — падение сверх допуска."""
 
+    _lower_is_regression = frozenset(
+        {"stories_cross_source", "stories_multi_per_1k", "stories_cross_source_per_1k"}
+    )
     out: list[dict[str, Any]] = []
     for metric, tol in REGRESSION_METRICS.items():
         if metric not in metrics or metric not in baseline:
             continue
         cur = float(metrics[metric])
         base = float(baseline[metric])
-        if metric == "stories_cross_source":
-            regressed = cur < base - tol
-            delta = round(cur - base, 3)
-        else:
-            regressed = cur > base + tol
-            delta = round(cur - base, 3)
+        regressed = cur < base - tol if metric in _lower_is_regression else cur > base + tol
+        delta = round(cur - base, 3)
         out.append(
             {
                 "metric": metric,
