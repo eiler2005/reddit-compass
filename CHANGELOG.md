@@ -7,6 +7,13 @@
 
 ### Added
 
+- **Продукт оживлён на проде (2026-07-30)**: `engine cycle` (embedding_v2 + model2vec)
+  прогнан на свежих данных 24–30, **все полы качества зелёные** (overmerge 0, тренды без
+  голых имён/дублей, таксономия сбалансирована, Pulse other 13.9%), канал `broad`
+  опубликован — `/today` больше не preview. Reddit собран с домашнего IP и смерджен в corpus
+  точечно по provider (без перезаписи VPS-БД; `scripts/ingest_snapshot_day.py` /
+  `scripts/merge_reddit_corpus.py`). Ночной cron `16:00 UTC` запускает цикл с Qwen-дообучением серой
+  зоны (`--review-limit 80`). Эталон качества: `config/quality_baselines.json`.
 - **Quality gates (допустимый уровень качества + защита от регрессий)**: `intelligence/quality.py`
   считает метрики по immutable-релизу (overmerge, баланс рубрик новой таксономии, качество
   имён трендов, доля `other` в Pulse) и проверяет их против абсолютных полов `QUALITY_FLOORS`

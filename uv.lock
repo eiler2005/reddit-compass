@@ -1177,6 +1177,23 @@ wheels = [
 ]
 
 [[package]]
+name = "model2vec"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "joblib" },
+    { name = "numpy" },
+    { name = "safetensors" },
+    { name = "tokenizers" },
+    { name = "tqdm" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/54/c8/8efa9e52d210957b02b1c711f4e3b88d1e9eb5485d1869aaa9833d0cd1c5/model2vec-0.8.2.tar.gz", hash = "sha256:4e88d1a5eb2136475ebd90505689046f61caf25c69371c331f21c6499637c110", size = 4532469, upload-time = "2026-05-29T12:01:21.035Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/a1/38101b223fb6cea0f2e401fbacdf4f6121628d45dc9329b255d7ac843234/model2vec-0.8.2-py3-none-any.whl", hash = "sha256:f0ecfe994316e401dca583fbf6dd22079d308c05717dd36d40bff60f265431cf", size = 54749, upload-time = "2026-05-29T12:01:19.411Z" },
+]
+
+[[package]]
 name = "mpmath"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2158,6 +2175,10 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+embed = [
+    { name = "model2vec" },
+    { name = "numpy" },
+]
 engine = [
     { name = "numpy" },
     { name = "sentence-transformers" },
@@ -2179,7 +2200,9 @@ requires-dist = [
     { name = "aiohttp", specifier = ">=3.9,<4" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "jinja2", specifier = ">=3.1,<4" },
+    { name = "model2vec", marker = "extra == 'embed'", specifier = ">=0.3,<1" },
     { name = "numpy", specifier = ">=2,<3" },
+    { name = "numpy", marker = "extra == 'embed'", specifier = ">=2,<3" },
     { name = "numpy", marker = "extra == 'engine'", specifier = ">=2,<3" },
     { name = "playwright", specifier = ">=1.40,<2" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3,<4" },
@@ -2189,7 +2212,7 @@ requires-dist = [
     { name = "spacy", marker = "extra == 'engine'", specifier = ">=3.8,<4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
-provides-extras = ["engine"]
+provides-extras = ["engine", "embed"]
 
 [package.metadata.requires-dev]
 dev = [
