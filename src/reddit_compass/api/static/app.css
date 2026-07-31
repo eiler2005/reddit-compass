@@ -192,7 +192,7 @@ h3 {
     backdrop-filter: blur(20px) saturate(1.5);
     -webkit-backdrop-filter: blur(20px) saturate(1.5);
     border-bottom: 1px solid var(--border);
-    padding: 0.75rem 1.5rem;
+    padding: 0.6rem 1.5rem 0.4rem;
 }
 
 .nav {
@@ -378,6 +378,41 @@ h3 {
     font-family: var(--font-mono);
 }
 
+.release-info-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    padding: 0.5rem 1.5rem;
+    margin: -1.5rem 0 2rem;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+
+.release-tag {
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--accent-2-bright);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.65rem;
+}
+
+.release-id {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    background: var(--surface);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+}
+
+.release-sep {
+    color: var(--text-muted);
+    opacity: 0.4;
+}
+
 .profile {
     margin-left: auto;
     font-size: 0.75rem;
@@ -418,6 +453,12 @@ h3 {
     background: var(--error-dim);
     color: var(--error);
     border: 1px solid color-mix(in srgb, var(--error) 25%, transparent);
+}
+
+.status-pending {
+    background: color-mix(in srgb, var(--accent-2) 15%, transparent);
+    color: var(--accent-2-bright);
+    border: 1px solid color-mix(in srgb, var(--accent-2) 30%, transparent);
 }
 
 .status-running, .status-skipped, .status-not_configured {
@@ -1508,15 +1549,73 @@ a.story-card {
 /* ─── Footer ────────────────────────────────────────────────────────────── */
 
 .footer {
-    text-align: center;
-    padding: 2.5rem;
-    color: var(--text-muted);
-    font-size: 0.75rem;
+    padding: 2.5rem 1.5rem;
     border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg) 95%, var(--accent) 5%);
+}
+
+.footer-inner {
+    max-width: 1320px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.footer-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--text);
+}
+
+.footer-desc {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+    line-height: 1.6;
+    max-width: 720px;
+    margin: 0;
+}
+
+.footer-meta {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin: 0;
 }
 
 .footer a { color: var(--text-muted); text-decoration: none; }
 .footer a:hover { color: var(--accent-2-bright); }
+
+/* ─── Secondary nav (under main header) ─────────────────────────────────── */
+
+.nav-secondary {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    max-width: 1320px;
+    margin: 0 auto;
+    padding: 0.35rem 0 0;
+    border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+}
+
+.nav-secondary a {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 0.25rem 0.6rem;
+    border-radius: 4px;
+    letter-spacing: 0.02em;
+    transition: color 0.15s, background 0.15s;
+}
+
+.nav-secondary a:hover {
+    color: var(--accent-2-bright);
+    background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+}
 
 /* ─── Focus & accessibility ─────────────────────────────────────────────── */
 

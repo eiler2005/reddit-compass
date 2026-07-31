@@ -110,11 +110,13 @@ async def collect_sources(
         all_items.extend(items)
 
     finished_at = now_iso()
-    status = (
-        "complete"
-        if source_results and all(result.status in {"ok", "empty"} for result in source_results)
-        else "partial"
-    )
+    _statuses = {r.status for r in source_results}
+    if source_results and _statuses <= {"ok", "empty"}:
+        status = "complete"
+    elif "pending" in _statuses:
+        status = "pending"
+    else:
+        status = "partial"
     persist_collection(
         conn,
         run_id=run_id,
@@ -152,9 +154,10 @@ def finalize_snapshot_collection(
 
     Source adapters are intentionally *not* invoked here.  This is the hand-off
     used when Reddit has been fetched from the Mac and the remaining adapters
-    have written their JSONL artifacts on the VPS.  A missing artifact is an
-    explicit error and therefore makes the resulting run ``partial``; stale or
-    absent input can never silently turn into a completed collection.
+    have written their JSONL artifacts on the VPS.  A missing artifact is
+    marked ``pending`` (not ``error``) so the run stays ``pending`` until the
+    artifact arrives and finalization is re-run; stale or unreadable input
+    is still an explicit ``error`` making the run ``partial``.
     """
 
     del config  # Kept in the public signature alongside ``collect_sources``.
@@ -179,9 +182,9 @@ def finalize_snapshot_collection(
             source_results.append(
                 SourceResult(
                     source_id=source_id,
-                    status="error",
+                    status="pending",
                     error_code="snapshot_missing",
-                    message=f"Missing snapshot artifact: {filename}",
+                    message=f"Waiting for snapshot artifact: {filename}",
                 )
             )
             continue
@@ -208,11 +211,13 @@ def finalize_snapshot_collection(
         )
 
     finished_at = now_iso()
-    status = (
-        "complete"
-        if source_results and all(result.status in {"ok", "empty"} for result in source_results)
-        else "partial"
-    )
+    _statuses = {r.status for r in source_results}
+    if source_results and _statuses <= {"ok", "empty"}:
+        status = "complete"
+    elif "pending" in _statuses:
+        status = "pending"
+    else:
+        status = "partial"
     from .db import get_db
 
     conn = get_db(db_path)

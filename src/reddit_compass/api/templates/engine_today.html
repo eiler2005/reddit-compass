@@ -23,6 +23,16 @@
             {{ radar.engine_version }} · {{ dashboard.release_window }}
         </span>
     </div>
+    <div class="release-info-bar">
+        <span class="release-tag">Data</span>
+        <code class="release-id">{{ radar.data_release_id }}</code>
+        <span class="release-sep">·</span>
+        <span class="release-tag">Stories</span>
+        <code class="release-id">{{ radar.story_release_id }}</code>
+        <span class="release-sep">·</span>
+        <span class="release-tag">Trends</span>
+        <code class="release-id">{{ radar.trend_release_id }}</code>
+    </div>
 
     <section class="section today-overview">
         <div class="kpi-grid today-kpis" aria-label="Сводка выпуска">

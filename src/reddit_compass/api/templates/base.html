@@ -27,12 +27,7 @@
             <span class="nav-spacer"></span>
             <button class="theme-toggle" type="button" aria-label="Переключить тему">☀️</button>
         </nav>
-    </header>
-    <main class="main">
-        {% block content %}{% endblock %}
-    </main>
-    <footer class="footer">
-        <nav class="footer-nav" aria-label="Служебная навигация">
+        <nav class="nav-secondary" aria-label="Служебная навигация">
             <a href="/runs">Запуски</a>
             <a href="/engine">Engine</a>
             <a href="/projects/rbc">Проекты</a>
@@ -40,7 +35,28 @@
             <a href="/explore">Обзор</a>
             <a href="/radar">Radar</a>
         </nav>
-        <p>reddit-compass — трендовый радар</p>
+    </header>
+    <main class="main">
+        {% block content %}{% endblock %}
+    </main>
+    <footer class="footer">
+        <div class="footer-inner">
+            <div class="footer-brand">
+                <span class="brand-mark" aria-hidden="true"></span>
+                <strong>reddit-compass</strong>
+            </div>
+            <p class="footer-desc">
+                Автономный трендовый радар: собирает голос людей (Reddit), разработчиков (HN),
+                медиа (BBC, Guardian, FT, Reuters) и бизнес-сигналы (ProductHunt) —
+                и превращает в управляемые сюжеты, тренды и рекомендации для книги, колонок РБК
+                и бизнес-решений. Config-driven, read-only, без аккаунтов.
+            </p>
+            <p class="footer-meta">
+                <a href="https://github.com/eiler2005/reddit-compass">GitHub</a> ·
+                <a href="/docs">API Docs</a> ·
+                <a href="/runs">Статус запусков</a>
+            </p>
+        </div>
     </footer>
     <script src="/static/app.js"></script>
 </body>

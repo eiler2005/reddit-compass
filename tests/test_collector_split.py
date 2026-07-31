@@ -113,7 +113,7 @@ def test_finalize_snapshot_collection_creates_one_complete_raw_run(tmp_path: Pat
     }
 
 
-def test_finalize_snapshot_collection_marks_missing_artifact_partial(tmp_path: Path) -> None:
+def test_finalize_snapshot_collection_marks_missing_artifact_pending(tmp_path: Path) -> None:
     date = "2026-07-30"
     snapshot_dir = tmp_path / "snapshots" / date
     write_posts_jsonl([_legacy_card("reddit-post", date)], snapshot_dir / "posts.jsonl")
@@ -127,7 +127,7 @@ def test_finalize_snapshot_collection_marks_missing_artifact_partial(tmp_path: P
         snapshot_date=date,
     )
 
-    assert result.status == "partial"
+    assert result.status == "pending"
     assert [source.error_code for source in result.source_results] == [None, "snapshot_missing"]
 
 
