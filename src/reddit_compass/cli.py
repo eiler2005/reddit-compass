@@ -18,8 +18,10 @@ import json
 import logging
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from .config import DEFAULT_HARVESTS_DIR, DEFAULT_PROFILE, DEFAULT_SNAPSHOTS_DIR, MonitorConfig
 from .detect_virality import detect_virality
@@ -604,6 +606,51 @@ def _engine_review_requested(args: argparse.Namespace) -> bool:
     return int(args.review_limit) > 0 or int(args.trend_review_limit) > 0
 
 
+async def _review_trend_jobs(
+    jobs: list[dict[str, Any]],
+    *,
+    model: str,
+    review_runner: Callable[[str, str], Awaitable[str]],
+    store_response: Callable[..., dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Review a bounded batch without letting one Qwen failure abort it.
+
+    A transport timeout is deliberately not persisted as an ``invalid`` LLM
+    decision: invalid answers are cacheable, while a transient provider error
+    must remain eligible for a later retry.
+    """
+    results: list[dict[str, Any]] = []
+    errors: list[str] = []
+    for job in jobs:
+        target_id = str(job["target_id"])
+        try:
+            raw_response = await review_runner(str(job["prompt"]), model)
+        except Exception as exc:  # bounded optional review; retain the batch
+            error = exc.__class__.__name__
+            errors.append(f"{target_id}:{error}")
+            logger.warning("Trend review failed for %s: %s", target_id, error)
+            results.append(
+                {
+                    "target_id": target_id,
+                    "decision": "error",
+                    "valid": False,
+                    "error": error,
+                }
+            )
+            continue
+        results.append(
+            store_response(
+                target_id=target_id,
+                input_hash=str(job["input_hash"]),
+                raw_response=raw_response,
+                allowed_story_ids={str(story_id) for story_id in job["story_ids"]},
+                model=model,
+                prompt_version=str(job["prompt_version"]),
+            )
+        )
+    return results, errors
+
+
 async def _cmd_engine(args: argparse.Namespace) -> None:
     """Versioned Story/Trend Engine; never mutates compass.db."""
     from dataclasses import asdict
@@ -976,28 +1023,21 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     limit=args.limit,
                     model=args.model,
                 )
-                results = []
-                for job in jobs:
-                    raw_response = await call_qwen_json(
-                        str(job["prompt"]),
-                        model=args.model,
-                    )
-                    results.append(
-                        store_trend_review_response(
-                            engine_conn,
-                            target_id=str(job["target_id"]),
-                            input_hash=str(job["input_hash"]),
-                            raw_response=raw_response,
-                            allowed_story_ids={str(story_id) for story_id in job["story_ids"]},
-                            model=args.model,
-                            prompt_version=str(job["prompt_version"]),
-                        )
-                    )
+                results, errors = await _review_trend_jobs(
+                    jobs,
+                    model=args.model,
+                    review_runner=lambda prompt, model: call_qwen_json(prompt, model=model),
+                    store_response=lambda **kwargs: store_trend_review_response(
+                        engine_conn, **kwargs
+                    ),
+                )
                 print(
                     json.dumps(
                         {
                             "trend_release_id": args.trend_release,
                             "reviewed": len(results),
+                            "failed": len(errors),
+                            "errors": errors,
                             "results": results,
                             "next": (
                                 "Run `engine trends propose` again with the same "

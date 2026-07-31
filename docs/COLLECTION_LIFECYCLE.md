@@ -168,6 +168,9 @@ reviewed StoryRelease      # новый immutable attempt в том же cycle
 сохраняется как ошибка attempt и не может зависшим запросом задержать quality/publication stage.
 Этот budget применяется и к `aiohttp` connect/read timeout, а не только к coroutine: закрытый
 провайдером TCP-сокет не должен удерживать Engine за пределами лимита.
+Команда `engine trends review` продолжает следующую bounded-порцию после timeout/error и выводит
+список неуспешных target IDs; временная ошибка не кэшируется как LLM-решение, поэтому кандидат
+можно честно повторить в следующем review attempt.
 
 ### 3.3. Trends и качество
 
