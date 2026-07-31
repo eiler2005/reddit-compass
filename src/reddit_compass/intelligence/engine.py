@@ -60,7 +60,7 @@ from .story_scoring import MergeModel, auto_label_pair, extract_feature_vector, 
 from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
-ENGINE_SCHEMA_VERSION = 6
+ENGINE_SCHEMA_VERSION = 7
 DEFAULT_STORY_METHOD = "hybrid_v2"
 # Дефолт совпадает с прод-путём (`engine cycle`). Раньше библиотека умалчивала
 # `story_graph_v1`, а ночной прогон считал `embedding_v2` — и разница была не
@@ -313,6 +313,13 @@ CREATE TABLE IF NOT EXISTS llm_reviews (
 -- Quality is derived from immutable releases but stored separately, so the
 -- operational Run journal never has to recompute expensive taxonomy metrics
 -- for every historical release during an HTTP request.
+CREATE TABLE IF NOT EXISTS runtime_versions (
+    component   TEXT PRIMARY KEY,
+    version     TEXT NOT NULL,
+    detail_json TEXT NOT NULL DEFAULT '{}',
+    recorded_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS engine_quality_reports (
     data_release_id   TEXT NOT NULL,
     story_release_id  TEXT NOT NULL,
@@ -699,6 +706,54 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
     )
     conn.execute(f"PRAGMA user_version = {ENGINE_SCHEMA_VERSION}")
     conn.commit()
+
+
+def record_runtime_version(
+    conn: sqlite3.Connection,
+    component: str,
+    version: str,
+    detail: dict[str, Any] | None = None,
+) -> None:
+    """Зафиксировать версию компонента в реестре.
+
+    Реестр отвечает на вопрос «что сейчас развёрнуто и на каких данных работает».
+    Отдельные версии существовали и раньше (схемы БД, git SHA релиза, cache-buster
+    статики), но собрать их в одном месте было нельзя, а на VPS код лежит копией
+    без git — там SHA вообще неоткуда взять на лету. Поэтому версии не вычисляются
+    задним числом, а записываются в момент события: деплой пишет код и статику,
+    сбор данных пишет корпус, публикация — то, что видит UI.
+    """
+    conn.execute(
+        """
+        INSERT INTO runtime_versions (component, version, detail_json, recorded_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(component) DO UPDATE SET
+            version = excluded.version,
+            detail_json = excluded.detail_json,
+            recorded_at = excluded.recorded_at
+        """,
+        (component, version, _json(detail or {}), now_iso()),
+    )
+    conn.commit()
+
+
+def load_runtime_versions(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """Реестр версий целиком. Пустой словарь — реестр ещё не заполнялся."""
+    try:
+        rows = conn.execute(
+            "SELECT component, version, detail_json, recorded_at FROM runtime_versions"
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # Старый файл БД без таблицы: отсутствие реестра не должно ронять /version.
+        return {}
+    return {
+        str(row["component"]): {
+            "version": str(row["version"]),
+            "detail": _json_dict(row["detail_json"]),
+            "recorded_at": str(row["recorded_at"]),
+        }
+        for row in rows
+    }
 
 
 def _ensure_engine_column(
@@ -5135,6 +5190,7 @@ def publish_radar(
     trend_release_id: str,
     channel: str = "broad",
     allow_partial: bool = False,
+    force: bool = False,
     signal_release_id: str | None = None,
 ) -> Publication:
     story_release = get_story_release(conn, story_release_id)
@@ -5163,12 +5219,16 @@ def publish_radar(
             )
         if not allow_partial:
             raise ValueError("Partial data release requires allow_partial=True")
-    if channel in {"broad", "ai-native"} and not _release_passes_publication_gate(
-        conn,
-        data_release_id=data_release.release_id,
-        story_release=story_release,
-        trend_release=trend_release,
-        signal_release_id=signal_release_id,
+    if (
+        channel in {"broad", "ai-native"}
+        and not force
+        and not _release_passes_publication_gate(
+            conn,
+            data_release_id=data_release.release_id,
+            story_release=story_release,
+            trend_release=trend_release,
+            signal_release_id=signal_release_id,
+        )
     ):
         raise ValueError(
             "Production channel requires passed Story/Trend publication gates "
@@ -5229,6 +5289,21 @@ def publish_radar(
     except Exception:
         conn.rollback()
         raise
+    # Версия данных, которую видит UI. Пишется здесь, потому что публикация —
+    # единственный момент, когда «что показывается» меняется осознанно.
+    record_runtime_version(
+        conn,
+        "data",
+        publication_id,
+        {
+            "channel": channel,
+            "data_release_id": data_release.release_id,
+            "story_release_id": story_release_id,
+            "trend_release_id": trend_release_id,
+            "item_count": data_release.item_count,
+            "input_status": data_release.input_status,
+        },
+    )
     return Publication(
         publication_id=publication_id,
         channel=channel,

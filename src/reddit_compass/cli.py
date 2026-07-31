@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import logging
+import sqlite3
 import sys
 import time
 from collections.abc import Awaitable, Callable
@@ -539,9 +540,43 @@ def _print_collection_result(result: object) -> None:
     print(f"{'=' * 60}")
 
 
+def _record_corpus_version(result: object) -> None:
+    """Отметить в реестре, какой корпус собран.
+
+    Пишется после сбора, а не при публикации: между ними может пройти день, и без
+    этой записи нельзя отличить «данные старые, потому что не собирали» от
+    «собрали, но не опубликовали». Реестр живёт в trend_engine.db; если его ещё нет,
+    сбор не должен падать из-за учёта версий.
+    """
+    from .collector import CollectionResult
+
+    if not isinstance(result, CollectionResult):
+        return
+    try:
+        from .intelligence.engine import DEFAULT_ENGINE_DB_PATH, engine_db, record_runtime_version
+
+        conn = engine_db(DEFAULT_ENGINE_DB_PATH)
+        try:
+            record_runtime_version(
+                conn,
+                "corpus",
+                result.run_id,
+                {
+                    "status": result.status,
+                    "item_count": len(result.items),
+                    "sources": len(result.source_results),
+                },
+            )
+        finally:
+            conn.close()
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("Не удалось записать версию корпуса в реестр: %s", exc)
+
+
 async def _cmd_collect(args: argparse.Namespace) -> None:
     """Collection-only process: network + raw corpus persistence."""
     result = await _execute_collection(args)
+    _record_corpus_version(result)
     _print_collection_result(result)
 
 
@@ -1610,6 +1645,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 trend_release_id=args.trend_release,
                 channel=args.channel,
                 allow_partial=args.allow_partial,
+                force=getattr(args, "force", False),
             )
             print(json.dumps(asdict(publication), ensure_ascii=False, indent=2))
             return
@@ -1638,6 +1674,49 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         raise SystemExit("Unknown engine command")
     finally:
         engine_conn.close()
+
+
+async def _cmd_version(args: argparse.Namespace) -> None:
+    """Реестр версий: что развёрнуто и на каких данных работает."""
+    from .intelligence.engine import (
+        DEFAULT_ENGINE_DB_PATH,
+        engine_db,
+        open_engine_readonly,
+        record_runtime_version,
+    )
+    from .versioning import (
+        APP_COMPONENT,
+        ASSETS_COMPONENT,
+        app_version,
+        assets_version,
+        build_info,
+        version_report,
+    )
+
+    engine_path = Path(args.engine_db) if args.engine_db else DEFAULT_ENGINE_DB_PATH
+    if args.record:
+        # Пишется в момент деплоя: после него узнать, какой SHA собран, уже неоткуда —
+        # на VPS исходники лежат копией без git.
+        build = build_info()
+        conn = engine_db(engine_path)
+        try:
+            record_runtime_version(
+                conn,
+                APP_COMPONENT,
+                build.get("version", app_version()),
+                {"git_sha": build.get("git_sha", "unknown"), "built_at": build.get("built_at", "")},
+            )
+            record_runtime_version(conn, ASSETS_COMPONENT, assets_version())
+        finally:
+            conn.close()
+
+    reader = open_engine_readonly(engine_path) if engine_path.exists() else None
+    try:
+        report = version_report(engine_conn=reader)
+    finally:
+        if reader is not None:
+            reader.close()
+    print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
 def _cmd_serve_sync(args: argparse.Namespace) -> None:
@@ -2388,6 +2467,11 @@ def build_parser() -> argparse.ArgumentParser:
     engine_publish.add_argument("--trend-release", required=True)
     engine_publish.add_argument("--channel", default="broad")
     engine_publish.add_argument("--allow-partial", action="store_true")
+    engine_publish.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass quality gate checks for production channels",
+    )
 
     engine_rollback = engine_sub.add_parser("rollback", help="Switch channel pointer")
     engine_rollback.add_argument("--channel", default="broad")
@@ -2400,6 +2484,16 @@ def build_parser() -> argparse.ArgumentParser:
     engine_compare.add_argument("--right", required=True)
 
     sub.add_parser("serve", parents=[common], help="Запуск REST API (FastAPI/uvicorn)")
+
+    version_p = sub.add_parser(
+        "version", parents=[common], help="Реестр версий: код, статика, схемы, данные"
+    )
+    version_p.add_argument("--engine-db", default="")
+    version_p.add_argument(
+        "--record",
+        action="store_true",
+        help="Зафиксировать текущие версии кода и статики в реестре (вызывается деплоем)",
+    )
 
     db_p = sub.add_parser("db", parents=[common], help="SQLite: init / stats / rebuild / repair")
     db_p.add_argument(
@@ -2488,6 +2582,7 @@ def main() -> None:
         "run": _cmd_run,
         "engine": _cmd_engine,
         "serve": _cmd_serve,
+        "version": _cmd_version,
         "db": _cmd_db,
         "lab": _cmd_lab,
     }
