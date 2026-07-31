@@ -45,6 +45,12 @@ Ladder / PH       │              │
 | Quality + publish | Допускает готовую версию и атомарно меняет channel pointer | Не копирует и не удаляет старые версии |
 | FastAPI UI | Читает только текущую publication или явный preview | Не управляет сбором и не скрывает partial input |
 
+`rc-api` — намеренно лёгкий read-serving контейнер (512 MB, без Playwright и embedding extra).
+Команды `engine cycle`, Qwen review и embedding materialization всегда запускаются через
+`docker compose run --rm reddit-compass …`: этот collector runtime имеет 1 GB и зависимости
+`.[embed]`. Запуск Engine через `docker exec rc-api` не является supported workflow и может
+перейти на fallback либо быть остановлен лимитом памяти.
+
 Это разделение нужно, чтобы алгоритм кластеризации можно было безопасно менять на старой
 базе: новая гипотеза создаёт новый `StoryRelease`, а не full rebuild и не потерю исходников.
 

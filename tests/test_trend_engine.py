@@ -449,6 +449,38 @@ def test_release_embeddings_can_be_loaded_for_selected_items_only(tmp_path: Path
     )
 
 
+def test_release_embedding_cache_reuses_vectors_without_empty_encode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    cache_release_embeddings(
+        engine,
+        data_release_id=data_release.release_id,
+        model_name="lexical-hash-v1",
+    )
+
+    def unexpected_encode(*_args: object, **_kwargs: object) -> list[list[float]]:
+        pytest.fail("existing hashes must not invoke the embedding backend with an empty batch")
+
+    monkeypatch.setattr("reddit_compass.intelligence.engine.encode_passages", unexpected_encode)
+    cached = cache_release_embeddings(
+        engine,
+        data_release_id=data_release.release_id,
+        model_name="lexical-hash-v1",
+    )
+
+    assert cached["new_vector_count"] == 0
+    assert cached["cached_vector_count"] == cached["item_count"]
+
+
 def test_engine_diagnose_reports_undermerge_and_next_commands(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)

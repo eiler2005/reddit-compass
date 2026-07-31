@@ -1218,10 +1218,19 @@ def cache_release_embeddings(
     }
     missing_hashes = sorted(set(input_hashes.values()) - existing)
     text_by_hash = {input_hashes[item_id]: text for item_id, text in inputs.items()}
-    vectors = encode_passages(
-        [text_by_hash[input_hash] for input_hash in missing_hashes],
-        model_name=model_name,
-        batch_size=batch_size,
+    # Embedding vectors are global cache entries while item refs are release
+    # specific.  A later DataRelease often has no new text hashes, but still
+    # needs its refs written below.  In that case do not call a backend with an
+    # empty batch: model2vec delegates to NumPy and raises ``need at least one
+    # array to concatenate`` for ``encode([])``.
+    vectors = (
+        encode_passages(
+            [text_by_hash[input_hash] for input_hash in missing_hashes],
+            model_name=model_name,
+            batch_size=batch_size,
+        )
+        if missing_hashes
+        else []
     )
     if len(vectors) != len(missing_hashes):
         raise ValueError("Embedding model returned an unexpected vector count")
