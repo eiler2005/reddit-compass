@@ -96,11 +96,11 @@
     {% endif %}
 
     <section class="section">
-        {% if radar.preview %}
+        {% if radar.preview or radar.candidate_count > radar.confirmed_count %}
         <h2>Кандидаты trendwatching</h2>
         <p class="section-note">
             Кандидатов в release: {{ radar.candidate_count }}. Они доступны для
-            исследования, но не считаются production-трендами до ручного review и публикации.
+            исследования, но не считаются подтверждёнными production-трендами до ручного review.
             Подтверждено: {{ radar.confirmed_count }}.
         </p>
         {% else %}
@@ -114,7 +114,7 @@
             <article class="story-card">
                 <div class="story-meta">
                     <span class="direction-badge">{{ trend.lifecycle }}</span>
-                    {% if radar.preview %}
+                    {% if radar.preview or radar.candidate_count > radar.confirmed_count %}
                     <span class="direction-badge">{{ trend.candidate_status }}</span>
                     {% if trend.llm_decision %}<span>{{ trend.llm_decision }}</span>{% endif %}
                     {% endif %}

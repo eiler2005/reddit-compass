@@ -389,8 +389,9 @@ Preview before publication:
 
 ### Evaluated candidates in Radar
 
-Preview Radar deliberately shows **all** rows from the latest evaluated `TrendRelease`, not only
-rows that have already passed the production gate. The UI labels each row as `pending`,
+Radar deliberately shows **all** rows from the served `TrendRelease`, not only rows that have
+already passed the production gate. This is especially important in preview, but also protects the
+UI when an older publication contains pending rows. The UI labels each row as `pending`,
 `qwen_coherent`, `qwen_rejected` or `confirmed` and shows the Qwen decision when one exists. This
 keeps the 19 current candidates available for research while making their non-production status
 explicit; `/today` continues to select only confirmed trends with usable names.

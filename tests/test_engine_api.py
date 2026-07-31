@@ -428,6 +428,25 @@ def test_radar_rubric_uses_member_story_domains_not_broad_trend_array(
     assert world_response.json()["shelves"]["growing"][0]["trend_id"] == "trend_1"
 
 
+def test_radar_labels_published_pending_rows_as_candidates(
+    engine_client: TestClient,
+) -> None:
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    conn.execute(
+        "UPDATE engine_trends SET review_status = 'pending' WHERE trend_release_id = ?",
+        ("trend_test",),
+    )
+    conn.commit()
+    conn.close()
+
+    response = engine_client.get("/runs/2026-07-29/radar?channel=broad")
+
+    assert response.status_code == 200
+    assert "Кандидаты trendwatching" in response.text
+    assert "Подтверждено: 0" in response.text
+
+
 def test_unpublished_engine_pages_show_latest_evaluated_preview(
     engine_client: TestClient,
 ) -> None:
