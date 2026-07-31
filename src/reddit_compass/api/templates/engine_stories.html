@@ -4,28 +4,11 @@
 
 {% block content %}
 <div class="container">
-    <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news?{{ analysis_query }}">News</a>
-        <a href="/stories?{{ analysis_query }}" class="active">Stories</a>
-        <a href="/trends?{{ analysis_query }}">Trends</a>
-        <a href="/pulse">Reddit Pulse</a>
-        <a href="/projects/rbc?{{ analysis_query }}">Project Lens</a>
-        <a href="/radar?{{ analysis_query }}">Radar</a>
-    </nav>
+    {% with active_layer="stories" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    <div class="page-header">
-        <h1>Stories</h1>
-        <p class="section-note">Конкретные события, собранные из нескольких материалов. Это слой дедупликации и evidence matrix.</p>
-    </div>
+    {% with page_title="Stories", page_note="Конкретные события, собранные из нескольких материалов. Это слой дедупликации и evidence matrix." %}{% include "components/page_header.html" %}{% endwith %}
 
-    {% if stories.preview %}
-    <section class="section">
-        <p class="section-note" style="color: var(--warning);">
-            Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated StoryRelease,
-            не production RadarPublication.
-        </p>
-    </section>
-    {% endif %}
+    {% with preview=stories.preview, release_type="StoryRelease" %}{% include "components/preview_banner.html" %}{% endwith %}
 
     <section class="section">
         <form class="filters" method="get" action="/stories">
@@ -47,14 +30,7 @@
             <article class="story-card">
                 <div class="story-meta">
                     <span class="direction-badge">{{ story.confidence }}</span>
-                    {% if story.source_scope %}
-                    <span class="scope-badge scope-{{ story.source_scope }}" title="Источник охвата">
-                        {% if story.source_scope == "cross_source" %}🔗 Reddit + СМИ
-                        {% elif story.source_scope == "community_only" %}🔴 только Reddit
-                        {% elif story.source_scope == "mainstream_only" %}📰 только СМИ
-                        {% else %}{{ story.source_scope }}{% endif %}
-                    </span>
-                    {% endif %}
+                    {% with source_scope=story.source_scope %}{% include "components/scope_badge.html" %}{% endwith %}
                     <span>{{ story.source_count }} source clusters</span>
                     <span>{{ story.item_count }} materials</span>
                     <span>{{ story.first_seen }} → {{ story.last_seen }}</span>
@@ -63,32 +39,11 @@
                 {% if story.summary_ru %}
                 <p>{{ story.summary_ru }}</p>
                 {% endif %}
-                <div class="chip-cloud">
-                    {% for domain_id in story.domain_ids %}
-                    <span class="chip">{{ domain_id }}</span>
-                    {% endfor %}
-                    {% for project_id, score in story.project_scores.items() %}
-                    <span class="chip">{{ project_id }} {{ score }}</span>
-                    {% endfor %}
-                </div>
-                {% if story.evidence_items %}
-                <h3>Evidence</h3>
-                <ul class="evidence-list">
-                    {% for item in story.evidence_items %}
-                    <li>
-                        <span>{{ item.provider }}</span>
-                        {% if item.canonical_url %}
-                        <a href="{{ item.canonical_url }}" rel="noopener noreferrer">{{ item.title }}</a>
-                        {% else %}
-                        {{ item.title }}
-                        {% endif %}
-                    </li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
+                {% with domain_ids=story.domain_ids, project_scores=story.project_scores %}{% include "components/chip_cloud.html" %}{% endwith %}
+                {% with evidence_items=story.evidence_items, list_title="Evidence" %}{% include "components/evidence_list.html" %}{% endwith %}
             </article>
             {% else %}
-            <p class="section-note">Stories не найдены.</p>
+            {% with empty_message="Stories не найдены." %}{% include "components/empty_state.html" %}{% endwith %}
             {% endfor %}
         </div>
     </section>

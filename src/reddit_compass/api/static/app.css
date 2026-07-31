@@ -307,6 +307,23 @@ h3 {
     margin-bottom: 1rem;
 }
 
+/* ─── Page header ───────────────────────────────────────────────────────── */
+/* Intro block used across Engine pages (News/Stories/Trends/Pulse/Lens):
+   h1 + a short section-note describing the layer. */
+
+.page-header {
+    margin-bottom: 2rem;
+}
+
+.page-header h1 {
+    margin-bottom: 0.5rem;
+}
+
+.page-header .section-note {
+    margin-bottom: 0;
+    max-width: 720px;
+}
+
 /* ─── Date switcher ─────────────────────────────────────────────────────── */
 
 .date-switcher {
@@ -491,6 +508,16 @@ a.kpi-card {
     grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
 }
 
+/* Shelf grid — the main card grid on Engine pages (News/Stories/Trends/Pulse/
+   Radar/Lens): wraps .story-card / .pulse-card children, and on radar.html
+   also wraps .shelf blocks (compact trend lists). Same rhythm as .story-grid
+   so cards line up consistently across pages. */
+.shelf-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1.25rem;
+}
+
 .story-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -538,13 +565,6 @@ a.story-card {
     font-size: 0.76rem;
 }
 
-.story-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.75rem;
-}
-
 .direction-badge {
     font-size: 0.7rem;
     padding: 0.25rem 0.6rem;
@@ -554,10 +574,8 @@ a.story-card {
     font-weight: 600;
     letter-spacing: 0.02em;
 }
-
-.direction-new { background: var(--accent-dim); color: var(--accent-bright); }
-.direction-growing { background: var(--success-dim); color: var(--success); }
-.direction-resurfacing { background: var(--accent-2-dim); color: var(--accent-2-bright); }
+.direction-up { background: var(--success-dim); color: var(--success); }
+.direction-down { background: var(--error-dim); color: var(--error); }
 
 /* Фаза 4/6: индикатор разрыва перспективы (source_scope) на карточках. */
 .scope-badge {
@@ -601,40 +619,6 @@ a.story-card {
 
 .story-title a:hover { color: var(--accent-bright); }
 
-.story-title-link { flex: 1; }
-
-.story-title-link::after {
-    content: " ↗";
-    font-size: 0.7rem;
-    opacity: 0;
-    transition: opacity var(--duration) var(--ease-out);
-    color: var(--accent-2-bright);
-}
-
-.story-title-link:hover::after { opacity: 1; }
-
-.story-detail-link {
-    font-size: 0.8rem;
-    opacity: 0.4;
-    transition: opacity var(--duration) var(--ease-out);
-    flex-shrink: 0;
-}
-
-.story-detail-link:hover { opacity: 1; }
-
-.story-summary {
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-    margin-bottom: 0.5rem;
-}
-
-.story-why {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    margin-bottom: 0.75rem;
-    font-style: italic;
-}
-
 .clusters {
     display: flex;
     gap: 0.4rem;
@@ -642,95 +626,30 @@ a.story-card {
     margin-bottom: 0.75rem;
 }
 
-.cluster-badge {
-    font-size: 0.7rem;
-    padding: 0.2rem 0.55rem;
-    border-radius: 999px;
-    font-weight: 500;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text-secondary);
-    white-space: nowrap;
-    transition: all var(--duration) var(--ease-out);
-}
-
-.cluster-badge:hover {
-    border-color: var(--accent-2);
-    color: var(--accent-2-bright);
-}
-
-.story-footer {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.75rem;
+.meta {
     color: var(--text-muted);
     font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.confidence {
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-size: 0.7rem;
+}
+
+.confidence-badge {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.6rem;
+    border-radius: var(--radius-sm);
+    background: var(--surface-2);
+    color: var(--text-secondary);
+    font-weight: 600;
+    letter-spacing: 0.02em;
 }
 
 .confidence-high { color: var(--success); }
-.confidence-medium { color: var(--warning); }
-.confidence-low { color: var(--text-muted); }
-
-.evidence-links {
-    display: flex;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-top: 0.75rem;
-}
-
-.evidence-link {
-    font-size: 0.7rem;
-    padding: 0.3rem 0.6rem;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    text-decoration: none;
-    color: var(--text-secondary);
-    font-weight: 500;
-    transition: all var(--duration) var(--ease-out);
-}
-
-.evidence-link:hover {
-    border-color: var(--accent);
-    color: var(--accent-bright);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(68, 110, 178, 0.2);
-}
-
-.score-breakdown {
-    margin-top: 0.75rem;
-    font-size: 0.75rem;
-}
-
-.score-breakdown summary {
-    cursor: pointer;
-    color: var(--text-muted);
-    transition: color var(--duration) var(--ease-out);
-}
-
-.score-breakdown summary:hover { color: var(--accent-bright); }
-
-.score-breakdown dl {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 0.3rem 1rem;
-    margin-top: 0.5rem;
-    font-family: var(--font-mono);
-}
-
-.score-breakdown dt { color: var(--text-muted); }
-.score-breakdown dd { color: var(--text-secondary); text-align: right; }
-
-/* Card actions row */
-.card-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 0.75rem;
-    padding-top: 0.6rem;
-    border-top: 1px solid var(--border);
-}
 
 .card-action-link {
     font-size: 0.75rem;
@@ -759,15 +678,41 @@ a.story-card {
     border-color: var(--border-accent);
 }
 
-/* ─── Clouds ────────────────────────────────────────────────────────────── */
+/* ─── Trend shelves (compact) ───────────────────────────────────────────── */
+/* Used on radar.html inside .shelf-grid: a labeled shelf ("Растёт", "Новое"…)
+   holding a compact list of trend links, lighter than a full .story-card. */
 
-.clouds-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1.5rem;
+.shelf {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.25rem;
 }
 
-.cloud-block h3 { margin-bottom: 0.75rem; }
+.shelf h3 { margin-bottom: 0.75rem; }
+
+.themes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.5rem;
+}
+
+.table.timeline td:nth-child(3) { font-family: var(--font-mono); }
+
+.provider {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    margin-left: 0.35rem;
+}
+
+.excerpt {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    margin-top: 0.3rem;
+}
+
+.section.research { margin-top: 3rem; }
 
 .cloud {
     display: flex;
@@ -803,16 +748,6 @@ a.story-card {
     background: var(--surface-2);
     padding: 0.1rem 0.35rem;
     border-radius: var(--radius-sm);
-}
-
-.cloud-candidate {
-    border-color: color-mix(in srgb, var(--accent-2) 30%, transparent);
-    background: var(--accent-2-dim);
-}
-
-.cloud-pain {
-    border-color: color-mix(in srgb, var(--error) 30%, transparent);
-    background: var(--error-dim);
 }
 
 /* ─── Tables ────────────────────────────────────────────────────────────── */
@@ -856,6 +791,12 @@ a.story-card {
 
 .table a:hover { color: var(--accent-bright); }
 
+/* Scroll wrapper for wide tables (engine.html release/publication tables) so
+   they scroll horizontally instead of squeezing columns on narrow screens. */
+.table-wrap {
+    overflow-x: auto;
+}
+
 /* ─── Buttons ───────────────────────────────────────────────────────────── */
 
 .btn {
@@ -895,50 +836,27 @@ a.story-card {
     transform: translateY(-2px) scale(1.02);
 }
 
-/* ─── Read list ─────────────────────────────────────────────────────────── */
-
-.read-list { list-style: none; }
-
-.read-list li {
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 0.75rem 0;
-    border-bottom: 1px solid var(--border);
+.btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 1.25rem;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
     transition: all var(--duration) var(--ease-out);
 }
 
-.read-list li:hover { padding-left: 0.5rem; }
-
-.read-list a {
-    color: var(--text);
-    text-decoration: none;
-    flex: 1;
-    transition: color var(--duration) var(--ease-out);
+.btn-secondary:hover {
+    border-color: var(--accent-2);
+    color: var(--accent-2-bright);
+    background: var(--accent-2-dim);
 }
-
-.read-list a:hover { color: var(--accent-bright); }
-
-.read-source {
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-left: 1rem;
-}
-
-/* ─── Source coverage ───────────────────────────────────────────────────── */
-
-.source-coverage { margin-top: 2rem; }
-
-.source-coverage summary {
-    cursor: pointer;
-    font-weight: 600;
-    font-family: var(--font-display);
-    padding: 0.75rem 0;
-    transition: color var(--duration) var(--ease-out);
-}
-
-.source-coverage summary:hover { color: var(--accent-bright); }
 
 /* ─── Radar CTA ─────────────────────────────────────────────────────────── */
 
@@ -955,13 +873,6 @@ a.story-card {
     font-size: 0.8rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
-}
-
-.source-status {
-    color: var(--text-muted);
-    font-size: 0.8rem;
-    font-family: var(--font-mono);
-    margin: 1rem 0;
 }
 
 .today-dashboard .date-switcher {
@@ -1091,6 +1002,11 @@ a.story-card {
 
 /* Operational run ledger: the compact summary is readable first; details
    expose the entire collection → publication chain without a second screen. */
+.runs-ledger {
+    max-width: 980px;
+    margin: 0 auto;
+}
+
 .run-list {
     display: grid;
     gap: 0.85rem;
@@ -1353,12 +1269,10 @@ a.story-card {
     border-color: var(--border-accent);
 }
 
-/* ─── Two column ────────────────────────────────────────────────────────── */
-
-.two-column {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 1.5rem;
+.chip-pain {
+    color: var(--error);
+    background: var(--error-dim);
+    border-color: color-mix(in srgb, var(--error) 25%, transparent);
 }
 
 /* ─── Tabs / Relevance ──────────────────────────────────────────────────── */
@@ -1367,57 +1281,6 @@ a.story-card {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
     gap: 1.5rem;
-}
-
-.tab-block h3 { margin-bottom: 0.75rem; }
-
-.relevance-list { list-style: none; counter-reset: relevance; }
-
-.relevance-list li {
-    counter-increment: relevance;
-    display: flex;
-    justify-content: space-between;
-    align-items: baseline;
-    padding: 0.6rem 0;
-    border-bottom: 1px solid var(--border);
-    transition: all var(--duration) var(--ease-out);
-}
-
-.relevance-list li:hover { padding-left: 0.5rem; }
-
-.relevance-list li::before {
-    content: counter(relevance, decimal-leading-zero);
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    margin-right: 0.75rem;
-}
-
-.relevance-list a {
-    color: var(--text);
-    text-decoration: none;
-    flex: 1;
-    transition: color var(--duration) var(--ease-out);
-}
-
-.relevance-list a:hover { color: var(--accent-bright); }
-
-.relevance-score {
-    font-family: var(--font-mono);
-    font-weight: 700;
-    background: var(--gradient-brand);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin-left: 0.75rem;
-}
-
-/* ─── Explore presets ───────────────────────────────────────────────────── */
-
-.explore-presets {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.6rem;
 }
 
 /* ─── Domain tabs (Radar) ───────────────────────────────────────────────── */
@@ -1466,50 +1329,36 @@ a.story-card {
     opacity: 0.7;
 }
 
-/* ─── Active filters (Explore) ──────────────────────────────────────────── */
+/* ─── Mode switcher (Radar) ─────────────────────────────────────────────── */
 
-.active-filters {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-bottom: 1rem;
-    align-items: center;
-}
-
-.filter-pill {
+.mode-switcher {
     display: inline-flex;
-    align-items: center;
-    padding: 0.3rem 0.7rem;
-    background: var(--accent-dim);
-    border: 1px solid var(--border-accent);
-    border-radius: 999px;
-    font-size: 0.75rem;
-    color: var(--accent-bright);
-    font-weight: 500;
+    gap: 0.35rem;
+    padding: 0.3rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 1.5rem;
 }
 
-.filter-pill-pain {
-    background: var(--error-dim);
-    border-color: color-mix(in srgb, var(--error) 25%, transparent);
-    color: var(--error);
-}
-
-.filter-clear {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    text-decoration: underline;
-    text-underline-offset: 2px;
-}
-
-.filter-clear:hover {
-    color: var(--text);
-}
-
-.results-count {
-    font-family: var(--font-mono);
+.mode-link {
+    padding: 0.5rem 1rem;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    text-decoration: none;
     font-size: 0.85rem;
-    color: var(--text-muted);
-    margin-bottom: 1.25rem;
+    font-weight: 500;
+    transition: all var(--duration) var(--ease-out);
+}
+
+.mode-link:hover {
+    color: var(--text);
+    background: var(--surface-2);
+}
+
+.mode-link.active {
+    background: var(--gradient-brand);
+    color: #fff;
 }
 
 /* ─── Filters ───────────────────────────────────────────────────────────── */
@@ -1691,6 +1540,7 @@ a.story-card {
     .main { padding: 1.5rem 1rem 3rem; }
 
     .story-grid, .story-grid.compact { grid-template-columns: 1fr; }
+    .shelf-grid { grid-template-columns: 1fr; }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
 
     .date-switcher { flex-direction: column; gap: 0.75rem; }
@@ -1889,4 +1739,23 @@ a.story-card {
     gap: 1rem;
     margin-top: 1.5rem;
     padding: 1rem 0;
+}
+
+/* ─── Footer navigation ─────────────────────────────────────────────────── */
+
+.footer-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.footer-nav a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+
+.footer-nav a:hover {
+    color: var(--accent-bright);
 }

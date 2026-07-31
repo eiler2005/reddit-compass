@@ -8,20 +8,15 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from datetime import datetime
-from urllib.parse import urlencode
 
 from ..config import DEFAULT_PROFILE
-from ..intelligence.taxonomy import BROAD_DOMAINS, DOMAIN_ORDER, stable_hash_id
+from ..intelligence.taxonomy import BROAD_DOMAINS, DOMAIN_ORDER
 from ..sources.registry import SOURCES
 from .view_models import (
-    CloudNode,
     DomainSummaryView,
-    RawItemView,
     RunSummary,
     SourceCoverageRow,
     StoryCardView,
-    TrendStrengthView,
     cluster_label,
     direction_label,
     domain_label,
@@ -246,131 +241,6 @@ def _coverage_label(provider: str, section: str) -> str:
     return provider_label(provider)
 
 
-def build_freshness_line(summary: RunSummary) -> str:
-    """Строит строку freshness для header."""
-    status_text = {
-        "complete": "Полный",
-        "partial": "Частичный",
-        "running": "Выполняется",
-        "failed": "Ошибка",
-    }.get(summary.status, summary.status)
-
-    parts = [status_text]
-
-    if summary.finished_at:
-        try:
-            dt = datetime.fromisoformat(summary.finished_at.replace("Z", "+00:00"))
-            parts.append(f"обновлено {dt.strftime('%H:%M')}")
-        except ValueError:
-            pass
-
-    parts.append(
-        f"{summary.successful_provider_count}/{summary.expected_provider_count} источников"
-    )
-    parts.append(f"{summary.unique_item_count} материалов")
-
-    return " · ".join(parts)
-
-
-def build_theme_clouds(
-    conn: sqlite3.Connection,
-    run_id: str,
-    theme_catalog: list[dict[str, str]] | None = None,
-) -> tuple[list[CloudNode], list[CloudNode], list[CloudNode]]:
-    """Строит три облака: stable themes, emerging candidates, pain points.
-
-    Returns:
-        Tuple of (stable_themes, emerging_candidates, pain_points).
-    """
-    # Получаем item signals для run
-    signals = conn.execute(
-        "SELECT * FROM item_signals WHERE run_id = ?",
-        (run_id,),
-    ).fetchall()
-
-    if not signals:
-        return [], [], []
-
-    def explore_url(**filters: str) -> str:
-        params: dict[str, str] = {}
-        if ":" in run_id:
-            date, profile = run_id.split(":", 1)
-            params["date"] = date
-            params["profile"] = profile
-        params.update({key: value for key, value in filters.items() if value})
-        return f"/explore?{urlencode(params)}"
-
-    # Stable themes: из theme_catalog (profile taxonomy)
-    stable_themes: list[CloudNode] = []
-    if theme_catalog:
-        theme_ids = {t["id"] for t in theme_catalog}
-        theme_labels = {t["id"]: t.get("label", t["id"]) for t in theme_catalog}
-
-        # Считаем items по theme_ids
-        theme_counts: dict[str, int] = {}
-        for sig in signals:
-            import json
-
-            sig_themes = json.loads(sig["theme_ids"])
-            for theme_id in sig_themes:
-                if theme_id in theme_ids:
-                    theme_counts[theme_id] = theme_counts.get(theme_id, 0) + 1
-
-        for theme_id, count in sorted(theme_counts.items(), key=lambda x: -x[1]):
-            stable_themes.append(
-                CloudNode(
-                    node_id=theme_id,
-                    label_ru=theme_labels.get(theme_id, theme_id),
-                    item_count=count,
-                    url=explore_url(theme=theme_id),
-                )
-            )
-
-    # Emerging candidates: из candidate_themes
-    candidate_counts: dict[str, int] = {}
-    for sig in signals:
-        import json
-
-        candidates = json.loads(sig["candidate_themes"])
-        for candidate in candidates:
-            candidate_counts[candidate] = candidate_counts.get(candidate, 0) + 1
-
-    emerging_candidates: list[CloudNode] = []
-    for candidate, count in sorted(candidate_counts.items(), key=lambda x: -x[1])[:20]:
-        if count >= 2:  # Только кандидаты с 2+ упоминаниями
-            emerging_candidates.append(
-                CloudNode(
-                    node_id=stable_hash_id("candidate", candidate, length=10),
-                    label_ru=candidate,
-                    label_original=candidate,
-                    item_count=count,
-                    url=explore_url(candidate_theme=candidate),
-                )
-            )
-
-    # Pain points: нормализованные
-    pain_counts: dict[str, int] = {}
-    for sig in signals:
-        import json
-
-        pains = json.loads(sig["pain_points"])
-        for pain in pains:
-            pain_counts[pain] = pain_counts.get(pain, 0) + 1
-
-    pain_points: list[CloudNode] = []
-    for pain, count in sorted(pain_counts.items(), key=lambda x: -x[1])[:15]:
-        pain_points.append(
-            CloudNode(
-                node_id=stable_hash_id("pain", pain, length=10),
-                label_ru=pain,
-                item_count=count,
-                url=explore_url(pain=pain),
-            )
-        )
-
-    return stable_themes, emerging_candidates, pain_points
-
-
 def build_domain_summaries(
     conn: sqlite3.Connection,
     run_id: str,
@@ -507,78 +377,6 @@ def build_trend_shelves(
             add("people_only", row)
 
     return shelves
-
-
-def build_trend_strength(
-    conn: sqlite3.Connection,
-    run_id: str,
-    limit: int = 20,
-) -> list[TrendStrengthView]:
-    """Строит список силы трендов."""
-    rows = conn.execute(
-        """SELECT sm.story_id, s.title, sm.trend_score, sm.novelty,
-                  sm.cross_source_coverage, sm.direction, sm.source_count, sm.item_count
-           FROM story_metrics sm
-           JOIN stories s ON sm.story_id = s.story_id
-           WHERE sm.run_id = ?
-           ORDER BY sm.trend_score DESC
-           LIMIT ?""",
-        (run_id, limit),
-    ).fetchall()
-
-    return [
-        TrendStrengthView(
-            story_id=row["story_id"],
-            title=row["title"],
-            trend_score=row["trend_score"],
-            novelty=row["novelty"],
-            coverage=row["cross_source_coverage"],
-            direction=row["direction"],
-            direction_label=direction_label(row["direction"]),
-            provider_count=row["source_count"],
-            item_count=row["item_count"],
-        )
-        for row in rows
-    ]
-
-
-def build_raw_popular_items(
-    conn: sqlite3.Connection,
-    date: str,
-    profile: str = DEFAULT_PROFILE,
-    limit: int = 20,
-) -> list[RawItemView]:
-    """Строит список популярных items (raw engagement)."""
-    run_row = conn.execute(
-        "SELECT run_id FROM runs WHERE snapshot_date = ? AND profile = ?",
-        (date, profile),
-    ).fetchone()
-    if not run_row:
-        return []
-    rows = conn.execute(
-        """SELECT item_id, title, provider, source_cluster, canonical_url, raw_engagement
-           FROM items
-           WHERE item_id IN (SELECT item_id FROM observations WHERE run_id = ?)
-           ORDER BY json_extract(raw_engagement, '$.score') DESC
-           LIMIT ?""",
-        (run_row["run_id"], limit),
-    ).fetchall()
-
-    items = []
-    for row in rows:
-        engagement = json.loads(row["raw_engagement"]) if row["raw_engagement"] else {}
-        items.append(
-            RawItemView(
-                item_id=row["item_id"],
-                title=row["title"],
-                provider=row["provider"],
-                source_cluster=row["source_cluster"],
-                url=row["canonical_url"],
-                score=int(engagement.get("score", 0)),
-                comments=int(engagement.get("comments", 0)),
-            )
-        )
-    return items
 
 
 def build_goal_relevance_rankings(

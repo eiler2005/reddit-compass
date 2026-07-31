@@ -1,0 +1,9 @@
+{# Navigation between analysis layers. Expects: analysis_query, active_layer (news|stories|trends|pulse|projects|radar) #}
+<nav class="layer-nav" aria-label="Analysis layers">
+    <a href="/news?{{ analysis_query }}"{% if active_layer == "news" %} class="active"{% endif %}>News</a>
+    <a href="/stories?{{ analysis_query }}"{% if active_layer == "stories" %} class="active"{% endif %}>Stories</a>
+    <a href="/trends?{{ analysis_query }}"{% if active_layer == "trends" %} class="active"{% endif %}>Trends</a>
+    <a href="/pulse"{% if active_layer == "pulse" %} class="active"{% endif %}>Reddit Pulse</a>
+    <a href="/projects/rbc?{{ analysis_query }}"{% if active_layer == "projects" %} class="active"{% endif %}>Project Lens</a>
+    <a href="/radar?{{ analysis_query }}"{% if active_layer == "radar" %} class="active"{% endif %}>Radar</a>
+</nav>

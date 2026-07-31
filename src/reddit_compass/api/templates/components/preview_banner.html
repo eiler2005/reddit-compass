@@ -1,0 +1,9 @@
+{# Preview mode warning. Expects: preview (bool), channel (str), release_type (str, e.g. "StoryRelease") #}
+{% if preview %}
+<section class="section">
+    <p class="section-note" style="color: var(--warning);">
+        Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated {{ release_type | default("release") }},
+        не production RadarPublication.
+    </p>
+</section>
+{% endif %}

@@ -1,0 +1,9 @@
+{# Source scope badge. Expects: source_scope (str) #}
+{% if source_scope %}
+<span class="scope-badge scope-{{ source_scope }}" title="Источник охвата">
+    {% if source_scope == "cross_source" %}🔗 Reddit + СМИ
+    {% elif source_scope == "community_only" %}🔴 только Reddit
+    {% elif source_scope == "mainstream_only" %}📰 только СМИ
+    {% else %}{{ source_scope }}{% endif %}
+</span>
+{% endif %}

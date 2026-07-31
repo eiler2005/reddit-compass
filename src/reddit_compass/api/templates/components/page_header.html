@@ -1,0 +1,5 @@
+{# Page header with title and optional note. Expects: page_title, page_note (optional) #}
+<div class="page-header">
+    <h1>{{ page_title }}</h1>
+    {% if page_note %}<p class="section-note">{{ page_note }}</p>{% endif %}
+</div>

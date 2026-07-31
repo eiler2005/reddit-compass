@@ -35,14 +35,9 @@ from ..intelligence.engine import (
 )
 from ..intelligence.quality import is_bad_trend_name
 from ..intelligence.repository import (
-    get_briefing,
-    get_research_state,
-    get_story,
-    query_stories,
     update_research_state,
 )
 from ..intelligence.taxonomy import BROAD_DOMAINS
-from .view_models import briefing_to_view, story_to_detail_view
 
 router = APIRouter()
 
@@ -793,119 +788,72 @@ async def today_page(
                 },
             )
 
-    from .query_service import (
-        build_freshness_line,
-        build_run_summary,
-        build_source_coverage,
-        build_theme_clouds,
-    )
-
-    if date is None:
-        row = conn.execute(
-            "SELECT snapshot_date FROM runs ORDER BY snapshot_date DESC LIMIT 1"
-        ).fetchone()
-        date = row[0] if row else None
-
-    if date is None:
-        return templates.TemplateResponse(
-            request=request,
-            name="empty.html",
-            context={"message": "Нет данных. Запустите `reddit-compass run`."},
-        )
-
-    briefing = get_briefing(conn, date, profile)
-    if briefing is None:
-        return templates.TemplateResponse(
-            request=request,
-            name="empty.html",
-            context={"message": f"Briefing не найден для {date}."},
-        )
-
-    view = briefing_to_view(briefing)
-
-    # Run summary и source coverage
-    run_summary = build_run_summary(conn, date, profile)
-    source_coverage = build_source_coverage(conn, f"{date}:{profile}", date)
-    freshness_line = build_freshness_line(run_summary) if run_summary else ""
-
-    # Theme clouds
-    from ..config import MonitorConfig
-
-    config = MonitorConfig.from_profile(profile)
-    theme_catalog = [{"id": t.id, "label": t.label} for t in config.themes]
-    stable_themes, emerging_candidates, pain_point_cloud = build_theme_clouds(
-        conn, f"{date}:{profile}", theme_catalog
-    )
-    view.stable_themes = stable_themes
-    view.emerging_candidates = emerging_candidates
-    view.pain_point_cloud = pain_point_cloud
-
-    prev_row = conn.execute(
-        "SELECT snapshot_date FROM runs WHERE snapshot_date < ? "
-        "ORDER BY snapshot_date DESC LIMIT 1",
-        (date,),
-    ).fetchone()
-    next_row = conn.execute(
-        "SELECT snapshot_date FROM runs WHERE snapshot_date > ? ORDER BY snapshot_date ASC LIMIT 1",
-        (date,),
-    ).fetchone()
-
-    view.prev_date = prev_row[0] if prev_row else None
-    view.next_date = next_row[0] if next_row else None
-
+    # Публикации нет — честная заглушка вместо legacy-брифинга из compass.db.
+    # Radar читает только опубликованный релиз; собирать параллельную картину из
+    # сырого корпуса значило бы показывать не то, что прошло гейты качества.
     return templates.TemplateResponse(
         request=request,
-        name="today.html",
+        name="components/empty_state.html",
         context={
-            "briefing": view,
-            "run_summary": run_summary,
-            "source_coverage": source_coverage,
-            "freshness_line": freshness_line,
-            "csrf_token": _generate_csrf_token(),
+            "message": "Публикации нет. Запустите `reddit-compass engine cycle`.",
         },
     )
 
 
-@router.get("/ui/today-changes")
+def _render_fragment(name: str, context: dict[str, object]) -> HTMLResponse:
+    """Отрисовать партиал как HTML-фрагмент для догрузки на клиенте.
+
+    Ленты /today отдают готовую разметку, а не JSON: карточка описана в одном
+    месте — в Jinja, — и браузеру остаётся только вставить её. Раньше та же
+    разметка существовала вторым экземпляром в императивном JS, и любая правка
+    требовала синхронных изменений на двух языках.
+    """
+    return HTMLResponse(templates.get_template(name).render(**context))
+
+
+@router.get("/ui/today-changes", response_class=HTMLResponse)
 def today_changes_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
-) -> dict[str, object]:
-    """Compact JSON cards for the top changes shown by Today."""
+) -> HTMLResponse:
+    """HTML-фрагмент с карточками верхних trend-кандидатов."""
     engine_path = _engine_path()
     if not engine_path.exists():
-        return {"date": date or "", "items": []}
+        return HTMLResponse("")
     engine_conn = open_engine_readonly(engine_path)
     try:
         radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
         if radar is None:
-            return {"date": date or "", "items": []}
-        return {
-            "date": radar.date,
-            "items": _today_change_candidates(radar, _analysis_query("broad", None)),
-        }
+            return HTMLResponse("")
+        cards = _today_change_candidates(radar, _analysis_query("broad", None))
+        return HTMLResponse(
+            "".join(
+                templates.get_template("components/today_change_card.html").render(trend=trend)
+                for trend in cards
+            )
+        )
     except (HTTPException, OSError, sqlite3.Error):
-        return {"date": date or "", "items": []}
+        return HTMLResponse("")
     finally:
         engine_conn.close()
 
 
-@router.get("/ui/today-reading")
+@router.get("/ui/today-reading", response_class=HTMLResponse)
 def today_reading_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
     offset: int = 0,
     limit: int = 10,
-) -> dict[str, object]:
-    """Paged, safe JSON feed for the progressive Today reading queue."""
+) -> HTMLResponse:
+    """Постраничный HTML-фрагмент ленты чтения."""
     engine_path = _engine_path()
     if not engine_path.exists():
-        return {"date": date or "", "items": []}
+        return HTMLResponse("")
     engine_conn = open_engine_readonly(engine_path)
     try:
         radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
         if radar is None:
-            return {"date": date or "", "items": []}
+            return HTMLResponse("")
         radar_payload = radar.model_dump()
         # Keep each response below the reverse proxy's small-response limit;
         # the client requests two deterministic pages for the complete top-20.
@@ -919,14 +867,18 @@ def today_reading_feed(
             date=str(radar_payload["date"]),
             profile=profile,
         )
-        return {
-            "date": radar_payload["date"],
-            "items": list(items[start : start + page_size]),
-        }
+        template = templates.get_template("components/today_reading_item.html")
+        return HTMLResponse(
+            "".join(
+                # Нумерация продолжает отрендеренную на сервере первую страницу.
+                template.render(item=item, rank=start + index + 1)
+                for index, item in enumerate(items[start : start + page_size])
+            )
+        )
     except (HTTPException, OSError, sqlite3.Error):
         # Today itself can still render its publication/preview state.  Do not
         # turn an unavailable optional reading feed into a broken dashboard.
-        return {"date": date or "", "items": []}
+        return HTMLResponse("")
     finally:
         engine_conn.close()
 
@@ -1407,210 +1359,12 @@ async def story_page(
                 },
             )
 
-    story_data = get_story(conn, story_id)
-    if story_data is None:
-        return templates.TemplateResponse(
-            request=request,
-            name="empty.html",
-            context={"message": f"Story {story_id} не найден."},
-            status_code=404,
-        )
-
-    from ..intelligence.models import Story
-
-    legacy_story = Story(
-        story_id=story_data["story_id"],
-        canonical_key=story_data["canonical_key"],
-        title=story_data["title"],
-        summary_ru=story_data.get("summary_ru", ""),
-        theme_ids=story_data.get("theme_ids", []),
-        first_seen=story_data.get("first_seen", ""),
-        last_seen=story_data.get("last_seen", ""),
-        item_ids=story_data.get("item_ids", []),
-    )
-
-    evidence = []
-    for item_id in legacy_story.item_ids:
-        row = conn.execute("SELECT * FROM items WHERE item_id = ?", (item_id,)).fetchone()
-        if row:
-            evidence.append(
-                {
-                    "item_id": row["item_id"],
-                    "provider": row["provider"],
-                    "source_cluster": row["source_cluster"],
-                    "url": _safe_url(row["canonical_url"]),
-                    "title": row["title"],
-                    "excerpt": row["excerpt"],
-                    "content_scope": row["content_scope"],
-                }
-            )
-
-    research_state = get_research_state(conn, story_id)
-
-    view = story_to_detail_view(
-        story=legacy_story,
-        metrics=story_data.get("metrics", []),
-        evidence=evidence,
-        research_state=research_state,
-    )
-
+    # Опубликованного сюжета нет — заглушка вместо legacy-детали из compass.db.
     return templates.TemplateResponse(
         request=request,
-        name="story.html",
-        context={
-            "story": view,
-            "csrf_token": _generate_csrf_token(),
-        },
-    )
-
-
-@router.get("/explore", response_class=HTMLResponse)
-async def explore_page(
-    request: Request,
-    q: str | None = None,
-    date_from: str | None = None,
-    date_to: str | None = None,
-    date: str | None = None,
-    profile: str | None = None,
-    theme: str | None = None,
-    candidate_theme: str | None = None,
-    domain: str | None = None,
-    pain: str | None = None,
-    provider: str | None = None,
-    source_cluster: str | None = None,
-    direction: str | None = None,
-    confidence: str | None = None,
-    status: str | None = None,
-    saved: bool | None = None,
-    sort: str = "trend_score",
-    page: int = 1,
-    page_size: int = 50,
-    conn: sqlite3.Connection = Depends(_get_db),
-) -> HTMLResponse:
-    """Explore: поиск и фильтрация stories."""
-    page_size = min(max(page_size, 10), 100)
-    page = max(page, 1)
-
-    stories, total = query_stories(
-        conn,
-        date=date,
-        profile=profile,
-        q=q,
-        theme=theme,
-        candidate_theme=candidate_theme,
-        domain=domain,
-        pain=pain,
-        provider=provider,
-        source_cluster=source_cluster,
-        direction=direction,
-        confidence=confidence,
-        sort=sort,
-        page=page,
-        page_size=page_size,
-    )
-
-    total_pages = (total + page_size - 1) // page_size if total > 0 else 1
-    pagination_params = {
-        key: value
-        for key, value in {
-            "q": q,
-            "date": date,
-            "profile": profile,
-            "theme": theme,
-            "candidate_theme": candidate_theme,
-            "domain": domain,
-            "pain": pain,
-            "provider": provider,
-            "source_cluster": source_cluster,
-            "direction": direction,
-            "confidence": confidence,
-            "status": status,
-            "saved": str(saved).lower() if saved is not None else None,
-            "sort": sort,
-            "page_size": str(page_size),
-        }.items()
-        if value
-    }
-
-    def page_url(page_number: int) -> str:
-        return f"/explore?{urlencode({**pagination_params, 'page': str(page_number)})}"
-
-    from .view_models import StoryCardView, direction_label, provider_label
-
-    # Batch-load primary evidence for each story
-    story_ids = [s["story_id"] for s in stories]
-    evidence_map: dict[str, dict[str, str]] = {}
-    if story_ids:
-        placeholders = ",".join("?" * len(story_ids))
-        rows = conn.execute(
-            f"""SELECT si.story_id, i.canonical_url, i.provider, i.title
-                FROM story_items si
-                JOIN items i ON si.item_id = i.item_id
-                WHERE si.story_id IN ({placeholders})
-                ORDER BY si.story_id,
-                    CASE i.content_scope
-                        WHEN 'full' THEN 0 WHEN 'excerpt' THEN 1
-                        WHEN 'abstract' THEN 2 ELSE 3 END
-                LIMIT 500""",
-            story_ids,
-        ).fetchall()
-        for row in rows:
-            sid = row["story_id"]
-            if sid not in evidence_map:
-                evidence_map[sid] = {
-                    "url": row["canonical_url"],
-                    "provider": row["provider"],
-                    "provider_label": provider_label(row["provider"]),
-                }
-
-    story_views = []
-    for s in stories:
-        ev = evidence_map.get(s["story_id"], {})
-        story_views.append(
-            StoryCardView(
-                story_id=s["story_id"],
-                title=s["title"],
-                summary_ru=s.get("summary_ru", ""),
-                direction=s.get("direction", "new"),
-                direction_label=direction_label(s.get("direction", "new")),
-                trend_score=s.get("trend_score", 0),
-                confidence=s.get("confidence", "low"),
-                why_it_matters="",
-                source_count=s.get("source_count", 0),
-                item_count=s.get("item_count", 0),
-                clusters=[source_cluster] if source_cluster else [],
-                primary_evidence_url=ev.get("url", ""),
-                primary_evidence_provider=ev.get("provider", ""),
-                primary_evidence_provider_label=ev.get("provider_label", ""),
-            )
-        )
-
-    return templates.TemplateResponse(
-        request=request,
-        name="explore.html",
-        context={
-            "stories": story_views,
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-            "total_pages": total_pages,
-            "filters": {
-                "q": q,
-                "date": date,
-                "profile": profile,
-                "domain": domain,
-                "pain": pain,
-                "provider": provider,
-                "source_cluster": source_cluster,
-                "theme": theme,
-                "candidate_theme": candidate_theme,
-                "direction": direction,
-                "confidence": confidence,
-                "sort": sort,
-            },
-            "prev_url": page_url(page - 1) if page > 1 else "",
-            "next_url": page_url(page + 1) if page < total_pages else "",
-        },
+        name="components/empty_state.html",
+        context={"message": f"Сюжет {story_id} не найден в опубликованном релизе."},
+        status_code=404,
     )
 
 
@@ -2071,6 +1825,18 @@ async def dashboard_redirect() -> RedirectResponse:
     return RedirectResponse(url="/today", status_code=302)
 
 
+@router.get("/explore", include_in_schema=False)
+async def explore_redirect(request: Request) -> RedirectResponse:
+    """Legacy redirect: /explore → /news.
+
+    Отдельная страница поиска по историям снята вместе с legacy-слоем: она читала
+    `compass.db` напрямую, в обход опубликованного релиза. Фильтры живут на /news,
+    поэтому строку запроса переносим как есть.
+    """
+    query = request.url.query
+    return RedirectResponse(url=f"/news?{query}" if query else "/news", status_code=301)
+
+
 @router.get("/radar", response_class=HTMLResponse)
 async def radar_redirect(
     channel: str = "broad",
@@ -2123,19 +1889,6 @@ async def radar_page(
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Полный аналитический Radar."""
-    from ..config import MonitorConfig
-    from .query_service import (
-        build_domain_matrix,
-        build_domain_summaries,
-        build_goal_relevance_rankings,
-        build_raw_popular_items,
-        build_run_summary,
-        build_source_coverage,
-        build_theme_clouds,
-        build_trend_shelves,
-        build_trend_strength,
-    )
-    from .view_models import RadarPageView, domain_label
 
     engine_path = _engine_path()
     if engine_path.exists():
@@ -2223,97 +1976,11 @@ async def radar_page(
                 },
             )
 
-    run_id = f"{date}:{profile}"
-    run_summary = build_run_summary(conn, date, profile)
-
-    if run_summary is None:
-        return templates.TemplateResponse(
-            request=request,
-            name="empty.html",
-            context={"message": f"Run не найден для {date}."},
-        )
-
-    # Source coverage
-    source_coverage = build_source_coverage(conn, run_id, date)
-
-    # Briefing для stories
-    briefing = get_briefing(conn, date, profile)
-    top_changes = []
-    mega_stories = []
-    watchlist = []
-    column_ideas = []
-    narrative_shifts = []
-
-    if briefing:
-        view = briefing_to_view(briefing)
-        top_changes = view.top_changes
-        mega_stories = view.mega_stories
-        watchlist = view.watchlist
-        column_ideas = view.column_ideas
-        narrative_shifts = view.narrative_shifts
-
-    # Theme clouds
-    config = MonitorConfig.from_profile(profile)
-    theme_catalog = [{"id": t.id, "label": t.label} for t in config.themes]
-    stable_themes, emerging_candidates, pain_point_cloud = build_theme_clouds(
-        conn, run_id, theme_catalog
-    )
-
-    # Trend strength
-    trend_strength_rows = build_trend_strength(conn, run_id)
-
-    # Raw popular items
-    raw_popular_items = build_raw_popular_items(conn, date, profile=profile)
-
-    # Goal relevance rankings
-    goals = [g.id for g in config.goals]
-    goal_relevance_rankings = build_goal_relevance_rankings(conn, run_id, goals)
-    domain_summaries = build_domain_summaries(conn, run_id)
-    domain_matrix = build_domain_matrix(conn, run_id)
-    shelf_domain = domain
-    if mode == "ai-native" and shelf_domain is None:
-        shelf_domain = "ai_technology"
-    trend_shelves = build_trend_shelves(conn, run_id, domain=shelf_domain)
-
-    # Prev/next dates
-    prev_row = conn.execute(
-        "SELECT snapshot_date FROM runs WHERE snapshot_date < ? "
-        "ORDER BY snapshot_date DESC LIMIT 1",
-        (date,),
-    ).fetchone()
-    next_row = conn.execute(
-        "SELECT snapshot_date FROM runs WHERE snapshot_date > ? ORDER BY snapshot_date ASC LIMIT 1",
-        (date,),
-    ).fetchone()
-
-    radar = RadarPageView(
-        date=date,
-        profile=profile,
-        mode=mode,
-        selected_domain=domain,
-        selected_domain_label=domain_label(domain) if domain else "",
-        run=run_summary,
-        source_coverage=source_coverage,
-        domain_summaries=domain_summaries,
-        domain_matrix=domain_matrix,
-        trend_shelves=trend_shelves,
-        top_changes=top_changes,
-        mega_stories=mega_stories,
-        watchlist=watchlist,
-        stable_themes=stable_themes,
-        emerging_candidates=emerging_candidates,
-        pain_point_cloud=pain_point_cloud,
-        goal_relevance_rankings=goal_relevance_rankings,
-        trend_strength_rows=trend_strength_rows,
-        column_ideas=column_ideas,
-        narrative_shifts=narrative_shifts,
-        raw_popular_items=raw_popular_items,
-        prev_date=prev_row[0] if prev_row else None,
-        next_date=next_row[0] if next_row else None,
-    )
-
+    # Публикации для этой даты нет — заглушка вместо legacy-радара из compass.db.
     return templates.TemplateResponse(
         request=request,
-        name="radar.html",
-        context={"radar": radar},
+        name="components/empty_state.html",
+        context={
+            "message": "Опубликованного радара нет. Запустите `reddit-compass engine cycle`.",
+        },
     )

@@ -1,0 +1,16 @@
+{# Evidence items list. Expects: evidence_items (list of dicts with provider, title, canonical_url), list_title (optional) #}
+{% if evidence_items %}
+{% if list_title %}<h3>{{ list_title }}</h3>{% endif %}
+<ul class="evidence-list">
+    {% for item in evidence_items %}
+    <li>
+        <span>{{ item.provider }}</span>
+        {% if item.canonical_url %}
+        <a href="{{ item.canonical_url }}" rel="noopener noreferrer">{{ item.title }}</a>
+        {% else %}
+        {{ item.title }}
+        {% endif %}
+    </li>
+    {% endfor %}
+</ul>
+{% endif %}

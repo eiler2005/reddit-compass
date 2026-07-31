@@ -4,18 +4,9 @@
 
 {% block content %}
 <div class="container">
-    <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news?{{ analysis_query }}">News</a>
-        <a href="/stories?{{ analysis_query }}">Stories</a>
-        <a href="/trends?{{ analysis_query }}">Trends</a>
-        <a href="/projects/{{ lens.project_id }}?{{ analysis_query }}" class="active">Project Lens</a>
-        <a href="/radar?{{ analysis_query }}">Radar</a>
-    </nav>
+    {% with active_layer="projects" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    <div class="page-header">
-        <h1>Project Lens · {{ lens.project_id }}</h1>
-        <p class="section-note">Рабочий слой для книги, РБК и других проектов поверх опубликованных stories/trends.</p>
-    </div>
+    {% with page_title="Project Lens · " ~ lens.project_id, page_note="Рабочий слой для книги, РБК и других проектов поверх опубликованных stories/trends." %}{% include "components/page_header.html" %}{% endwith %}
 
     {% if lens.preview %}
     <section class="section">

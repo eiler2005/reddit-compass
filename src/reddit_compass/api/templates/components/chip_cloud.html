@@ -1,0 +1,9 @@
+{# Domain + project score chips. Expects: domain_ids (list), project_scores (dict) #}
+<div class="chip-cloud">
+    {% for domain_id in domain_ids %}
+    <span class="chip">{{ domain_id }}</span>
+    {% endfor %}
+    {% for project_id, score in project_scores.items() %}
+    <span class="chip">{{ project_id }} {{ score }}</span>
+    {% endfor %}
+</div>

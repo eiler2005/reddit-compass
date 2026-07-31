@@ -4,28 +4,11 @@
 
 {% block content %}
 <div class="container">
-    <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news?{{ analysis_query }}">News</a>
-        <a href="/stories?{{ analysis_query }}">Stories</a>
-        <a href="/trends?{{ analysis_query }}" class="active">Trends</a>
-        <a href="/pulse">Reddit Pulse</a>
-        <a href="/projects/rbc?{{ analysis_query }}">Project Lens</a>
-        <a href="/radar?{{ analysis_query }}">Radar</a>
-    </nav>
+    {% with active_layer="trends" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    <div class="page-header">
-        <h1>Trends</h1>
-        <p class="section-note">Повторяющиеся паттерны поверх разных stories. Копии одной новости сюда не должны попадать.</p>
-    </div>
+    {% with page_title="Trends", page_note="Повторяющиеся паттерны поверх разных stories. Копии одной новости сюда не должны попадать." %}{% include "components/page_header.html" %}{% endwith %}
 
-    {% if trends.preview %}
-    <section class="section">
-        <p class="section-note" style="color: var(--warning);">
-            Preview mode: опубликованной версии для channel {{ channel }} нет. Показан latest evaluated TrendRelease,
-            не production RadarPublication.
-        </p>
-    </section>
-    {% endif %}
+    {% with preview=trends.preview, release_type="TrendRelease" %}{% include "components/preview_banner.html" %}{% endwith %}
 
     <section class="section">
         <form class="filters" method="get" action="/trends">
@@ -48,14 +31,7 @@
             <article class="story-card">
                 <div class="story-meta">
                     <span class="direction-badge">{{ trend.lifecycle }}</span>
-                    {% if trend.source_scope %}
-                    <span class="scope-badge scope-{{ trend.source_scope }}" title="Источник охвата">
-                        {% if trend.source_scope == "cross_source" %}🔗 Reddit + СМИ
-                        {% elif trend.source_scope == "community_only" %}🔴 только Reddit
-                        {% elif trend.source_scope == "mainstream_only" %}📰 только СМИ
-                        {% else %}{{ trend.source_scope }}{% endif %}
-                    </span>
-                    {% endif %}
+                    {% with source_scope=trend.source_scope %}{% include "components/scope_badge.html" %}{% endwith %}
                     <span>{{ trend.review_status }}</span>
                     <span>{{ "%.0f"|format(trend.confidence * 100) }}% confidence</span>
                     <span>{{ trend.story_count }} stories</span>
@@ -63,14 +39,7 @@
                 </div>
                 <h2 class="story-title"><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h2>
                 <p>{{ trend.pattern }}</p>
-                <div class="chip-cloud">
-                    {% for domain_id in trend.domain_ids %}
-                    <span class="chip">{{ domain_id }}</span>
-                    {% endfor %}
-                    {% for project_id, score in trend.project_scores.items() %}
-                    <span class="chip">{{ project_id }} {{ score }}</span>
-                    {% endfor %}
-                </div>
+                {% with domain_ids=trend.domain_ids, project_scores=trend.project_scores %}{% include "components/chip_cloud.html" %}{% endwith %}
                 {% if trend.stories %}
                 <h3>Stories inside trend</h3>
                 <ul class="evidence-list">
@@ -81,7 +50,7 @@
                 {% endif %}
             </article>
             {% else %}
-            <p class="section-note">Trends не найдены.</p>
+            {% with empty_message="Trends не найдены." %}{% include "components/empty_state.html" %}{% endwith %}
             {% endfor %}
         </div>
     </section>

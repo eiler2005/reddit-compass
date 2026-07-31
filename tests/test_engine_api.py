@@ -481,8 +481,8 @@ def test_unpublished_engine_pages_show_latest_evaluated_preview(
     assert today_page.status_code == 200
     assert changes_response.status_code == 200
     assert "Preview mode" in today_page.text
-    assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
-    assert changes_response.json()["items"][0]["url"] == "/trends/trend_1?channel=broad"
+    assert "Проверяемый тренд" in changes_response.text
+    assert 'href="/trends/trend_1?channel=broad"' in changes_response.text
     assert "Качество и ограничения" in today_page.text
     assert "Куда идти дальше" in today_page.text
 
@@ -505,25 +505,20 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert "Куда идти дальше" in response.text
     assert 'href="/news?channel=broad"' in response.text
     assert 'href="/stories?channel=broad&amp;domain=world_geopolitics"' in response.text
-    assert 'src="/static/today_reading.js?v=20260731.2"' in response.text
+    # Версия в cache-buster меняется при каждой правке скрипта — пинить её значит
+    # ломать тест на ровном месте. Проверяем, что скрипт подключён.
+    assert 'src="/static/today_reading.js?v=' in response.text
     assert 'data-server-rendered="true"' in response.text
     assert "data-reading-item" in response.text
     assert 'href="https://example.com/story"' in response.text
-    assert reading_response.json()["items"][0]["primary_url"] == "https://example.com/story"
-    assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
-    assert "evidence_story_ids" not in changes_response.json()["items"][0]
-    assert set(changes_response.json()["items"][0]) == {
-        "url",
-        "title",
-        "pattern",
-        "lifecycle_label",
-        "source_scope_label",
-        "source_scope",
-        "review_label",
-        "confidence_pct",
-        "source_count",
-        "story_count",
-    }
+    # Ленты отдают готовую разметку, а не JSON: карточка описана только в Jinja.
+    assert 'href="https://example.com/story"' in reading_response.text
+    assert "data-reading-item" in reading_response.text
+    assert "Проверяемый тренд" in changes_response.text
+    # Тяжёлые поля не должны утекать во фрагмент: ответ обязан оставаться ниже
+    # лимита обратного прокси на маленькие ответы.
+    assert "evidence_story_ids" not in changes_response.text
+    assert len(changes_response.text) < 4096
     assert "javascript:alert" not in response.text
     assert "javascript:alert" not in reading_response.text
 
@@ -625,7 +620,7 @@ def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
     assert "Wrong date pulse" not in radar_page.text
     assert "javascript:alert" not in radar_page.text
     assert today_page.status_code == 200
-    assert changes_response.json()["items"][0]["title"] == "Проверяемый тренд"
+    assert "Проверяемый тренд" in changes_response.text
     assert "publication_test" in today_page.text
 
 

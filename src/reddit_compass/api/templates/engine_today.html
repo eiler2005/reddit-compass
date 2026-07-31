@@ -78,23 +78,7 @@
         </p>
         <div class="story-grid" data-today-changes aria-live="polite"{% if changes %} data-server-rendered="true"{% endif %}>
             {% for trend in changes %}
-            <a class="story-card today-trend-card" href="{{ trend.url }}">
-                <div class="story-meta">
-                    <span class="direction-badge">{{ trend.lifecycle_label }}</span>
-                    {% if trend.source_scope_label %}
-                    <span class="scope-badge scope-{{ trend.source_scope }}">{{ trend.source_scope_label }}</span>
-                    {% endif %}
-                    <span>{{ trend.review_label }}</span>
-                    <span>{{ trend.confidence_pct }}%</span>
-                </div>
-                <h3>{{ trend.title }}</h3>
-                {% if trend.pattern %}<p>{{ trend.pattern }}</p>{% endif %}
-                <div class="today-card-footer">
-                    <span>{{ trend.source_count }} источников</span>
-                    <span>{{ trend.story_count }} событий</span>
-                    <span>Открыть →</span>
-                </div>
-            </a>
+            {% include "components/today_change_card.html" %}
             {% else %}
             <p class="section-note">Пока нет проверенных трендов для brief: кандидаты остаются в Engine до review, а ниже — материалы для ежедневного чтения.</p>
             {% endfor %}
@@ -113,28 +97,7 @@
         </p>
         <div class="reading-feed" data-reading-feed aria-live="polite"{% if initial_reading %} data-server-rendered="true"{% endif %}>
             {% for item in initial_reading %}
-            <article class="reading-item" data-reading-item>
-                <div class="reading-rank">{{ "%02d"|format(loop.index) }}</div>
-                <div class="reading-main">
-                    <div class="story-meta">
-                        {% for value in [item.provider_label, item.source_section, item.source_cluster, item.published_at] if value %}
-                        <span>{{ value }}</span>
-                        {% endfor %}
-                    </div>
-                    <h3><a href="{{ item.primary_url }}" target="_blank" rel="noopener noreferrer">{{ item.title }}</a></h3>
-                    <div class="chip-cloud">
-                        {% for label in item.domain_labels %}<span class="chip">{{ label }}</span>{% endfor %}
-                        {% if item.reason %}<span class="chip chip-accent">{{ item.reason }}</span>{% endif %}
-                    </div>
-                </div>
-                <div class="reading-actions">
-                    <a class="card-action-link" href="{{ item.primary_url }}" target="_blank" rel="noopener noreferrer">Открыть</a>
-                    {% if item.secondary_url %}
-                    <a class="card-action-link" href="{{ item.secondary_url }}" target="_blank" rel="noopener noreferrer">{{ item.secondary_label }}</a>
-                    {% endif %}
-                    {% if item.story_id %}<a class="card-action-link" href="/stories/{{ item.story_id|urlencode }}?channel=broad">Story</a>{% endif %}
-                </div>
-            </article>
+            {% with rank = loop.index %}{% include "components/today_reading_item.html" %}{% endwith %}
             {% else %}
             <p class="section-note">Подбираю свежие материалы из опубликованного release…</p>
             {% endfor %}
@@ -183,5 +146,5 @@
         </span>
     </div>
 </div>
-<script src="/static/today_reading.js?v=20260731.2" defer></script>
+<script src="/static/today_reading.js?v=20260731.3" defer></script>
 {% endblock %}

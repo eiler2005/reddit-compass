@@ -8,7 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from ..intelligence.models import Briefing, BriefingStory, ResearchState, Story
+from ..intelligence.models import ResearchState
 from ..intelligence.taxonomy import DOMAIN_LABELS_RU
 
 
@@ -156,36 +156,6 @@ class StoryDetailView:
     research_state: ResearchState | None = None
 
 
-@dataclass
-class ExploreView:
-    """View model для explore страницы."""
-
-    stories: list[StoryCardView] = field(default_factory=list)
-    total: int = 0
-    page: int = 1
-    page_size: int = 50
-    total_pages: int = 0
-    filters: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class RunView:
-    """View model для run."""
-
-    run_id: str
-    date: str
-    profile: str
-    status: str
-    status_label: str
-    started_at: str
-    finished_at: str | None
-    item_count: int = 0
-    story_count: int = 0
-    multi_item_count: int = 0
-    cross_source_count: int = 0
-    sources: list[dict[str, Any]] = field(default_factory=list)
-
-
 _DIRECTION_LABELS = {
     "new": "🆕 Новый",
     "growing": "📈 Растёт",
@@ -257,144 +227,6 @@ def status_label(status: str) -> str:
     return _STATUS_LABELS.get(status, status)
 
 
-def briefing_to_view(briefing: Briefing) -> BriefingView:
-    """Преобразует Briefing в BriefingView."""
-
-    def _story_to_card(bs: BriefingStory) -> StoryCardView:
-        clusters: list[str] = list({e.source_cluster for e in bs.evidence})
-        clusters_display = [cluster_label(c) for c in clusters]
-
-        # Ранжирование primary evidence:
-        # 1. content_scope: full > excerpt > abstract > headline
-        # 2. При равном scope — предпочтение mainstream/business
-        scope_weight = {"full": 4, "excerpt": 3, "abstract": 2, "headline": 1}
-        cluster_weight = {
-            "mainstream": 2,
-            "business": 2,
-            "tech_culture": 1,
-            "developers": 1,
-            "voices": 0,
-            "product_pulse": 0,
-            "search_interest": 0,
-        }
-
-        evidence_list = [
-            {
-                "item_id": e.item_id,
-                "provider": e.provider,
-                "provider_label": provider_label(e.provider),
-                "source_cluster": e.source_cluster,
-                "cluster_label": cluster_label(e.source_cluster),
-                "url": e.url,
-                "title": e.title,
-                "excerpt": e.excerpt,
-                "content_scope": e.content_scope,
-            }
-            for e in bs.evidence
-        ]
-
-        primary_url = ""
-        primary_provider = ""
-        primary_provider_label = ""
-        if evidence_list:
-            ranked = sorted(
-                evidence_list,
-                key=lambda x: (
-                    scope_weight.get(x["content_scope"], 0),
-                    cluster_weight.get(x["source_cluster"], 0),
-                ),
-                reverse=True,
-            )
-            primary_url = ranked[0]["url"]
-            primary_provider = ranked[0]["provider"]
-            primary_provider_label = ranked[0]["provider_label"]
-
-        return StoryCardView(
-            story_id=bs.story.story_id,
-            title=bs.story.title,
-            summary_ru=bs.story.summary_ru,
-            direction=bs.metric.direction,
-            direction_label=direction_label(bs.metric.direction),
-            trend_score=bs.metric.trend_score,
-            confidence=bs.metric.confidence,
-            why_it_matters=bs.why_it_matters,
-            source_count=bs.metric.source_count,
-            item_count=bs.metric.item_count,
-            domain_ids=bs.story.domain_ids,
-            domain_labels=[domain_label(domain_id) for domain_id in bs.story.domain_ids],
-            clusters=clusters,
-            clusters_display=clusters_display,
-            evidence=evidence_list,
-            score_breakdown=bs.score_breakdown,
-            primary_evidence_url=primary_url,
-            primary_evidence_provider=primary_provider,
-            primary_evidence_provider_label=primary_provider_label,
-        )
-
-    return BriefingView(
-        date=briefing.date,
-        profile=briefing.profile,
-        status=briefing.status,
-        status_label=status_label(briefing.status),
-        generated_at=briefing.generated_at,
-        top_changes=[_story_to_card(bs) for bs in briefing.top_changes],
-        mega_stories=[_story_to_card(bs) for bs in briefing.mega_stories],
-        watchlist=[_story_to_card(bs) for bs in briefing.watchlist],
-        pain_points=[
-            {"text": gp.text, "evidence_ids": gp.evidence_ids} for gp in briefing.pain_points
-        ],
-        column_ideas=[
-            {"text": gp.text, "evidence_ids": gp.evidence_ids} for gp in briefing.column_ideas
-        ],
-        narrative_shifts=[
-            {"text": gp.text, "evidence_ids": gp.evidence_ids} for gp in briefing.narrative_shifts
-        ],
-        source_health=[
-            {
-                "source_id": sh.source_id,
-                "provider": sh.provider,
-                "status": sh.status,
-                "count": sh.count,
-                "message": sh.message,
-            }
-            for sh in briefing.source_health
-        ],
-    )
-
-
-def story_to_detail_view(
-    story: Story,
-    metrics: list[dict[str, Any]],
-    evidence: list[dict[str, Any]],
-    research_state: ResearchState | None = None,
-) -> StoryDetailView:
-    """Преобразует Story в StoryDetailView."""
-    evidence_by_cluster: dict[str, list[dict[str, Any]]] = {}
-    for e in evidence:
-        cluster = e.get("source_cluster", "other")
-        evidence_by_cluster.setdefault(cluster, []).append(e)
-
-    latest_metric = metrics[-1] if metrics else {}
-
-    return StoryDetailView(
-        story_id=story.story_id,
-        title=story.title,
-        summary_ru=story.summary_ru,
-        theme_labels=story.theme_ids,
-        why_it_matters=latest_metric.get("why_it_matters", ""),
-        timeline=metrics,
-        score_breakdown={
-            "goal_relevance": latest_metric.get("goal_relevance", 0),
-            "cross_source_coverage": latest_metric.get("cross_source_coverage", 0),
-            "momentum": latest_metric.get("momentum", 0),
-            "novelty": latest_metric.get("novelty", 0),
-            "evidence_quality": latest_metric.get("evidence_quality", 0),
-        },
-        evidence_by_cluster=evidence_by_cluster,
-        research_state=research_state,
-    )
-
-
 @dataclass
 class TrendStrengthView:
     """View model для строки силы трендов."""
@@ -421,47 +253,3 @@ class RawItemView:
     url: str
     score: int = 0
     comments: int = 0
-
-
-@dataclass
-class RadarPageView:
-    """Полный аналитический Radar."""
-
-    date: str
-    profile: str
-    run: RunSummary
-    source_coverage: list[SourceCoverageRow]
-    mode: str = "broad"
-    selected_domain: str | None = None
-    selected_domain_label: str = ""
-    domain_summaries: list[DomainSummaryView] = field(default_factory=list)
-    domain_matrix: list[dict[str, Any]] = field(default_factory=list)
-    trend_shelves: dict[str, list[StoryCardView]] = field(default_factory=dict)
-    top_changes: list[StoryCardView] = field(default_factory=list)
-    mega_stories: list[StoryCardView] = field(default_factory=list)
-    watchlist: list[StoryCardView] = field(default_factory=list)
-    stable_themes: list[CloudNode] = field(default_factory=list)
-    emerging_candidates: list[CloudNode] = field(default_factory=list)
-    pain_point_cloud: list[CloudNode] = field(default_factory=list)
-    goal_relevance_rankings: dict[str, list[StoryCardView]] = field(default_factory=dict)
-    trend_strength_rows: list[TrendStrengthView] = field(default_factory=list)
-    column_ideas: list[dict[str, Any]] = field(default_factory=list)
-    narrative_shifts: list[dict[str, Any]] = field(default_factory=list)
-    raw_popular_items: list[RawItemView] = field(default_factory=list)
-    prev_date: str | None = None
-    next_date: str | None = None
-
-
-@dataclass
-class TodayPageView:
-    """Компактный Today briefing."""
-
-    date: str
-    profile: str
-    run: RunSummary
-    top_changes: list[StoryCardView] = field(default_factory=list)
-    urgent_reads: list[dict[str, Any]] = field(default_factory=list)
-    saved_in_progress: list[StoryCardView] = field(default_factory=list)
-    radar_url: str = ""
-    prev_date: str | None = None
-    next_date: str | None = None

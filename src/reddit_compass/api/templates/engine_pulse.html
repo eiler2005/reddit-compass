@@ -4,24 +4,9 @@
 
 {% block content %}
 <div class="container">
-    <nav class="layer-nav" aria-label="Analysis layers">
-        <a href="/news">News</a>
-        <a href="/stories">Stories</a>
-        <a href="/trends">Trends</a>
-        <a href="/pulse" class="active">Reddit Pulse</a>
-        <a href="/radar">Radar</a>
-        <a href="/projects/rbc">Project Lens</a>
-    </nav>
+    {% with active_layer="pulse" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    <div class="page-header">
-        <h1>🔴 Reddit Pulse</h1>
-        <p class="section-note">
-            Reddit-native сигналы: что обсуждают сообщества прямо сейчас.
-            Reddit сам ранжирует посты (score, comments, ratio) — мы добавляем
-            editorial слой поверх: percentile внутри саба, velocity, depth,
-            cross-subreddit repetition, novelty.
-        </p>
-    </div>
+    {% with page_title="🔴 Reddit Pulse", page_note="Reddit-native сигналы: что обсуждают сообщества прямо сейчас. Reddit сам ранжирует посты (score, comments, ratio) — мы добавляем editorial слой поверх: percentile внутри саба, velocity, depth, cross-subreddit repetition, novelty." %}{% include "components/page_header.html" %}{% endwith %}
 
     {% if pulse_summary %}
     {% if not pulse_summary.perspective_gap_available %}

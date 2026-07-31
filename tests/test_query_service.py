@@ -7,13 +7,10 @@ from pathlib import Path
 import pytest
 
 from reddit_compass.api.query_service import (
-    build_freshness_line,
     build_run_summary,
     build_source_coverage,
-    build_theme_clouds,
     resolve_latest_run,
 )
-from reddit_compass.api.view_models import RunSummary
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.migrations import migrate
 from reddit_compass.intelligence.models import (
@@ -102,24 +99,6 @@ class TestBuildRunSummary:
         assert summary is None
 
 
-class TestBuildFreshnessLine:
-    def test_builds_line(self):
-        summary = RunSummary(
-            run_id="2026-07-27:ai-native",
-            date="2026-07-27",
-            profile="ai-native",
-            status="complete",
-            finished_at="2026-07-27T11:00:00Z",
-            unique_item_count=100,
-            successful_provider_count=5,
-            expected_provider_count=6,
-        )
-        line = build_freshness_line(summary)
-        assert "Полный" in line
-        assert "5/6 источников" in line
-        assert "100 материалов" in line
-
-
 class TestBuildSourceCoverage:
     def test_builds_coverage(self, db_with_data):
         coverage = build_source_coverage(db_with_data, "2026-07-27:ai-native", "2026-07-27")
@@ -174,47 +153,7 @@ class TestBuildSourceCoverage:
         assert by_id["bbc:world"].label == "BBC / World"
 
 
-class TestBuildThemeClouds:
-    def test_returns_empty_for_no_signals(self, db_with_data):
-        stable, emerging, pain = build_theme_clouds(db_with_data, "2026-07-27:ai-native")
-        assert stable == []
-        assert emerging == []
-        assert pain == []
-
-    def test_cloud_nodes_link_to_explore_with_run_context(self, db_with_data):
-        replace_run_signals(
-            db_with_data,
-            "2026-07-27:ai-native",
-            [
-                ItemSignal(
-                    item_id="reddit:1",
-                    theme_ids=["ai_agents"],
-                    candidate_themes=["agent security"],
-                    pain_points=["security breach"],
-                ),
-                ItemSignal(
-                    item_id="reddit:2",
-                    theme_ids=["ai_agents"],
-                    candidate_themes=["agent security"],
-                    pain_points=["security breach"],
-                ),
-            ],
-        )
-        db_with_data.commit()
-
-        stable, emerging, pain = build_theme_clouds(
-            db_with_data,
-            "2026-07-27:ai-native",
-            [{"id": "ai_agents", "label": "AI-агенты"}],
-        )
-
-        assert stable[0].url == "/explore?date=2026-07-27&profile=ai-native&theme=ai_agents"
-        assert (
-            emerging[0].url
-            == "/explore?date=2026-07-27&profile=ai-native&candidate_theme=agent+security"
-        )
-        assert pain[0].url == "/explore?date=2026-07-27&profile=ai-native&pain=security+breach"
-
+class TestQueryStories:
     def test_query_stories_filters_by_item_signal_pain(self, db_with_data):
         other_story = Story(
             story_id="story_other",

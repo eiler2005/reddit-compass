@@ -1,0 +1,22 @@
+{# Карточка тренда в блоке «Что изменилось» на /today.
+
+   Один источник разметки и для серверного рендера первой страницы, и для догрузки:
+   эндпоинт /ui/today-changes отдаёт этот же партиал HTML-фрагментом. Раньше та же
+   карточка была продублирована императивным кодом в today_reading.js. #}
+<a class="story-card today-trend-card" href="{{ trend.url }}">
+    <div class="story-meta">
+        <span class="direction-badge">{{ trend.lifecycle_label }}</span>
+        {% if trend.source_scope_label %}
+        <span class="scope-badge scope-{{ trend.source_scope }}">{{ trend.source_scope_label }}</span>
+        {% endif %}
+        <span>{{ trend.review_label }}</span>
+        <span>{{ trend.confidence_pct }}%</span>
+    </div>
+    <h3>{{ trend.title }}</h3>
+    {% if trend.pattern %}<p>{{ trend.pattern }}</p>{% endif %}
+    <div class="today-card-footer">
+        <span>{{ trend.source_count }} источников</span>
+        <span>{{ trend.story_count }} событий</span>
+        <span>Открыть →</span>
+    </div>
+</a>
