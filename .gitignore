@@ -28,6 +28,7 @@ htmlcov/
 # Runtime data (snapshots, harvests, reports) — everything except the placeholder
 data/*
 !data/.gitkeep
+!data/review/
 
 # Editors and OS
 .DS_Store

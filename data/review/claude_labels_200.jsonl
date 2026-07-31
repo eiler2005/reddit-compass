@@ -1,0 +1,200 @@
+{"pair_id": "arstechnica:4d1e57718034763bd3e55b27|reuters:0573b9c73fe3b2479fafe4c0", "label": "same_story", "note": "один и тот же судебный запрет на закон о prediction markets"}
+{"pair_id": "guardian:openai-says-its-models-went-rogue-and-hacked-start|wired:openais-rogue-ai-agent-hacked-more-than-just-huggi", "label": "same_story", "note": "один инцидент с rogue-агентом OpenAI, Wired даёт развитие того же события"}
+{"pair_id": "guardian:5aa775d9f4b4a09fbbc42e0a|techcrunch:bb239ee05f73e5d03bf0da19", "label": "same_story", "note": "обе про утечку расшаренных чатов Claude в поиск; Guardian — сервисный материал о том же"}
+{"pair_id": "hackernews:49086388|reddit:1v8182u", "label": "same_story", "note": "заявление CEO Hugging Face после взлома"}
+{"pair_id": "verge:e4182bcb08bb391db0630c27|washingtonpost:apple-will-now-let-you-lease-iphones-other-devices", "label": "same_story", "note": "один анонс программы лизинга устройств Apple"}
+{"pair_id": "reddit:1v8182u|techcrunch:446a8454722be8bb7fd05064", "label": "same_story", "note": "то же заявление CEO Hugging Face"}
+{"pair_id": "nytimes:86937448228366d8be26b1c9|washingtonpost:f4ba64385cbae26eb002add2", "label": "same_story", "note": "рецензии на один и тот же фильм в день выхода"}
+{"pair_id": "guardian:5aa775d9f4b4a09fbbc42e0a|hackernews:49089970", "label": "same_story", "note": "утечка чатов Claude: новость и сервисный материал о ней"}
+{"pair_id": "hackernews:49089970|techcrunch:bb239ee05f73e5d03bf0da19", "label": "same_story", "note": "та же утечка чатов Claude"}
+{"pair_id": "bbc:c3ek3gvdnj3o?at_medium=RSS&at_campaign=rss|hackernews:49014108", "label": "same_story", "note": "то же заявление OpenAI о rogue-агенте"}
+{"pair_id": "hackernews:48989357|reddit:1v7tyqm", "label": "different_story", "note": "вопрос о выборе инструмента против показа своего проекта — общие только названия тулов"}
+{"pair_id": "hackernews:49021816|reddit:1v2l6sm", "label": "same_story", "note": "бенчмарки Gemini 3.6 Flash — реакция на тот же анонс"}
+{"pair_id": "guardian:openai-says-its-models-went-rogue-and-hacked-start|reddit:1v3lg37", "label": "same_story", "note": "то же заявление OpenAI об автономном взломе"}
+{"pair_id": "hackernews:49086388|reddit:1v2txp7", "label": "same_story", "note": "тот же инцидент со взломом Hugging Face"}
+{"pair_id": "arstechnica:4a4d812ef5a7157dbd876736|wired:security-news-this-week-the-openai-models-that-hac", "label": "same_story", "note": "технический разбор того же взлома"}
+{"pair_id": "hackernews:48989357|reddit:1v3jqt9", "label": "different_story", "note": "два независимых вопроса сообщества, а не одно событие"}
+{"pair_id": "americanbanker:openais-security-incident-offers-three-lessons-for|hackernews:48997548", "label": "same_story", "note": "тот же инцидент, отраслевой разбор для банков"}
+{"pair_id": "nytimes:open-source-silicon-valley-china.html|wired:silicon-valley-is-completely-divided-over-chinese-", "label": "same_story", "note": "один и тот же раскол в Кремниевой долине по китайскому AI"}
+{"pair_id": "guardian:5aa775d9f4b4a09fbbc42e0a|hackernews:49075115", "label": "same_story", "note": "та же утечка чатов Claude в Google"}
+{"pair_id": "hackernews:49014108|washingtonpost:openais-new-model-went-rogue-hacked-another-compan", "label": "same_story", "note": "то же событие с rogue-моделью OpenAI"}
+{"pair_id": "hackernews:48989230|reuters:a1642c936382e9f34616eee3", "label": "different_story", "note": "разные запреты: модели Chinese AI против гуманоидных роботов"}
+{"pair_id": "ft:CBMihAFBVV95cUxQWUJRUnQzZzFsQlNjT21CVjBZSTRGUC1WTn|reuters:CBMivAFBVV95cUxPZXJqVTM2Sjk5OGw4TnB5SWw2S0xRNG03eE", "label": "different_story", "note": "разные инциденты: атака на танкеры против перехвата удара по НПЗ"}
+{"pair_id": "guardian:small-businesses-ai|reddit:1v6djg3", "label": "different_story", "note": "противоположные утверждения о разном: сокращения против отказа от трат"}
+{"pair_id": "hackernews:48987577|wired:security-news-this-week-the-openai-models-that-hac", "label": "same_story", "note": "тот же взлом сети Hugging Face"}
+{"pair_id": "ft:455565e7c9a0d6ff34e8d079|reuters:CBMimwFBVV95cUxORVFmcndVRlpnZk84cG1MdjJ3bnBLTThobT", "label": "different_story", "note": "санкции США против санкционного пакета ЕС — разные акторы"}
+{"pair_id": "arstechnica:789a430363deb8686c0d8144|hackernews:49086285", "label": "same_story", "note": "один и тот же рекордный беспосадочный перелёт"}
+{"pair_id": "verge:399ca38bba3a922f868d1bd0|washingtonpost:apple-will-now-let-you-lease-iphones-other-devices", "label": "same_story", "note": "та же лизинговая программа Apple, уточнение детали"}
+{"pair_id": "reddit:1v2z3g3|washingtonpost:openais-new-model-went-rogue-hacked-another-compan", "label": "same_story", "note": "то же событие с rogue-моделями OpenAI"}
+{"pair_id": "guardian:697bbe3e4f4b973ca80b7c0e|reddit:1v7dxn6", "label": "same_story", "note": "то же требование прозрачности от CEO пострадавшей компании"}
+{"pair_id": "reddit:1v76wem|techcrunch:426917ef4f43fb95e891816f", "label": "different_story", "note": "обсуждение цитаты против новости о позиции — разные события"}
+{"pair_id": "foxbusiness:CBMiyAFBVV95cUxPTXByQWNwTGpCZU03R3dFRnRIWGRSRl8xYn|hackernews:48987577", "label": "same_story", "note": "тот же взлом Hugging Face, реакция Белого дома"}
+{"pair_id": "techcrunch:285637682dc88cb8a00e2876|wired:private-claude-chats-exposed-in-google-and-bing-se", "label": "different_story", "note": "доля AI-поиска Google против утечки чатов Claude — общий только Google"}
+{"pair_id": "guardian:tesla-profits-earnings|reddit:1v4k903", "label": "same_story", "note": "один и тот же отчёт Tesla о прибыли"}
+{"pair_id": "reddit:1v5r32l|usatoday:CBMitwFBVV95cUxNVmNrZDFXdm42QUhtMDdVZ25GTUJMQVJBZk", "label": "different_story", "note": "введение пошлин и иск против них — разные события"}
+{"pair_id": "nytimes:ec2be82e223637ad12bcae9f|reuters:7ad2ae210954d1af69223916", "label": "same_story", "note": "одна и та же сделка Rogers и Prime Video по NHL"}
+{"pair_id": "foxbusiness:0df6905cc459f3b3bad2f270|verge:b1ee046911e8283efa35368f", "label": "same_story", "note": "один и тот же запрет на иностранные роботы и инверторы"}
+{"pair_id": "nytimes:paramount-warner-bros-deal-pause.html|reddit:1v1ri1r", "label": "same_story", "note": "одна и та же приостановка сделки Paramount и Warner Bros."}
+{"pair_id": "hackernews:49086448|techcrunch:bd5982b0a35319c6f96af7e0", "label": "same_story", "note": "одна волна регуляторного давления на Waymo после сбоев"}
+{"pair_id": "reddit:1v1wdvu|reddit:1v7uro9", "label": "different_story", "note": "два разных человека рассказывают о своём увольнении"}
+{"pair_id": "guardian:bd499cd4d4923399c6a77ee0|hackernews:49087306", "label": "different_story", "note": "обзор iPhone 17e против замены программы апгрейда; разница 127 дней"}
+{"pair_id": "bbc:c071af5e339d50d906532ff5|reddit:1v8gcbk", "label": "same_story", "note": "утечка расшаренных чатов Claude в поиск"}
+{"pair_id": "reddit:1v6p4sq|reuters:1d4fa563e737beb173ccc40b", "label": "different_story", "note": "сделка на поставку чипов против падения индекса — разные события"}
+{"pair_id": "nytimes:322961eb6064ef7488d0141a|reddit:1v7y3sr", "label": "same_story", "note": "один анонс Open Secure AI Alliance от Nvidia"}
+{"pair_id": "bbc:90a57f45a1f5109b6fbe3a2d|reddit:1v7uyl3", "label": "same_story", "note": "одна и та же пауза в атаках США и Ирана, BBC подаёт через нефть"}
+{"pair_id": "bbc:cd9w22n9e4go?at_medium=RSS&at_campaign=rss|reddit:1v3pl53", "label": "same_story", "note": "разбор того же взлома OpenAI"}
+{"pair_id": "guardian:d59a106bf24aa3d5292984bf|reddit:1v137gh", "label": "different_story", "note": "обвинения Милея против обсуждения проигранного финала"}
+{"pair_id": "ft:117c3dff8c51fb8586c56235|nytimes:0ce311524157f5b86c9dd669", "label": "different_story", "note": "кредитные риски big tech против падения акций — разные материалы"}
+{"pair_id": "hackernews:49021816|reddit:1v3g73p", "label": "same_story", "note": "реакция сообщества на тот же анонс Gemini 3.6 Flash"}
+{"pair_id": "producthunt:1204092|reddit:1v32ob7", "label": "low_signal", "note": "по заголовкам нельзя понять, одно ли это приложение"}
+{"pair_id": "usatoday:d3a252b93dfd850613aff742|usatoday:de6b4ee5510c14bf2ef96133", "label": "different_story", "note": "подписание игрока против объявления об уходе — разные события"}
+{"pair_id": "bbc:1ef447ba7b360872ff7a96c4|reuters:CBMisAFBVV95cUxPZ29lUm9wb0g2TUU0dWowSWdwNFExdGpETD", "label": "same_story", "note": "одна волна лесных пожаров в Испании и Франции"}
+{"pair_id": "reddit:1v7ti2o|washingtonpost:how-protect-yourself-check-washing-widespread-form", "label": "different_story", "note": "поиск работы против рисков бумажных чеков"}
+{"pair_id": "arstechnica:arstechnica|reddit:1v65hxk", "label": "different_story", "note": "реклама McAfee на мониторах LG против доли Windows 10"}
+{"pair_id": "nytimes:3117420c6989ea84ea1aa3cc|reddit:1v1ri1r", "label": "same_story", "note": "одна и та же приостановка сделки Paramount и Warner Bros."}
+{"pair_id": "ft:CBMihAFBVV95cUxOMy1OMldaMFlSSmNCOEhHUUxtenZYVFQtVX|reddit:1v4c41p", "label": "same_story", "note": "одно условие Трампа по ядерной сделке с Саудовской Аравией"}
+{"pair_id": "hackernews:49083197|hackernews:49089970", "label": "same_story", "note": "та же утечка чатов Claude"}
+{"pair_id": "reddit:1v73zai|verge:warner-bros-suing-amazon-poaching-employees", "label": "different_story", "note": "перенос сделки против иска к Amazon о переманивании"}
+{"pair_id": "reddit:1v2ybnw|wired:openais-rogue-ai-agent-hacked-more-than-just-huggi", "label": "same_story", "note": "тот же побег моделей OpenAI и взлом Hugging Face"}
+{"pair_id": "newyorker:why-elon-musk-bought-twitter|washingtonpost:spacexs-once-soaring-stock-is-now-trading-less-tha", "label": "different_story", "note": "покупка Twitter против падения акций SpaceX"}
+{"pair_id": "verge:tesla-robotaxi-mileage-waymo-cities-earnings-musk|wired:chinese-drivers-are-using-tiny-plastic-heads-to-fo", "label": "different_story", "note": "обещания по роботакси против обмана автопилота в Китае"}
+{"pair_id": "guardian:96203b188b8068074a22be4d|nytimes:0c57e3eb1232521889230c07", "label": "same_story", "note": "та же волна пожаров во Франции и Испании"}
+{"pair_id": "foxbusiness:CBMiyAFBVV95cUxPTXByQWNwTGpCZU03R3dFRnRIWGRSRl8xYn|hackernews:49007536", "label": "same_story", "note": "тот же инцидент с побегом моделей OpenAI"}
+{"pair_id": "reddit:1v2t4sv|reddit:1v3jtmc", "label": "different_story", "note": "два независимых CMV-треда на разные темы"}
+{"pair_id": "americanbanker:ai-sometimes-is-even-smarter-than-we-think-it-is|wired:ai-isnt-smarter-than-a-baby-yet", "label": "different_story", "note": "две колонки об уме AI без общего события"}
+{"pair_id": "bbc:c5yw2xgnv2jo?at_medium=RSS&at_campaign=rss|reddit:1v2j06k", "label": "different_story", "note": "общий разбор пошлин против конкретного введения 50% по Канаде"}
+{"pair_id": "bbc:51e9d596442003568df6916b|reddit:1v7nzl3", "label": "same_story", "note": "одна и та же стрельба в Сиэтле, разные стадии"}
+{"pair_id": "hackernews:49073815|reuters:CBMitwFBVV95cUxPLTA5S2htM2dsTTR2MTQxOHV6UXNETUJHTH", "label": "same_story", "note": "тот же альянс Nvidia по открытой AI-безопасности"}
+{"pair_id": "nytimes:stocks-ai-chips.html|reuters:03a356744ec0f3a342b2de10", "label": "same_story", "note": "одна и та же распродажа чиповых акций из-за Китая"}
+{"pair_id": "reddit:1v2t6gy|washingtonpost:2fbd5d4a62d365474d1771bf", "label": "different_story", "note": "отставка командующего против визита в Британию"}
+{"pair_id": "wired:chinas-open-ai-models-are-challenging-silicon-vall|wired:silicon-valley-is-completely-divided-over-chinese-", "label": "same_story", "note": "один и тот же спор Кремниевой долины о китайском AI"}
+{"pair_id": "hackernews:49085236|reddit:1v7emqr", "label": "same_story", "note": "одно и то же дело о самоочистке GrapheneOS на границе"}
+{"pair_id": "reddit:1v3hsx0|washingtonpost:trump-set-adopt-forced-labor-tariffs-following-sup", "label": "different_story", "note": "решение суда Пенсильвании против пошлин в обход Верховного суда"}
+{"pair_id": "guardian:ai-jobs-apocalypse-human-labor|reddit:1v64fw6", "label": "different_story", "note": "колонка и независимое обсуждение — не одно событие"}
+{"pair_id": "guardian:ai-jobs-apocalypse-human-labor|reddit:1v7oley", "label": "different_story", "note": "колонка про рабочие места против тезиса про экономическую ценность"}
+{"pair_id": "hackernews:48939768|hackernews:48957136", "label": "different_story", "note": "две разные задачи, решённые моделями"}
+{"pair_id": "guardian:andy-burnham-vows-to-use-his-political-capital-to-|guardian:treasury-andy-burnham-ambitions-john-healey", "label": "same_story", "note": "одна и та же инициатива Бёрнэма и ограничения по ней"}
+{"pair_id": "bbc:cy9w4q8pgp0o?at_medium=RSS&at_campaign=rss|hackernews:49086387", "label": "different_story", "note": "заявка о возможностях Kimi K3 против появления на Modal, 11 дней"}
+{"pair_id": "reddit:1v65hxk|verge:lg-mcafee-ads-windows-microsoft-crackdown", "label": "different_story", "note": "доля Windows 10 против давления Microsoft на LG"}
+{"pair_id": "verge:tesla-robotaxi-mileage-waymo-cities-earnings-musk|washingtonpost:musks-spacex-tumbles-back-earth-dragging-tesla-dow", "label": "different_story", "note": "роботакси против падения акций SpaceX"}
+{"pair_id": "guardian:0f766e91f3adb6b7bad31f3f|reddit:1v1id23", "label": "different_story", "note": "манифест о творчестве против вопроса сообщества"}
+{"pair_id": "reddit:1v5c3vt|verge:nvidia-open-secure-ai-alliance-cybersecurity", "label": "same_story", "note": "один и тот же анонс альянса Nvidia и Microsoft"}
+{"pair_id": "bbc:43368e7ff9d3125bfdae6487|hackernews:49014681", "label": "same_story", "note": "тот же побег агента OpenAI из песочницы"}
+{"pair_id": "bbc:cd9w22n9e4go?at_medium=RSS&at_campaign=rss|reddit:1v2txp7", "label": "same_story", "note": "тот же взлом Hugging Face"}
+{"pair_id": "ft:CBMihAFBVV95cUxQbUlvRC1OQTRveGd1VWVtaUdpRTZDUWVfNl|reddit:1uz1077", "label": "different_story", "note": "портрет основателя против обвала акций — разные материалы"}
+{"pair_id": "arstechnica:arstechnica|reddit:1v7m52c", "label": "different_story", "note": "реклама McAfee против продления жизни Windows 10"}
+{"pair_id": "ft:CBMicEFVX3lxTFBKQWFobEtrSjFYcEc4UFRSQTlaOWgzdnZxRE|reuters:CBMitAFBVV95cUxNUE1aUmxVOHNfRkY1bW5mZG5DMUxHaFBpSW", "label": "same_story", "note": "один и тот же наезд на Berlin Pride"}
+{"pair_id": "hackernews:49055227|hackernews:49085341", "label": "different_story", "note": "два разных Show HN проекта"}
+{"pair_id": "nytimes:9ab9f4232e59adc05ed5b14c|reddit:1v7k9hf", "label": "same_story", "note": "одна и та же сделка по дата-центру OpenAI с гарантией Nvidia"}
+{"pair_id": "hackernews:49019740|hackernews:49065779", "label": "different_story", "note": "два разных open-source проекта"}
+{"pair_id": "bbc:cy9w4q8pgp0o?at_medium=RSS&at_campaign=rss|reddit:1v1k0sq", "label": "different_story", "note": "заявка о возможностях Kimi K3 против вызванной ею распродажи"}
+{"pair_id": "hackernews:49067956|hackernews:49093716", "label": "different_story", "note": "два разных Show HN проекта про удалённый доступ"}
+{"pair_id": "nytimes:cxmt-stock-price-ai.html|reddit:1v7s0wj", "label": "same_story", "note": "один и тот же дебют CXMT на бирже с ростом 470%"}
+{"pair_id": "nytimes:340c2b9804e3db6819d544d6|reddit:1v5axes", "label": "different_story", "note": "визит Нетаньяху в Вашингтон против ордера в Лондоне"}
+{"pair_id": "guardian:4ee639e51770c4a3d21ae37e|reddit:1v5engg", "label": "same_story", "note": "один и тот же сбой PlayStation Network"}
+{"pair_id": "ft:ccf03e910d05aa7fa321b327|newyorker:why-elon-musk-bought-twitter", "label": "different_story", "note": "уход юриста против покупки Twitter"}
+{"pair_id": "nytimes:trump-interest-rates-bonds.html|reuters:f38260456bd3143b9c809396", "label": "different_story", "note": "движение ставки против высказывания Трампа о ФРС"}
+{"pair_id": "foxbusiness:CBMijAFBVV95cUxNSG55ZHJYMU5LRDI4TWFOSDd0NWZ2RXR5Rj|reddit:1uxv0ne", "label": "different_story", "note": "заявление Цукерберга против обвинений сотрудников"}
+{"pair_id": "foxbusiness:CBMiW0FVX3lxTE0zUUNCZUhqMkVpVnJxVjNOaTRMb0hmWEdWSV|techcrunch:10e2e1ef58544370f4a3160d", "label": "different_story", "note": "возвращение экипажа МКС против аварии робота"}
+{"pair_id": "producthunt:1205941|reddit:1v3u64o", "label": "low_signal", "note": "по заголовкам нельзя понять, один ли это продукт"}
+{"pair_id": "reddit:1v6c4um|reuters:CBMivAFBVV95cUxPZXJqVTM2Sjk5OGw4TnB5SWw2S0xRNG03eE", "label": "same_story", "note": "один и тот же обмен ударами Саудовской Аравии и хуситов"}
+{"pair_id": "ft:CBMihAFBVV95cUxQLVJBSHN6dXZsQ1lrN21ZQnY0eFdNZHp2Mn|reuters:CBMiqAFBVV95cUxNdktMME5KN1ExdnZKbndxQU94dENHWnFXQT", "label": "same_story", "note": "та же волна пожаров во Франции и Испании"}
+{"pair_id": "reddit:1v68yb8|reddit:1v80d8d", "label": "different_story", "note": "две разные технические заметки"}
+{"pair_id": "foxbusiness:CBMipgFBVV95cUxQTmxBWlRDQmpQMWsxVFNxY0MwZjFTcVY5cy|reuters:CBMitwFBVV95cUxPLTA5S2htM2dsTTR2MTQxOHV6UXNETUJHTH", "label": "same_story", "note": "один и тот же ход Nvidia вокруг открытых моделей и безопасности"}
+{"pair_id": "nytimes:openai-data-center-nvidia.html|reddit:1v7y3sr", "label": "different_story", "note": "сделка по дата-центру против альянса по безопасности"}
+{"pair_id": "hackernews:49089814|producthunt:1204092", "label": "different_story", "note": "порт Half-Life против приложения для Mac"}
+{"pair_id": "foxbusiness:57b6579b8ea9946d3418fe8a|wired:ebay-has-to-pay-dollar557-million-in-settlement-fo", "label": "different_story", "note": "два разных судебных урегулирования"}
+{"pair_id": "hackernews:49022854|wired:openais-rogue-ai-agent-hacked-more-than-just-huggi", "label": "different_story", "note": "способ подсунуть агента через ссылку против инцидента с Hugging Face"}
+{"pair_id": "reddit:1v07xai|reddit:1v09muj", "label": "different_story", "note": "два разных проекта про эмбеддинги GPT-2"}
+{"pair_id": "bbc:c5yw2xgnv2jo?at_medium=RSS&at_campaign=rss|reddit:1v7xa11", "label": "same_story", "note": "оба разбирают одни и те же новые пошлины Трампа"}
+{"pair_id": "bbc:47fc7c610d32d00d21c2870f|reddit:1v4ib4g", "label": "different_story", "note": "рецензия переводчика против неоплаченного счёта за судно"}
+{"pair_id": "arstechnica:arstechnica|verge:e9c474af2da2d9c444c29391", "label": "different_story", "note": "реклама McAfee против продукта Perplexity"}
+{"pair_id": "bbc:c235n47g8g8o?at_medium=RSS&at_campaign=rss|reddit:1v8sjh0", "label": "different_story", "note": "падение акций против вопроса про облигационных инвесторов"}
+{"pair_id": "ft:CBMicEFVX3lxTE9QajhXMGxYYnVablVqWTR3QjRSUmt4anhvWH|nytimes:be5a8b893b3f8e4764d9a3b1", "label": "different_story", "note": "репортаж о цветочных полях против отказа Пирло"}
+{"pair_id": "reddit:1v669na|reddit:1v66zhk", "label": "different_story", "note": "два разных вопроса про стажировки"}
+{"pair_id": "hackernews:48984017|reuters:772a5f17514fe5dd662243e1", "label": "different_story", "note": "атака шифровальщика против прогноза по выручке"}
+{"pair_id": "reddit:1v7u3cb|reuters:CBMitwFBVV95cUxObjl3eFpwYTR4M3ZQSFRseE9PckVCQ0RWen", "label": "different_story", "note": "визит Зеленского против конфликта с отставленным министром"}
+{"pair_id": "ft:CBMihAFBVV95cUxOMUxNdElTclhJazl5S2ZRekIya1ZvT0sxSD|reddit:1v6gto0", "label": "different_story", "note": "обход китайских ограничений против убытков инвесторов SpaceX"}
+{"pair_id": "hackernews:48972975|nytimes:microsoft-unveils-ai-cybersecurity-tools.html", "label": "different_story", "note": "заметка про harness против анонса инструментов Microsoft"}
+{"pair_id": "hackernews:48999841|reddit:1v3z283", "label": "different_story", "note": "два разных проекта про AI-агентов"}
+{"pair_id": "ft:CBMihAFBVV95cUxOV19hOTVtaDdGWE5tOERqa04tSHRuVG1nSH|hackernews:49086448", "label": "different_story", "note": "разрыв Waymo с Uber против позиции мэра по регулированию"}
+{"pair_id": "hackernews:49020185|hackernews:49081241", "label": "different_story", "note": "два разных Show HN проекта"}
+{"pair_id": "reddit:1v51e53|reddit:1v5ji3s", "label": "different_story", "note": "два разных проекта на LangGraph"}
+{"pair_id": "reuters:CBMisgFBVV95cUxOc0FGSEJkcmZyOElxNjhZc2Q1cWcwdVBILU|usatoday:CBMiygFBVV95cUxNUFlXakE2UmwzNEN0Uk0zd3g4OWJtZE52OU", "label": "different_story", "note": "отставка президента Бангладеш против требования к Макконнеллу"}
+{"pair_id": "verge:apple-smart-glasses-privacy|wired:halliday-new-smart-glasses-skip-the-camera", "label": "different_story", "note": "очки Apple против очков Halliday — разные продукты"}
+{"pair_id": "hackernews:49021816|techcrunch:dd98f963f3b250f71b382733", "label": "different_story", "note": "анонс Google против анонса Microsoft"}
+{"pair_id": "reuters:CBMizAFBVV95cUxPVFFLak9qWnRXdllOXzdoR0dESHJsZnUzb3|techcrunch:f98543da0b639b26ac89d156", "label": "different_story", "note": "дата-центры Nvidia и SK против партнёрства с SSI"}
+{"pair_id": "hackernews:49085341|hackernews:49094219", "label": "different_story", "note": "два разных Show HN проекта"}
+{"pair_id": "reuters:CBMiqAFBVV95cUxNdktMME5KN1ExdnZKbndxQU94dENHWnFXQT|reuters:CBMizAFBVV95cUxONEJlRVlNb1o1bHBLTFBtNi1aeUVCSTBHYT", "label": "same_story", "note": "одни и те же пожары под Бордо и эвакуация"}
+{"pair_id": "ft:CBMihAFBVV95cUxNZ0tDbkdiZDZwaGhVWWVUU2VaN3hKZ2FFTl|guardian:b07abff487c131141c0a2b91", "label": "different_story", "note": "научный материал о засухе против редакционной колонки о пожарах"}
+{"pair_id": "ft:5cf237055b2f375af3d50278|reddit:1v4dgdv", "label": "different_story", "note": "тактика ударов против последствий в виде импорта топлива"}
+{"pair_id": "reddit:1v6e73s|reddit:1v6p9od", "label": "different_story", "note": "два разных проекта сообщества"}
+{"pair_id": "producthunt:1206376|reddit:1v45nmq", "label": "different_story", "note": "агенты для интервью против вопроса о зарплатной вилке"}
+{"pair_id": "hackernews:48975696|hackernews:49017505", "label": "different_story", "note": "раздача токенов против решения задач Эрдёша"}
+{"pair_id": "verge:1a1aa14344406d0e9d9d26f7|verge:95f1328845152e5ff79e7ec2", "label": "different_story", "note": "батарейки в мышах против отмены консоли — разные анонсы"}
+{"pair_id": "reddit:1v3h1m9|techcrunch:7e44c5f3ab488da1aeede107", "label": "different_story", "note": "ядерная сделка против покупки доли в Lucid"}
+{"pair_id": "medium:gpt-live-ended-turn-taking-the-new-voice-budget-is|producthunt:1203265", "label": "different_story", "note": "задержка голосового ввода против сервиса счетов"}
+{"pair_id": "hackernews:49013458|nytimes:828a599b41a1a9d3df2fb0cb", "label": "different_story", "note": "взлом Hugging Face против анонса инструментов Microsoft"}
+{"pair_id": "foxbusiness:CBMiW0FVX3lxTE1LN0c3a1BGRjRmR0lEbUVBb0xSSVBEVHhGUn|usatoday:CBMiugFBVV95cUxOeVI2UExUUUE5MEtWS2tzRjJTQzJrTVoxdD", "label": "different_story", "note": "выпад Портного против отсутствия на мероприятии"}
+{"pair_id": "guardian:heatwave-and-online-shopping-drive-up-retail-sales|reddit:1v4pbbq", "label": "different_story", "note": "розничные продажи в жару против отчёта Intel"}
+{"pair_id": "foxbusiness:CBMi0AFBVV95cUxOUHEtY0ExNUVKXzRkN3p4aHFqWkxteWU0LV|hackernews:49083197", "label": "different_story", "note": "исследование Google о чатах против утечки чатов Claude"}
+{"pair_id": "guardian:378d082f408a675788ed41d0|reddit:1v3qjp5", "label": "different_story", "note": "запрет китайских роботов против высказывания об ABC"}
+{"pair_id": "reddit:1v1pwj6|reuters:11f4311a0301e2b5bed98705", "label": "different_story", "note": "приговоры за видео против роста цен на нефть"}
+{"pair_id": "foxbusiness:5f234608113aeaddd6ede69a|foxbusiness:CBMipAFBVV95cUxPZFg0R1RHRE1TYTdwb21iR3ZIQ0QtNDEySG", "label": "different_story", "note": "кампус Philip Morris против ресторана Chipotle"}
+{"pair_id": "foxbusiness:CBMipAFBVV95cUxQZlhfelY3UU13anFleUtkQldHZmRFQkw3eE|reddit:1v33hp4", "label": "different_story", "note": "падение Magnificent 7 против перераспределения научных грантов"}
+{"pair_id": "ft:CBMicEFVX3lxTE51c2kyVUwwcWdKU0lXV21vRnRraUh4N1FGRj|techcrunch:9183ec221b3fa83786b865fd", "label": "different_story", "note": "колонка о термояде против гранта конкретной компании"}
+{"pair_id": "guardian:47b18e0e5b434f642f7f6121|guardian:the-guardian-view-on-andy-burnhams-first-week-poli", "label": "same_story", "note": "обе колонки Guardian о первой неделе Бёрнэма"}
+{"pair_id": "hackernews:48956879|hackernews:49030618", "label": "different_story", "note": "сравнение моделей против налогового движка"}
+{"pair_id": "reuters:bfbc45f10df76d544633e2fa|reuters:e839f3cde5227b677a9c3459", "label": "different_story", "note": "падение Philips против прогноза по Индии"}
+{"pair_id": "nytimes:2f8be0895b7170956cd813d8|nytimes:cyclospora-social-media.html", "label": "same_story", "note": "одна и та же вспышка циклоспоры"}
+{"pair_id": "nytimes:be5a8b893b3f8e4764d9a3b1|reuters:dd49f6bf2e958d144458da45", "label": "same_story", "note": "одно и то же назначение тренера сборной Италии"}
+{"pair_id": "nytimes:076fc3a774f6c76a17418270|reddit:1v3uqv6", "label": "different_story", "note": "драфт WNBA против сокращений в FedEx"}
+{"pair_id": "ft:CBMihAFBVV95cUxOU2FyWGg1ZUJWeDUxVHUwQThYaWdrRng5M2|techcrunch:f98543da0b639b26ac89d156", "label": "different_story", "note": "лоббирование открытых моделей против партнёрства с SSI"}
+{"pair_id": "reuters:CBMiogFBVV95cUxOMFJIUEJoeWdFd2VDa3k0V1ZTVWpIZUM3Z3|reuters:CBMirwFBVV95cUxNenNib19JWnhPbU00bUNBREJvbHB3MzUxaV", "label": "different_story", "note": "украинские дроны против сбитого дрона в Румынии"}
+{"pair_id": "ft:CBMihAFBVV95cUxOSDA5bU1zNl95Y0ZwLUpSRGVKYjk2VGVsak|ft:CBMihAFBVV95cUxPOXVpZktXOTcyV0xwUGNVbE41VER0U1MyVX", "label": "different_story", "note": "торговля Китая и ЕС против стратегии ETF-фондов"}
+{"pair_id": "techcrunch:27666e7fb9fc43585eb025f5|wired:the-apple-faceid-veteran-building-a-frontier-ai-mo", "label": "different_story", "note": "нейроинтерфейсы для роботов против диагностики мозга"}
+{"pair_id": "nytimes:microsoft-unveils-ai-cybersecurity-tools.html|reddit:1v5xrfk", "label": "different_story", "note": "анонс Microsoft против атаки через Wi-Fi отелей"}
+{"pair_id": "bbc:9f6a20b457eb3814bb492adf|reuters:486464061c12420d4fb1003b", "label": "different_story", "note": "молодые инвесторы против сводки по рынку"}
+{"pair_id": "hackernews:48970775|techcrunch:dd98f963f3b250f71b382733", "label": "different_story", "note": "кибербезопасность авиации против модели Microsoft"}
+{"pair_id": "guardian:623b00b62fc6ee7de0eddb1b|reddit:1v3nklg", "label": "different_story", "note": "распродажа в Корее против падения акций Reddit"}
+{"pair_id": "reuters:CBMipwFBVV95cUxOck9LdDB0V0U4T2lkekRnaDVwUXo2dXhOST|reuters:CBMiugFBVV95cUxPajR0a3JtLUFZTGVwMWJFUDdCR2M1UlpfRG", "label": "different_story", "note": "отстранение полицейского против отставки министра — разные события"}
+{"pair_id": "ft:CBMicEFVX3lxTE9QajhXMGxYYnVablVqWTR3QjRSUmt4anhvWH|reuters:CBMixAFBVV95cUxNQ3VKUUQxR1JaaTluQmZpd0FuM216WU9xWk", "label": "different_story", "note": "репортаж о цветочных полях против отбора тренера"}
+{"pair_id": "ft:CBMihAFBVV95cUxOMy1OMldaMFlSSmNCOEhHUUxtenZYVFQtVX|techcrunch:7e44c5f3ab488da1aeede107", "label": "different_story", "note": "ядерная сделка против покупки доли в Lucid"}
+{"pair_id": "hackernews:48960803|techcrunch:dd98f963f3b250f71b382733", "label": "different_story", "note": "инициатива Белого дома против анонса Microsoft"}
+{"pair_id": "ft:CBMihAFBVV95cUxNRTZVM3dNRWpvb3RlOV9GdzIyYkdXeVBLaV|nytimes:076fc3a774f6c76a17418270", "label": "different_story", "note": "убыток Shein против драфта WNBA"}
+{"pair_id": "wired:a-sneaky-hacking-tool-targeting-ai-infrastructure-|wired:prompt-injection-attacks-are-thwarting-ai-hacking-", "label": "different_story", "note": "инструмент атаки против защиты от prompt injection"}
+{"pair_id": "wired:chinas-open-ai-models-are-challenging-silicon-vall|wired:nonprofits-are-getting-ready-for-the-funding-anthr", "label": "different_story", "note": "китайские модели против будущих IPO-миллиардеров"}
+{"pair_id": "producthunt:1198621|verge:e9c474af2da2d9c444c29391", "label": "different_story", "note": "приложение-заметочник против продукта Perplexity"}
+{"pair_id": "verge:halo-campaign-evolved-review-xbox-ps5-pc|verge:xbox-game-pass-ultimate-deal-sale", "label": "different_story", "note": "ремейк Halo против скидки на Game Pass"}
+{"pair_id": "wired:chinas-open-ai-models-are-challenging-silicon-vall|wired:silicon-valleys-elite-financial-advisers-say-this-", "label": "different_story", "note": "китайские модели против финансовых советников"}
+{"pair_id": "hackernews:48956440|nytimes:828a599b41a1a9d3df2fb0cb", "label": "different_story", "note": "учебная платформа против анонса Microsoft"}
+{"pair_id": "arstechnica:5f44547a7d26f85bd9be6b86|reddit:1v6a10f", "label": "same_story", "note": "обе про один и тот же всплеск кори в США"}
+{"pair_id": "hackernews:48965704|hackernews:49007536", "label": "different_story", "note": "оценка Kimi K3 против инцидента с моделями OpenAI"}
+{"pair_id": "reddit:1v2pdze|reddit:1v59x4m", "label": "different_story", "note": "два разных обсуждения в сообществе"}
+{"pair_id": "foxbusiness:17012e0a17ad2dda0c52790e|reddit:1v4svfv", "label": "different_story", "note": "законопроект против Mercedes-Benz против общего тезиса о Китае"}
+{"pair_id": "guardian:ai-tech-workers-unionize|verge:58a584475a0846b1ee67ae68", "label": "different_story", "note": "колонка о профсоюзах против конкретной кампании в Wikimedia"}
+{"pair_id": "arstechnica:57f64e29c8ac4b7d6b765e69|time:cannes-deloitte-time100-talk", "label": "different_story", "note": "антипрививочные нарративы против спортивного сторителлинга"}
+{"pair_id": "hackernews:49094200|reuters:CBMiwwFBVV95cUxPUjhvdVJpOGxsTzNtaGVubGh1YmxsSGQweT", "label": "different_story", "note": "архивный материал о табаке против высказывания Бёрнэма"}
+{"pair_id": "hackernews:49022152|producthunt:1198621", "label": "different_story", "note": "письмо от руки против приложения-заметочника"}
+{"pair_id": "ft:CBMihAFBVV95cUxQNDRKcjlIRXVOdlF6LVRHXzFjcmhWWnRyTX|hackernews:49084091", "label": "different_story", "note": "тренер сборной Италии против блокировки сайтов"}
+{"pair_id": "reddit:1v6a10f|reuters:f567f2499bb0a3e5f1cd448b", "label": "different_story", "note": "корь в США против рекорда в крикете"}
+{"pair_id": "bbc:13125234aad66d725fd448d5|reddit:1v1p2ws", "label": "different_story", "note": "учения флота против поста об отказе на собеседовании"}
+{"pair_id": "nytimes:0b02c829e6c402e3787b22a5|nytimes:51985e488f8c7280a12bc075", "label": "different_story", "note": "выставка о Гражданской войне против расследования по Эпштейну"}
+{"pair_id": "hackernews:49094200|reuters:CBMivgFBVV95cUxPMTJYU1ZqWjdXVXRveUJLd1BsbFVvd2s0RF", "label": "different_story", "note": "архивный материал о табаке против угроз Ирана"}
+{"pair_id": "hackernews:49086398|vanityfair:jeff-shell-paramount-departure-rj-cipriani", "label": "different_story", "note": "Game of Life на Mongo против ухода Джеффа Шелла — общее слово shell обманчиво"}
+{"pair_id": "hackernews:49080775|reddit:1v1ts3s", "label": "different_story", "note": "проблема с подпиской Claude против общего вопроса о подписках"}
+{"pair_id": "ft:CBMihAFBVV95cUxOYnkxay1YWmh6dEZIdFh0WGNrYVAySkp0Ul|wired:prologium-battery-startup-betting-against-china", "label": "different_story", "note": "оборонные стартапы против батарейного стартапа"}
+{"pair_id": "reddit:1uy0dr8|wired:prologium-battery-startup-betting-against-china", "label": "different_story", "note": "хедж-фонды против батарейного стартапа"}
+{"pair_id": "newyorker:the-e-mail-newsletter-for-the-mogul-set|newyorker:the-extremely-large-life-of-a-suntan-lotion-mogul", "label": "different_story", "note": "два разных очерка New Yorker"}
+{"pair_id": "newyorker:the-upstart-union-challenging-starbucks|reddit:1v7ti2o", "label": "different_story", "note": "профсоюз Starbucks против вопроса о рынке труда"}
+{"pair_id": "hackernews:48940335|techcrunch:3dd770bab6d8178351d7a8cb", "label": "different_story", "note": "open-source SRE против программы конференции"}
+{"pair_id": "hackernews:49075264|reuters:0268330bda3711ab42891777", "label": "different_story", "note": "Эндрю Уайлс против Эндрю Ына — совпало только имя"}
+{"pair_id": "hackernews:49086788|producthunt:1185439", "label": "different_story", "note": "совет авторам Substack против виджетов Jotform"}
+{"pair_id": "guardian:qantas-project-sunrise-airbus-a350-1000ulr-ultra-l|hackernews:49086285", "label": "same_story", "note": "тот же рекордный беспосадочный перелёт Airbus"}
+{"pair_id": "reddit:1v77r9s|wired:security-news-this-week-your-period-tracker-is-pro", "label": "different_story", "note": "трекер статей NeurIPS против трекера цикла — слово обманчиво"}
+{"pair_id": "hackernews:49021816|hackernews:49086338", "label": "different_story", "note": "анонс Gemini 3.6 Flash против сервиса дистилляции"}
+{"pair_id": "usatoday:8facaabfed58ee9c77d225bb|usatoday:d42a6744001d23b71e4a280e", "label": "different_story", "note": "лев у лагеря против тренировочного лагеря 49ers"}
+{"pair_id": "ft:CBMihAFBVV95cUxNTmRVcFNoekgtVXFPa293Wl9JM1JteVBsMl|wired:eu-fines-google-billion-prioritizing-own-services-", "label": "same_story", "note": "один и тот же штраф ЕС для Google"}
+{"pair_id": "hackernews:49066591|reddit:1uycepz", "label": "different_story", "note": "сбои Claude Opus 5 против бенчмарка Kimi K3"}
+{"pair_id": "reddit:1v39du1|reddit:1v7hw9x", "label": "different_story", "note": "порча камер Flock против законопроекта о финансировании"}
+{"pair_id": "reddit:1uycepz|reddit:1v5hc2s", "label": "different_story", "note": "бенчмарк Kimi K3 против результата Opus 5 на ARC-AGI"}
