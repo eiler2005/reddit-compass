@@ -5,14 +5,16 @@ Jinja2 templates с autoescape. Security headers.
 
 from __future__ import annotations
 
+import json
 import os
 import secrets
 import sqlite3
 from collections.abc import Generator
 from dataclasses import asdict
+from math import log1p
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
@@ -37,6 +39,7 @@ from ..intelligence.repository import (
     query_stories,
     update_research_state,
 )
+from ..intelligence.taxonomy import BROAD_DOMAINS
 from .view_models import briefing_to_view, story_to_detail_view
 
 router = APIRouter()
@@ -125,6 +128,70 @@ _REVIEW_LABELS = {
     "legacy": "legacy",
 }
 
+_PROVIDER_LABELS = {
+    "reddit": "Reddit",
+    "hn": "Hacker News",
+    "hackernews": "Hacker News",
+    "producthunt": "Product Hunt",
+    "reuters": "Reuters",
+    "bbc": "BBC",
+    "guardian": "Guardian",
+    "nytimes": "NYT",
+    "nyt": "NYT",
+    "financial_times": "FT",
+    "ft": "FT",
+    "techcrunch": "TechCrunch",
+    "the_verge": "The Verge",
+    "verge": "The Verge",
+    "ars_technica": "Ars Technica",
+    "wired": "Wired",
+}
+
+_READING_DOMAIN_WEIGHTS = {
+    "ai_technology": 26.0,
+    "labor_career": 23.0,
+    "business_markets": 23.0,
+    "security_privacy": 20.0,
+    "society_politics": 17.0,
+    "world_geopolitics": 16.0,
+    "finance_consumer": 15.0,
+    "culture_media": 12.0,
+    "science_health_education": 10.0,
+    "climate_energy_infrastructure": 9.0,
+    "sports": 5.0,
+    "other": -5.0,
+}
+
+_READING_PROVIDER_WEIGHTS = {
+    "reuters": 14.0,
+    "financial_times": 14.0,
+    "ft": 14.0,
+    "nytimes": 13.0,
+    "nyt": 13.0,
+    "bbc": 12.0,
+    "guardian": 12.0,
+    "wired": 11.0,
+    "techcrunch": 10.0,
+    "the_verge": 10.0,
+    "verge": 10.0,
+    "ars_technica": 10.0,
+    "hn": 9.0,
+    "hackernews": 9.0,
+    # Reddit is a useful early/community signal, but raw engagement must not
+    # crowd out reported or primary-source material in the daily reading list.
+    "reddit": 7.0,
+    "producthunt": 7.0,
+}
+
+_READING_CLUSTER_WEIGHTS = {
+    "business": 8.0,
+    "mainstream": 8.0,
+    "technology": 7.0,
+    "voices": 7.0,
+    "product": 6.0,
+    "culture": 5.0,
+}
+
 
 def _decorate_today_trend(trend: dict[str, object], analysis_query: str) -> dict[str, object]:
     enriched = dict(trend)
@@ -145,8 +212,316 @@ def _decorate_today_trend(trend: dict[str, object], analysis_query: str) -> dict
     return enriched
 
 
+def _json_dict_value(raw: object) -> dict[str, Any]:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _json_list_value(raw: object, fallback: list[str] | None = None) -> list[str]:
+    if isinstance(raw, list):
+        return [str(value) for value in raw]
+    if isinstance(raw, str) and raw:
+        try:
+            parsed = json.loads(raw)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(value) for value in parsed]
+    return list(fallback or [])
+
+
+def _provider_label(provider: str) -> str:
+    return _PROVIDER_LABELS.get(provider, provider.replace("_", " ").title())
+
+
+def _domain_label(domain_id: str) -> str:
+    return BROAD_DOMAINS[domain_id].label_ru if domain_id in BROAD_DOMAINS else domain_id
+
+
+def _float_metric(raw: dict[str, Any], *keys: str) -> float:
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, int | float):
+            return float(value)
+        if isinstance(value, str):
+            try:
+                return float(value)
+            except ValueError:
+                continue
+    return 0.0
+
+
+def _normalized_reading_key(title: str, primary_url: str, secondary_url: str) -> str:
+    url = primary_url or secondary_url
+    if url:
+        parsed = urlsplit(url)
+        return f"{parsed.netloc.lower()}{parsed.path.rstrip('/').lower()}"
+    return " ".join(title.lower().split())[:120]
+
+
+def _numeric_dict_value(raw: dict[str, Any], key: str) -> float:
+    value = raw.get(key, 0.0)
+    if isinstance(value, int | float):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def _is_low_signal_reading_title(title: str) -> bool:
+    """Keep recurring community housekeeping out of the human reading queue."""
+    title_lower = title.lower()
+    routine_markers = (
+        "game thread",
+        "daily discussion",
+        "megathread",
+        "daily questions",
+        "weekly discussion",
+        "what are you playing",
+    )
+    words = [word for word in title_lower.split() if any(char.isalpha() for char in word)]
+    return len(words) < 3 or any(marker in title_lower for marker in routine_markers)
+
+
+def _item_reading_score(
+    *,
+    row: sqlite3.Row,
+    domain_ids: list[str],
+    project_scores: dict[str, Any],
+    raw_engagement: dict[str, Any],
+    radar_date: str,
+) -> float:
+    provider = str(row["provider"] or "").lower()
+    source_cluster = str(row["source_cluster"] or "").lower()
+    content_scope = str(row["content_scope"] or "headline")
+    title = str(row["title"] or "")
+    score = max(
+        (_READING_DOMAIN_WEIGHTS.get(domain_id, 0.0) for domain_id in domain_ids),
+        default=0.0,
+    )
+    score += _READING_PROVIDER_WEIGHTS.get(provider, 4.0)
+    score += _READING_CLUSTER_WEIGHTS.get(source_cluster, 2.0)
+    score += min(
+        28.0,
+        0.25 * _numeric_dict_value(project_scores, "rbc")
+        + 0.18 * _numeric_dict_value(project_scores, "book")
+        + 0.12 * _numeric_dict_value(project_scores, "business"),
+    )
+    if provider in {"reddit", "hn", "hackernews", "producthunt"}:
+        # Engagement is measured differently across platforms.  It is a small
+        # within-channel tiebreaker here, never a global popularity contest.
+        score += min(
+            8.0,
+            log1p(_float_metric(raw_engagement, "score", "points", "votes")) * 1.0,
+        )
+        score += min(
+            5.0,
+            log1p(_float_metric(raw_engagement, "comments", "comment_count", "num_comments")) * 0.9,
+        )
+    if content_scope == "full":
+        score += 5.0
+    elif content_scope == "excerpt":
+        score += 3.0
+    elif content_scope == "abstract":
+        score += 2.0
+    if str(row["snapshot_date"] or "") == radar_date:
+        score += 8.0
+    if int(row["story_source_count"] or 0) > 1:
+        score += 5.0
+    if _is_low_signal_reading_title(title):
+        score -= 35.0
+    return score
+
+
+def _build_today_reading_list(
+    conn: sqlite3.Connection, radar: dict[str, object], *, limit: int = 20
+) -> list[dict[str, object]]:
+    data_release_id = str(radar.get("data_release_id") or "")
+    story_release_id = str(radar.get("story_release_id") or "")
+    radar_date = str(radar.get("date") or "")
+    if not data_release_id or not story_release_id:
+        return []
+    facet_row = conn.execute(
+        "SELECT facet_release_id FROM story_releases WHERE story_release_id = ?",
+        (story_release_id,),
+    ).fetchone()
+    if facet_row is None:
+        return []
+    rows = conn.execute(
+        """
+        SELECT
+            i.item_id,
+            i.provider,
+            i.source_cluster,
+            i.source_section,
+            i.title,
+            i.summary_ru,
+            i.excerpt,
+            i.canonical_url,
+            i.discussion_url,
+            i.target_url,
+            i.published_at,
+            i.observed_at,
+            i.snapshot_date,
+            i.content_scope,
+            i.raw_engagement,
+            i.domain_ids AS item_domain_ids,
+            f.domain_ids AS facet_domain_ids,
+            f.theme_ids,
+            f.pain_points,
+            f.summary_ru AS facet_summary_ru,
+            COALESCE(si.story_id, '') AS story_id,
+            COALESCE(s.title, '') AS story_title,
+            COALESCE(s.project_scores, '{}') AS project_scores,
+            COALESCE(s.source_count, 0) AS story_source_count,
+            COALESCE(s.item_count, 0) AS story_item_count
+        FROM release_items AS i
+        LEFT JOIN item_facets AS f
+          ON f.facet_release_id = ?
+         AND f.item_id = i.item_id
+        LEFT JOIN engine_story_items AS si
+          ON si.story_release_id = ?
+         AND si.item_id = i.item_id
+        LEFT JOIN engine_stories AS s
+          ON s.story_release_id = ?
+         AND s.story_id = si.story_id
+        WHERE i.release_id = ?
+        ORDER BY COALESCE(i.published_at, i.observed_at, i.snapshot_date) DESC, i.item_id
+        LIMIT 10000
+        """,
+        (facet_row["facet_release_id"], story_release_id, story_release_id, data_release_id),
+    ).fetchall()
+    candidates: list[dict[str, object]] = []
+    for row in rows:
+        title = str(row["title"] or "").strip()
+        if not title:
+            continue
+        provider = str(row["provider"] or "")
+        discussion_url = _safe_url(str(row["discussion_url"] or ""))
+        target_url = _safe_url(str(row["target_url"] or ""))
+        canonical_url = _safe_url(str(row["canonical_url"] or ""))
+        if provider == "reddit":
+            # A Reddit link-post should lead to the underlying material first;
+            # the discussion stays one click away.  Self posts still open at
+            # the Reddit discussion URL.
+            primary_url = target_url or discussion_url or canonical_url
+            secondary_url = (
+                discussion_url if discussion_url and discussion_url != primary_url else ""
+            )
+            secondary_label = "Обсуждение" if secondary_url else ""
+        else:
+            primary_url = canonical_url or target_url
+            secondary_url = (
+                discussion_url if discussion_url and discussion_url != primary_url else ""
+            )
+            secondary_label = "Reddit" if secondary_url else ""
+        if not primary_url:
+            continue
+        domain_ids = _json_list_value(row["facet_domain_ids"] or row["item_domain_ids"], ["other"])
+        project_scores = _json_dict_value(row["project_scores"])
+        raw_engagement = _json_dict_value(row["raw_engagement"])
+        score = _item_reading_score(
+            row=row,
+            domain_ids=domain_ids,
+            project_scores=project_scores,
+            raw_engagement=raw_engagement,
+            radar_date=radar_date,
+        )
+        candidates.append(
+            {
+                "item_id": row["item_id"],
+                "title": title,
+                "summary": row["facet_summary_ru"] or row["summary_ru"] or row["excerpt"] or "",
+                "provider": provider,
+                "provider_label": _provider_label(provider),
+                "source_cluster": row["source_cluster"],
+                "source_section": row["source_section"],
+                "primary_url": primary_url,
+                "secondary_url": secondary_url,
+                "secondary_label": secondary_label,
+                "story_id": row["story_id"],
+                "story_title": row["story_title"],
+                "story_item_count": int(row["story_item_count"] or 0),
+                "story_source_count": int(row["story_source_count"] or 0),
+                "domain_ids": domain_ids[:3],
+                "domain_labels": [_domain_label(domain_id) for domain_id in domain_ids[:3]],
+                "published_at": row["published_at"] or row["observed_at"] or row["snapshot_date"],
+                "score": round(score, 1),
+                "reason": " / ".join(
+                    value
+                    for value in [
+                        "профиль РБК" if _numeric_dict_value(project_scores, "rbc") >= 70 else "",
+                        "книга" if _numeric_dict_value(project_scores, "book") >= 60 else "",
+                        "Reddit-сигнал" if provider == "reddit" else "",
+                        "cross-source story" if int(row["story_source_count"] or 0) > 1 else "",
+                    ]
+                    if value
+                )
+                or "ежедневное чтение",
+                # One story should appear once even when it has a Reddit
+                # discussion plus several articles.  URLs are the fallback
+                # when the current StoryRelease has not joined the item yet.
+                "_dedupe_key": str(row["story_id"] or "")
+                or _normalized_reading_key(title, target_url or canonical_url, primary_url),
+                "_primary_domain": domain_ids[0] if domain_ids else "other",
+                "_is_current_day": str(row["snapshot_date"] or "") == radar_date,
+            }
+        )
+
+    def sort_key(item: dict[str, object]) -> tuple[float, str]:
+        score_raw = item.get("score", 0.0)
+        score = float(score_raw) if isinstance(score_raw, int | float | str) else 0.0
+        return (-score, str(item.get("title", "")))
+
+    candidates.sort(key=sort_key)
+    selected: list[dict[str, object]] = []
+    seen: set[str] = set()
+    provider_counts: dict[str, int] = {}
+    domain_counts: dict[str, int] = {}
+    reddit_count = 0
+    # A daily reading list is current-day first; a smaller collection falls
+    # back to the rest of the immutable release to retain a useful 20 items.
+    ordered_candidates = [item for item in candidates if bool(item["_is_current_day"])] + [
+        item for item in candidates if not bool(item["_is_current_day"])
+    ]
+    for item in ordered_candidates:
+        key = str(item["_dedupe_key"])
+        provider = str(item["provider"])
+        primary_domain = str(item["_primary_domain"])
+        if key in seen:
+            continue
+        if provider == "reddit" and reddit_count >= 6:
+            continue
+        if provider_counts.get(provider, 0) >= 4:
+            continue
+        if domain_counts.get(primary_domain, 0) >= 5:
+            continue
+        seen.add(key)
+        provider_counts[provider] = provider_counts.get(provider, 0) + 1
+        domain_counts[primary_domain] = domain_counts.get(primary_domain, 0) + 1
+        if provider == "reddit":
+            reddit_count += 1
+        item.pop("_dedupe_key", None)
+        item.pop("_primary_domain", None)
+        item.pop("_is_current_day", None)
+        selected.append(item)
+        if len(selected) >= limit:
+            break
+    return selected
+
+
 def _build_today_dashboard(
-    radar: dict[str, object], changes: list[dict[str, object]]
+    radar: dict[str, object], changes: list[dict[str, object]], analysis_query: str
 ) -> dict[str, object]:
     run_raw = radar.get("run")
     run = cast(dict[str, Any], run_raw) if isinstance(run_raw, dict) else {}
@@ -174,9 +549,18 @@ def _build_today_dashboard(
     )
     domains_raw = radar.get("domains")
     domains = domains_raw if isinstance(domains_raw, list) else []
-    top_domains = [
-        domain for domain in domains[:8] if isinstance(domain, dict) and domain.get("domain_id")
-    ]
+    top_domains: list[dict[str, object]] = []
+    for domain in domains[:8]:
+        if not isinstance(domain, dict) or not domain.get("domain_id"):
+            continue
+        domain_id = str(domain["domain_id"])
+        domain_query = urlencode({"channel": "broad", "domain": domain_id})
+        enriched_domain = dict(domain)
+        enriched_domain["news_url"] = f"/news?{domain_query}"
+        enriched_domain["stories_url"] = f"/stories?{domain_query}"
+        enriched_domain["trends_url"] = f"/trends?{domain_query}"
+        enriched_domain["radar_url"] = f"/runs/{radar.get('date')}/radar?{domain_query}"
+        top_domains.append(enriched_domain)
     release_dates = run.get("release_dates", [])
     if not isinstance(release_dates, list):
         release_dates = []
@@ -243,11 +627,11 @@ def _build_today_dashboard(
         else "",
         "status_notes": status_notes,
         "quick_links": [
-            ("News", "/news?channel=broad", "сырые материалы"),
-            ("Stories", "/stories?channel=broad", "конкретные события"),
-            ("Trends", "/trends?channel=broad", "паттерны поверх событий"),
+            ("News", f"/news?{analysis_query}", "сырые материалы"),
+            ("Stories", f"/stories?{analysis_query}", "конкретные события"),
+            ("Trends", f"/trends?{analysis_query}", "паттерны поверх событий"),
             ("Reddit Pulse", "/pulse", "сигналы сообществ"),
-            ("Radar", f"/runs/{radar.get('date')}/radar?channel=broad", "полный workspace"),
+            ("Radar", f"/runs/{radar.get('date')}/radar?{analysis_query}", "полный workspace"),
         ],
     }
 
@@ -265,6 +649,7 @@ async def today_page(
         from .v2 import _engine_radar, _resolve_latest_evaluated_preview
 
         engine_conn = open_engine_readonly(engine_path)
+        reading_items: list[dict[str, object]] = []
         try:
             publication = get_current_publication(engine_conn, "broad")
             if publication:
@@ -286,6 +671,12 @@ async def today_page(
                 if engine_date
                 else None
             )
+            if published_radar is not None:
+                reading_items = _build_today_reading_list(
+                    engine_conn,
+                    published_radar.model_dump(),
+                    limit=20,
+                )
         finally:
             engine_conn.close()
 
@@ -314,7 +705,12 @@ async def today_page(
                 context={
                     "radar": radar_payload,
                     "changes": decorated_changes,
-                    "dashboard": _build_today_dashboard(radar_payload, decorated_changes),
+                    "dashboard": _build_today_dashboard(
+                        radar_payload,
+                        decorated_changes,
+                        analysis_query,
+                    ),
+                    "reading_items": reading_items,
                     "analysis_query": analysis_query,
                 },
             )

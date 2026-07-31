@@ -45,7 +45,7 @@ flowchart TD
     SR --> PUB
 
     subgraph GUI[GUI / API]
-        TODAY[/today — Мир / Нерв Reddit / Тренды]
+        TODAY[/today — изменения / ежедневное чтение / рубрики]
         NEWS[/news]
         STORIES[/stories]
         TRENDS[/trends]

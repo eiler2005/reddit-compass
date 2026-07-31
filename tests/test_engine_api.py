@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reddit_compass.api.app import create_app
+from reddit_compass.api.ui import _build_today_reading_list
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.engine import engine_db
 from reddit_compass.intelligence.migrations import migrate
@@ -76,8 +77,8 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
         INSERT INTO release_items (
             release_id, item_id, provider, source_cluster, external_id,
             canonical_url, title, snapshot_date, source_section, domain_ids,
-            discussion_url, raw_engagement, metadata, row_checksum
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            discussion_url, target_url, raw_engagement, metadata, row_checksum
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "data_test",
@@ -91,6 +92,7 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
             "news",
             '["society_politics"]',
             "javascript:alert(1)",
+            "https://example.com/story",
             '{"score": 100, "comments": 40, "upvote_ratio": 0.91}',
             '{"is_self": false}',
             "reddit-row-checksum",
@@ -438,11 +440,42 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert "Сводка выпуска" in response.text
     assert "trend-кандидатов" in response.text
     assert "Качество и ограничения" in response.text
+    assert "Что прочитать сегодня" in response.text
     assert "Тематический срез" in response.text
     assert "Куда идти дальше" in response.text
     assert 'href="/trends/trend_1?channel=broad"' in response.text
     assert 'href="/news?channel=broad"' in response.text
+    assert 'href="/news?channel=broad&amp;domain=world_geopolitics"' in response.text
+    assert 'href="/stories?channel=broad&amp;domain=world_geopolitics"' in response.text
+    assert 'href="/trends?channel=broad&amp;domain=world_geopolitics"' in response.text
+    assert 'href="https://example.com/story"' in response.text
+    assert "javascript:alert" not in response.text
     assert "Проверяемый тренд" in response.text
+
+
+def test_today_reading_list_prefers_article_and_dedupes_story(
+    engine_client: TestClient,
+) -> None:
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    try:
+        items = _build_today_reading_list(
+            conn,
+            {
+                "data_release_id": "data_test",
+                "story_release_id": "story_test",
+                "date": "2026-07-29",
+            },
+        )
+    finally:
+        conn.close()
+
+    # The Reuters item and its Reddit discussion belong to one story.  The
+    # reading queue exposes the article URL and does not render the same story
+    # twice; a malicious discussion URL never becomes a link.
+    assert len(items) == 1
+    assert items[0]["primary_url"] == "https://example.com/story"
+    assert items[0]["secondary_url"] == ""
 
 
 def test_radar_keeps_previous_publication_for_new_date(

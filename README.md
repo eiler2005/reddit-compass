@@ -285,7 +285,7 @@ Then synthesizes: **top 5 deep themes** (with explanations), **3 column ideas**,
 
 | View | URL | Purpose |
 |---|---|---|
-| **Today** | `/today` | Утренний бриф: 3–5 изменений, что прочитать, что в работе |
+| **Today** | `/today` | Утренний бриф: 3–5 изменений, персональная лента до 20 свежих материалов с прямыми ссылками и drill-down по рубрикам |
 | **News** | `/news` | Сырой inbox опубликованного Data Release: материалы, источники, sections, связанный story |
 | **Stories** | `/stories` | Конкретные события с evidence items; не raw news и не тренды |
 | **Trends** | `/trends` | Повторяющиеся паттерны поверх нескольких stories |
