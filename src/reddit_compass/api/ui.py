@@ -572,10 +572,9 @@ def _build_today_dashboard(
         domain_id = str(domain["domain_id"])
         domain_query = urlencode({"channel": "broad", "domain": domain_id})
         enriched_domain = dict(domain)
-        enriched_domain["news_url"] = f"/news?{domain_query}"
-        enriched_domain["stories_url"] = f"/stories?{domain_query}"
-        enriched_domain["trends_url"] = f"/trends?{domain_query}"
-        enriched_domain["radar_url"] = f"/runs/{radar.get('date')}/radar?{domain_query}"
+        # A domain is a way to investigate concrete events, not a static
+        # counter.  The click therefore opens the filtered Story workspace.
+        enriched_domain["url"] = f"/stories?{domain_query}"
         top_domains.append(enriched_domain)
     release_dates = run.get("release_dates", [])
     if not isinstance(release_dates, list):

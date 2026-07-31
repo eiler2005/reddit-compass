@@ -121,19 +121,13 @@
     <section class="section today-grid">
         <div class="status-panel">
             <h2>Тематический срез</h2>
-            <div class="domain-slice-grid">
+            <p class="section-note">Клик открывает конкретные сюжеты выбранной рубрики.</p>
+            <div class="cloud">
                 {% for domain in dashboard.top_domains %}
-                <article class="domain-slice-card">
-                    <div>
-                        <strong>{{ domain.label_ru }}</strong>
-                        <span class="cloud-count">{{ domain.story_count }}</span>
-                    </div>
-                    <div class="domain-slice-actions">
-                        <a href="{{ domain.news_url }}">News</a>
-                        <a href="{{ domain.stories_url }}">Stories</a>
-                        <a href="{{ domain.trends_url }}">Trends</a>
-                    </div>
-                </article>
+                <a class="cloud-node" href="{{ domain.url }}">
+                    {{ domain.label_ru }}
+                    <span class="cloud-count">{{ domain.story_count }}</span>
+                </a>
                 {% else %}
                 <span class="section-note">Рубрики пока не рассчитаны.</span>
                 {% endfor %}

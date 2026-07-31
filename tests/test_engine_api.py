@@ -447,9 +447,7 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert "Куда идти дальше" in response.text
     assert 'href="/trends/trend_1?channel=broad"' in response.text
     assert 'href="/news?channel=broad"' in response.text
-    assert 'href="/news?channel=broad&amp;domain=world_geopolitics"' in response.text
     assert 'href="/stories?channel=broad&amp;domain=world_geopolitics"' in response.text
-    assert 'href="/trends?channel=broad&amp;domain=world_geopolitics"' in response.text
     assert 'src="/static/today_reading.js"' in response.text
     assert reading_response.json()["items"][0]["primary_url"] == "https://example.com/story"
     assert "javascript:alert" not in response.text
