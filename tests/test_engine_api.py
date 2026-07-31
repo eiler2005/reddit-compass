@@ -592,9 +592,9 @@ def test_published_trend_detail_limits_member_stories(engine_client: TestClient)
     trend_detail = engine_client.get("/trends/trend_1")
 
     assert trend.status_code == 200
-    assert len(trend.json()["stories"]) == 20
+    assert len(trend.json()["stories"]) == 8
     assert trend_detail.status_code == 200
-    assert "Показано 20 из 26 stories" in trend_detail.text
+    assert "Показано 8 из 26 stories" in trend_detail.text
 
 
 def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:

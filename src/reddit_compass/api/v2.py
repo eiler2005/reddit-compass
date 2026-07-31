@@ -1020,7 +1020,7 @@ def _engine_trend_detail(
         WHERE ts.trend_release_id = ?
           AND ts.trend_id = ?
         ORDER BY ts.membership_score DESC, s.source_count DESC, s.last_seen DESC
-        LIMIT 20
+        LIMIT 8
         """,
         (story_release.story_release_id, trend_release.trend_release_id, trend_id),
     ).fetchall()
