@@ -5585,7 +5585,14 @@ async def run_engine_cycle(
     publication_id = ""
     publication_blocked_reason = ""
     if publish_channel:
-        if data.input_status != "complete":
+        # A partial corpus is useful for an explicitly opted-in shadow/preview
+        # publication, but must never reach a production channel.  Keep this
+        # decision aligned with ``publish_radar`` rather than pre-emptively
+        # blocking every partial run here.
+        partial_not_allowed = data.input_status != "complete" and (
+            publish_channel in {"broad", "ai-native"} or not allow_partial
+        )
+        if partial_not_allowed:
             publication_blocked_reason = "input_partial"
         elif not quality_passed:
             publication_blocked_reason = "quality_floors_failed"

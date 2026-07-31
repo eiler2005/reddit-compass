@@ -599,6 +599,11 @@ async def _cmd_run(args: argparse.Namespace) -> None:
     )
 
 
+def _engine_review_requested(args: argparse.Namespace) -> bool:
+    """Whether either bounded Engine review stage needs a Qwen runner."""
+    return int(args.review_limit) > 0 or int(args.trend_review_limit) > 0
+
+
 async def _cmd_engine(args: argparse.Namespace) -> None:
     """Versioned Story/Trend Engine; never mutates compass.db."""
     from dataclasses import asdict
@@ -1456,7 +1461,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             corpus_conn = open_corpus_readonly(corpus_path)
             review_runner = (
                 (lambda prompt, model: call_qwen_json(prompt, model=model))
-                if int(args.review_limit) > 0
+                if _engine_review_requested(args)
                 else None
             )
             try:

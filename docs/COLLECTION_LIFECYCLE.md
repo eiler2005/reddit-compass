@@ -132,6 +132,9 @@ Data Release — не ссылка на живую БД, а полная frozen-
 Если expected source cluster пуст или raw run partial, release имеет `input_status=partial`.
 Такой release можно отлаживать, но его нельзя публиковать в `broad` или `ai-native` даже с
 `--allow-partial`; исключение допустимо лишь в непроизводственном `shadow`.
+`engine cycle --publish-channel shadow --allow-partial` делает такую preview-публикацию
+автоматически только после успешного quality gate. Без явного `--allow-partial` partial input
+остаётся без publication; production-каналы блокируются в обоих случаях.
 
 Health может содержать aggregate provider-row и section-rows одного провайдера. Например,
 `reddit=0` не делает release partial, если в том же frozen window есть успешные
@@ -143,6 +146,8 @@ voice coverage. Настоящий пустой provider без успешной
 Stories строятся из URL, title/BM25, entities, времени, чисел и локальных embedding candidates.
 Сначала применяются детерминированные hard-conflicts и provenance anchors. Qwen получает только
 серую зону (ограниченная порция pairs), с `temperature=0`, Pydantic JSON и evidence item IDs.
+Pair-review и trend-review имеют независимые limits: запуск только top trend reviews не требует
+повторять pair-review и всё равно создаёт Qwen runner.
 
 Candidate retrieval не разворачивает полный `N×N`: dense layer сохраняет top-K соседей на item,
 а sparse token/entity buckets ограничены 32 документами и общим budget 100 000 pairs на release.

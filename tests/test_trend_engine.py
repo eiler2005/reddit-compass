@@ -1431,6 +1431,73 @@ def test_run_engine_cycle_builds_all_layers(tmp_path: Path) -> None:
     assert result["label_source"] in {"auto", "qwen", "human", "skipped"}
 
 
+def test_run_engine_cycle_can_publish_opted_in_partial_shadow(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An explicitly opted-in shadow publication may expose a partial corpus.
+
+    Production channels remain protected by ``publish_radar``.  This test keeps
+    the cycle orchestration aligned with that lower-level contract, so preview
+    releases do not need a manual post-cycle publication workaround.
+    """
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_cycle_corpus(corpus_path)
+    upsert_run(
+        corpus,
+        run_id="2026-07-29:broad",
+        snapshot_date="2026-07-29",
+        profile="broad",
+        status="partial",
+        started_at="2026-07-29T07:00:00Z",
+        finished_at="2026-07-29T07:10:00Z",
+    )
+    corpus.commit()
+    engine = engine_db(tmp_path / "trend_engine.db")
+    import reddit_compass.intelligence.quality as quality_module
+    from reddit_compass.intelligence.quality import FloorResult
+
+    # The tiny fixture intentionally cannot satisfy corpus-size floors.  The
+    # contract under test is only the partial-shadow routing after quality has
+    # passed; production gate coverage lives in publish_radar tests.
+    monkeypatch.setattr(
+        quality_module,
+        "evaluate_floors",
+        lambda _metrics: [
+            FloorResult(
+                metric="test",
+                value=0.0,
+                floor=0.0,
+                op="max",
+                passed=True,
+                desc="test-only passed floor",
+            )
+        ],
+    )
+    try:
+        result = asyncio.run(
+            run_engine_cycle(
+                corpus,
+                engine,
+                corpus_path=corpus_path,
+                profile="broad",
+                window=2,
+                theme_catalog={},
+                pack_by_subreddit={"artificial": "ai_technology"},
+                review_limit=0,
+                publish_channel="shadow",
+                allow_partial=True,
+                pulse=False,
+            )
+        )
+    finally:
+        corpus.close()
+        engine.close()
+
+    assert result["quality"]["passed"] is True
+    assert result["publication_id"]
+    assert result["publication_blocked_reason"] == ""
+
+
 def test_run_engine_cycle_rebuilds_stories_after_valid_qwen_pair(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
