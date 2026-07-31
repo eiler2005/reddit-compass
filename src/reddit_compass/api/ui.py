@@ -365,8 +365,6 @@ def _build_today_reading_list(
             i.source_cluster,
             i.source_section,
             i.title,
-            i.summary_ru,
-            i.excerpt,
             i.canonical_url,
             i.discussion_url,
             i.target_url,
@@ -377,14 +375,9 @@ def _build_today_reading_list(
             i.raw_engagement,
             i.domain_ids AS item_domain_ids,
             f.domain_ids AS facet_domain_ids,
-            f.theme_ids,
-            f.pain_points,
-            f.summary_ru AS facet_summary_ru,
             COALESCE(si.story_id, '') AS story_id,
-            COALESCE(s.title, '') AS story_title,
             COALESCE(s.project_scores, '{}') AS project_scores,
-            COALESCE(s.source_count, 0) AS story_source_count,
-            COALESCE(s.item_count, 0) AS story_item_count
+            COALESCE(s.source_count, 0) AS story_source_count
         FROM release_items AS i
         LEFT JOIN item_facets AS f
           ON f.facet_release_id = ?
@@ -441,7 +434,6 @@ def _build_today_reading_list(
             {
                 "item_id": row["item_id"],
                 "title": title,
-                "summary": row["facet_summary_ru"] or row["summary_ru"] or row["excerpt"] or "",
                 "provider": provider,
                 "provider_label": _provider_label(provider),
                 "source_cluster": row["source_cluster"],
@@ -450,8 +442,6 @@ def _build_today_reading_list(
                 "secondary_url": secondary_url,
                 "secondary_label": secondary_label,
                 "story_id": row["story_id"],
-                "story_title": row["story_title"],
-                "story_item_count": int(row["story_item_count"] or 0),
                 "story_source_count": int(row["story_source_count"] or 0),
                 "domain_ids": domain_ids[:3],
                 "domain_labels": [_domain_label(domain_id) for domain_id in domain_ids[:3]],
@@ -518,6 +508,32 @@ def _build_today_reading_list(
         if len(selected) >= limit:
             break
     return selected
+
+
+def _load_today_engine_radar(
+    conn: sqlite3.Connection, *, date: str | None, profile: str
+) -> Any | None:
+    """Resolve the published (or evaluated preview) broad radar for Today."""
+    from .v2 import _engine_radar, _resolve_latest_evaluated_preview
+
+    publication = get_current_publication(conn, "broad")
+    if publication:
+        release = get_data_release(conn, publication.data_release_id)
+    else:
+        preview = _resolve_latest_evaluated_preview(conn, channel="broad")
+        release = preview[1] if preview else None
+    engine_date = date or (max(release.dates) if release and release.dates else None)
+    if not engine_date:
+        return None
+    return _engine_radar(
+        conn,
+        date=engine_date,
+        profile=profile,
+        mode="broad",
+        domain=None,
+        channel="broad",
+        publication_id=None,
+    )
 
 
 def _build_today_dashboard(
@@ -646,37 +662,9 @@ async def today_page(
     """Главная страница: briefing на сегодня."""
     engine_path = _engine_path()
     if engine_path.exists():
-        from .v2 import _engine_radar, _resolve_latest_evaluated_preview
-
         engine_conn = open_engine_readonly(engine_path)
-        reading_items: list[dict[str, object]] = []
         try:
-            publication = get_current_publication(engine_conn, "broad")
-            if publication:
-                release = get_data_release(engine_conn, publication.data_release_id)
-            else:
-                preview = _resolve_latest_evaluated_preview(engine_conn, channel="broad")
-                release = preview[1] if preview else None
-            engine_date = date or (max(release.dates) if release and release.dates else None)
-            published_radar = (
-                _engine_radar(
-                    engine_conn,
-                    date=engine_date,
-                    profile=profile,
-                    mode="broad",
-                    domain=None,
-                    channel="broad",
-                    publication_id=None,
-                )
-                if engine_date
-                else None
-            )
-            if published_radar is not None:
-                reading_items = _build_today_reading_list(
-                    engine_conn,
-                    published_radar.model_dump(),
-                    limit=20,
-                )
+            published_radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
         finally:
             engine_conn.close()
 
@@ -710,7 +698,8 @@ async def today_page(
                         decorated_changes,
                         analysis_query,
                     ),
-                    "reading_items": reading_items,
+                    "reading_endpoint": "/ui/today-reading?"
+                    + urlencode({"date": radar_payload["date"], "profile": profile}),
                     "analysis_query": analysis_query,
                 },
             )
@@ -786,6 +775,33 @@ async def today_page(
             "csrf_token": _generate_csrf_token(),
         },
     )
+
+
+@router.get("/ui/today-reading")
+async def today_reading_feed(
+    date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
+) -> dict[str, object]:
+    """Compact, safe JSON feed for the progressive Today reading queue."""
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return {"date": date or "", "items": []}
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
+        if radar is None:
+            return {"date": date or "", "items": []}
+        radar_payload = radar.model_dump()
+        return {
+            "date": radar_payload["date"],
+            "items": _build_today_reading_list(engine_conn, radar_payload, limit=20),
+        }
+    except HTTPException:
+        # Today itself can still render its publication/preview state.  Do not
+        # turn an unavailable optional reading feed into a broken dashboard.
+        return {"date": date or "", "items": []}
+    finally:
+        engine_conn.close()
 
 
 @router.get("/news", response_class=HTMLResponse)

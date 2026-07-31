@@ -103,50 +103,19 @@
         {% endif %}
     </section>
 
-    <section class="section">
+    <section class="section" data-reading-feed-url="{{ reading_endpoint }}">
         <h2>Что прочитать сегодня</h2>
         <p class="section-note">
             Топ-20 материалов из текущего broad release: не просто самые популярные, а свежие и
             профильные для книги/РБК/AI-business reading. Reddit ограничен квотой, чтобы не забивал
             ленту.
         </p>
-        {% if reading_items %}
-        <div class="reading-feed">
-            {% for item in reading_items %}
-            <article class="reading-item">
-                <div class="reading-rank">{{ "%02d"|format(loop.index) }}</div>
-                <div class="reading-main">
-                    <div class="story-meta">
-                        <span>{{ item.provider_label }}</span>
-                        {% if item.source_section %}<span>{{ item.source_section }}</span>{% endif %}
-                        <span>{{ item.source_cluster }}</span>
-                        {% if item.published_at %}<span>{{ item.published_at|truncate(16, true, '') }}</span>{% endif %}
-                    </div>
-                    <h3><a href="{{ item.primary_url }}" rel="noopener noreferrer">{{ item.title }}</a></h3>
-                    <div class="chip-cloud">
-                        {% for label in item.domain_labels %}
-                        <span class="chip">{{ label }}</span>
-                        {% endfor %}
-                        {% if item.reason %}<span class="chip chip-accent">{{ item.reason }}</span>{% endif %}
-                    </div>
-                </div>
-                <div class="reading-actions">
-                    <a class="card-action-link" href="{{ item.primary_url }}" rel="noopener noreferrer">Открыть</a>
-                    {% if item.secondary_url %}
-                    <a class="card-action-link" href="{{ item.secondary_url }}" rel="noopener noreferrer">
-                        {{ item.secondary_label }}
-                    </a>
-                    {% endif %}
-                    {% if item.story_id %}
-                    <a class="card-action-link" href="/stories/{{ item.story_id }}?{{ analysis_query }}">Story</a>
-                    {% endif %}
-                </div>
-            </article>
-            {% endfor %}
+        <div class="reading-feed" data-reading-feed aria-live="polite">
+            <p class="section-note">Подбираю свежие материалы из опубликованного release…</p>
         </div>
-        {% else %}
-        <p class="section-note">Лента чтения пока пустая для текущего release.</p>
-        {% endif %}
+        <noscript>
+            <p class="section-note">Для интерактивной ленты включите JavaScript или откройте <a href="/news?{{ analysis_query }}">News</a>.</p>
+        </noscript>
     </section>
 
     <section class="section today-grid">
@@ -194,4 +163,5 @@
         </span>
     </div>
 </div>
+<script src="/static/today_reading.js" defer></script>
 {% endblock %}
