@@ -780,8 +780,10 @@ async def today_page(
 async def today_reading_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
+    offset: int = 0,
+    limit: int = 10,
 ) -> dict[str, object]:
-    """Compact, safe JSON feed for the progressive Today reading queue."""
+    """Paged, safe JSON feed for the progressive Today reading queue."""
     engine_path = _engine_path()
     if not engine_path.exists():
         return {"date": date or "", "items": []}
@@ -791,9 +793,14 @@ async def today_reading_feed(
         if radar is None:
             return {"date": date or "", "items": []}
         radar_payload = radar.model_dump()
+        # Keep each response below the reverse proxy's small-response limit;
+        # the client requests two deterministic pages for the complete top-20.
+        page_size = min(max(limit, 1), 10)
+        start = max(offset, 0)
+        items = _build_today_reading_list(engine_conn, radar_payload, limit=20)
         return {
             "date": radar_payload["date"],
-            "items": _build_today_reading_list(engine_conn, radar_payload, limit=20),
+            "items": items[start : start + page_size],
         }
     except HTTPException:
         # Today itself can still render its publication/preview state.  Do not

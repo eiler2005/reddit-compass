@@ -84,10 +84,18 @@
         return article;
     };
 
-    fetch(endpoint, { headers: { Accept: "application/json" } })
-        .then((response) => (response.ok ? response.json() : Promise.reject(response)))
-        .then((payload) => {
-            const items = Array.isArray(payload.items) ? payload.items : [];
+    const fetchPage = (offset) => {
+        const url = new URL(endpoint, window.location.origin);
+        url.searchParams.set("offset", String(offset));
+        url.searchParams.set("limit", "10");
+        return fetch(url, { headers: { Accept: "application/json" } })
+            .then((response) => (response.ok ? response.json() : Promise.reject(response)))
+            .then((payload) => (Array.isArray(payload.items) ? payload.items : []));
+    };
+
+    Promise.all([fetchPage(0), fetchPage(10)])
+        .then((pages) => {
+            const items = pages.flat();
             feed.replaceChildren();
             if (!items.length) {
                 appendText(
