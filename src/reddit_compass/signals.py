@@ -103,10 +103,12 @@ async def _call_qwen(
     messages: list[dict[str, str]],
     model: str | None = None,
     temperature: float = 0.3,
+    timeout_seconds: float = 300.0,
 ) -> str:
     """Вызов Qwen API (OpenAI-compatible, через aiohttp)."""
     import aiohttp
 
+    timeout = max(0.001, float(timeout_seconds))
     api_key, base_url, default_model, _ = _get_api_config()
     url = f"{base_url}/chat/completions"
     headers = {
@@ -123,7 +125,18 @@ async def _call_qwen(
     async with (
         aiohttp.ClientSession() as session,
         session.post(
-            url, json=payload, headers=headers, timeout=aiohttp.ClientTimeout(total=300)
+            url,
+            json=payload,
+            headers=headers,
+            # ``asyncio.wait_for`` alone cannot reliably interrupt every
+            # half-closed TCP path while aiohttp is still cleaning up its
+            # context manager.  Apply the Engine budget to the transport too.
+            timeout=aiohttp.ClientTimeout(
+                total=timeout,
+                connect=min(15.0, timeout),
+                sock_connect=min(10.0, timeout),
+                sock_read=timeout,
+            ),
         ) as resp,
     ):
         if resp.status != 200:
@@ -159,6 +172,7 @@ async def call_qwen_json(
             ],
             model=model,
             temperature=0.0,
+            timeout_seconds=timeout_seconds,
         ),
         timeout=timeout_seconds,
     )

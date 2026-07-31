@@ -166,6 +166,8 @@ reviewed StoryRelease      # новый immutable attempt в том же cycle
 разметкой до следующего дня. Invalid JSON, неизвестные evidence IDs и сетевые ошибки сохраняются
 как диагностика, но не превращаются в merge. Один Engine-review ограничен 75 секундами: timeout
 сохраняется как ошибка attempt и не может зависшим запросом задержать quality/publication stage.
+Этот budget применяется и к `aiohttp` connect/read timeout, а не только к coroutine: закрытый
+провайдером TCP-сокет не должен удерживать Engine за пределами лимита.
 
 ### 3.3. Trends и качество
 
