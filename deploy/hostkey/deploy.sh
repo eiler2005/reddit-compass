@@ -49,6 +49,22 @@ scp "${SCRIPT_DIR}/install-cron.sh" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SECRETS_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.env"
 
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+
+# BUILD_INFO фиксирует, что именно уехало на прод. На VPS исходники лежат копией
+# без git, поэтому SHA туда попадает только так — иначе после деплоя узнать версию
+# развёрнутого кода неоткуда.
+BUILD_INFO_FILE="$(mktemp)"
+{
+    echo "git_sha=$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "version=$(grep -m1 '^version' "${PROJECT_ROOT}/pyproject.toml" | cut -d'\"' -f2)"
+    echo "branch=$(git -C "${PROJECT_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+    echo "dirty=$(git -C "${PROJECT_ROOT}" status --porcelain 2>/dev/null | head -c1 | wc -c | tr -d ' ')"
+} > "${BUILD_INFO_FILE}"
+echo "🏷  Версия: $(grep git_sha "${BUILD_INFO_FILE}" | cut -d= -f2)"
+scp "${BUILD_INFO_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/BUILD_INFO"
+rm -f "${BUILD_INFO_FILE}"
+
 scp "${PROJECT_ROOT}/Dockerfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/README.md" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
@@ -68,6 +84,10 @@ if [[ "${INSTALL_CRON:-0}" == "1" ]]; then
     echo "⏱️  Устанавливаю managed host-cron..."
     ssh "${VPS_USER}@${VPS_HOST}" "chmod +x ${REMOTE_DIR}/install-cron.sh && ${REMOTE_DIR}/install-cron.sh"
 fi
+
+echo "🏷  Фиксирую версии кода и статики в реестре..."
+ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose run --rm --entrypoint reddit-compass api version --record" \
+    >/dev/null 2>&1 || echo "   ⚠️  реестр не обновлён (проверьте: reddit-compass version --record)"
 
 echo "🏥 Проверяю health..."
 sleep 3

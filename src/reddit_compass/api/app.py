@@ -112,6 +112,26 @@ def create_app() -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok", "service": "reddit-compass"}
 
+    @app.get("/version", tags=["system"])
+    def version() -> dict[str, Any]:
+        """Что развёрнуто и на каких данных работает.
+
+        `/health` отвечает только «жив», по нему нельзя понять, доехал ли деплой
+        и какой выпуск сейчас показывает UI. Реестр отвечает на оба вопроса сразу.
+        """
+        from ..intelligence.engine import DEFAULT_ENGINE_DB_PATH, open_engine_readonly
+        from ..versioning import version_report
+
+        engine_path = Path(os.environ.get("RC_ENGINE_DB_PATH", str(DEFAULT_ENGINE_DB_PATH)))
+        engine_conn = None
+        try:
+            if engine_path.exists():
+                engine_conn = open_engine_readonly(engine_path)
+            return version_report(engine_conn=engine_conn)
+        finally:
+            if engine_conn is not None:
+                engine_conn.close()
+
     @app.post("/oauth/token", response_model=TokenResponse, tags=["auth"])
     def oauth_token(body: TokenRequest) -> TokenResponse:
         if body.grant_type != "client_credentials":

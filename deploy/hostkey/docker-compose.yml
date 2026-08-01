@@ -53,6 +53,10 @@ services:
       - "127.0.0.1:8901:8900"
     volumes:
       - rc_data:/data
+      # Что именно развёрнуто: SHA, время сборки, ветка. Пишется deploy.sh перед
+      # запуском — внутри контейнера git отсутствует, и без файла версия кода
+      # определяется как unknown.
+      - ./BUILD_INFO:/app/BUILD_INFO:ro
     networks: [rc_net]
     mem_limit: 512m
     memswap_limit: 512m

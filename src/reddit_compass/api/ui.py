@@ -38,6 +38,7 @@ from ..intelligence.repository import (
     update_research_state,
 )
 from ..intelligence.taxonomy import BROAD_DOMAINS
+from ..versioning import assets_version
 
 router = APIRouter()
 
@@ -46,6 +47,10 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.autoescape = True
+# Cache-buster статики считается из её содержимого. Ручная версия в шаблоне требовала
+# помнить про бамп при каждой правке скрипта, а забытый бамп означает старый JS против
+# новой разметки — ровно тот класс расхождений, который не виден в тестах.
+templates.env.globals["asset_version"] = assets_version()
 
 _CSRF_SECRET = secrets.token_hex(32)
 
