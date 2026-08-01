@@ -153,6 +153,19 @@ html {
     -moz-osx-font-smoothing: grayscale;
 }
 
+/* Глобальная защита от горизонтальной прокрутки. Во всём файле не было
+   ни одного overflow-wrap и ни одного min-width: 0, поэтому длинные
+   заголовки Reddit и ссылки без пробелов растягивали grid-колонки,
+   а страница ехала вбок на телефоне. */
+h1, h2, h3, h4, p, li, dd, a, code {
+    overflow-wrap: anywhere;
+}
+
+img, svg, video {
+    max-width: 100%;
+    height: auto;
+}
+
 body {
     font-family: var(--font-body);
     background: var(--bg-gradient);
@@ -276,15 +289,21 @@ h3 {
     50% { transform: scale(1.3); opacity: 0.7; box-shadow: 0 0 20px rgba(206, 54, 193, 0.6); }
 }
 
+/* Главное меню крупнее внутристраничного: раньше .layer-nav (16px, weight 600,
+   с рамкой) выглядел весомее .nav-link (14px, weight 500, без рамки), то есть
+   иерархия была перевёрнута. */
 .nav-link {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: var(--text-sm);
+    font-size: var(--text-base);
     font-weight: 500;
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius);
     transition: all var(--duration) var(--ease-out);
     position: relative;
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
 }
 
 .nav-link:hover {
@@ -292,24 +311,87 @@ h3 {
     background: var(--surface-2);
 }
 
+/* Активное состояние обязано отличаться от наведения, иначе по шапке нельзя
+   понять, где ты находишься: подчёркивание даёт этот признак и без цвета. */
 .nav-link.active {
     color: var(--accent-bright);
     background: var(--accent-dim);
+    font-weight: 600;
+    box-shadow: inset 0 -2px 0 var(--accent-bright);
 }
 
 .nav-spacer { flex: 1; }
 
+/* Служебные разделы. details/summary раскрывается без JS и с клавиатуры;
+   раньше эти шесть ссылок стояли отдельным рядом по 11.2px. */
+.nav-more {
+    position: relative;
+}
+
+.nav-more > summary {
+    list-style: none;
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: var(--text-base);
+    font-weight: 500;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius);
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    transition: all var(--duration) var(--ease-out);
+}
+
+.nav-more > summary::-webkit-details-marker { display: none; }
+.nav-more > summary::after { content: " ▾"; opacity: 0.6; }
+
+.nav-more > summary:hover {
+    color: var(--text);
+    background: var(--surface-2);
+}
+
+.nav-more-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% + var(--space-1));
+    z-index: 120;
+    min-width: 12rem;
+    display: flex;
+    flex-direction: column;
+    padding: var(--space-1);
+    background: var(--surface);
+    border: 1px solid var(--border-interactive);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
+}
+
+.nav-more-menu a {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+}
+
+.nav-more-menu a:hover {
+    color: var(--text);
+    background: var(--surface-2);
+}
+
 .theme-toggle {
     background: var(--surface-2);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-interactive);
     color: var(--text-secondary);
-    width: 38px;
-    height: 38px;
+    width: 44px;
+    height: 44px;
     border-radius: 50%;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
     font-size: var(--text-base);
     transition: all var(--duration) var(--ease-spring);
 }
@@ -317,8 +399,26 @@ h3 {
 .theme-toggle:hover {
     border-color: var(--accent-2);
     color: var(--accent-2-bright);
-    transform: rotate(20deg) scale(1.1);
     box-shadow: 0 0 16px rgba(116, 58, 174, 0.3);
+}
+
+/* Первая цель на странице для клавиатуры: до этого её не было, а у <main>
+   не было даже id. */
+.skip-link {
+    position: absolute;
+    left: var(--space-2);
+    top: calc(-1 * var(--space-8));
+    z-index: 200;
+    padding: var(--space-2) var(--space-4);
+    background: var(--surface);
+    border: 1px solid var(--accent-bright);
+    border-radius: var(--radius);
+    color: var(--text);
+    transition: top var(--duration) var(--ease-out);
+}
+
+.skip-link:focus {
+    top: var(--space-2);
 }
 
 /* ─── Layout ────────────────────────────────────────────────────────────── */
@@ -376,6 +476,11 @@ h3 {
 .page-header .section-note {
     margin-bottom: 0;
     max-width: 720px;
+}
+
+.page-help {
+    white-space: nowrap;
+    font-weight: 600;
 }
 
 /* ─── Date switcher ─────────────────────────────────────────────────────── */
@@ -952,6 +1057,40 @@ a.story-card {
     font-weight: 500;
 }
 
+/* ─── Страница «О сервисе» ──────────────────────────────────────────────── */
+
+.about-page .prose {
+    max-width: 68ch;
+    margin-bottom: var(--space-4);
+    color: var(--text-secondary);
+    line-height: 1.7;
+}
+
+.about-page .prose strong { color: var(--text); }
+
+.about-layers .item-row { grid-template-columns: minmax(0, 1fr); }
+.about-layers .item-row-summary { -webkit-line-clamp: none; }
+
+.glossary {
+    display: grid;
+    grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+    gap: var(--space-3) var(--space-5);
+    max-width: 68ch;
+}
+
+.glossary dt {
+    font-family: var(--font-mono);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--text);
+}
+
+.glossary dd {
+    margin: 0;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
 /* ─── Trend shelves (compact) ───────────────────────────────────────────── */
 /* Used on radar.html inside .shelf-grid: a labeled shelf ("Растёт", "Новое"…)
    holding a compact list of trend links, lighter than a full .story-card. */
@@ -963,7 +1102,7 @@ a.story-card {
     padding: var(--space-4);
 }
 
-.shelf h3 { margin-bottom: 0.75rem; }
+.shelf h3 { margin-bottom: var(--space-3); }
 
 .themes {
     display: flex;
@@ -986,7 +1125,7 @@ a.story-card {
     margin-top: var(--space-1);
 }
 
-.section.research { margin-top: 3rem; }
+.section.research { margin-top: var(--space-7); }
 
 .cloud {
     display: flex;
@@ -1461,11 +1600,18 @@ a.story-card {
     color: var(--accent);
 }
 
-@media (max-width: 900px) {
+/* .pipeline-stages требовала repeat(6, minmax(9rem, 1fr)) = 916px, а
+   схлопывалась только на 900px — то есть переполняла экран на всём
+   промежутке примерно от 900 до 960px. .run-summary требовала 596px.
+   Обе сетки теперь ужимаются раньше, чем перестают помещаться. */
+@media (max-width: 1024px) {
     .run-summary,
-    .pipeline-stages,
     .run-detail-grid {
         grid-template-columns: 1fr;
+    }
+
+    .pipeline-stages {
+        grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
     }
 
     .pipeline-stage {
@@ -1679,24 +1825,44 @@ a.story-card {
 
 .layer-nav a {
     display: inline-flex;
-    align-items: center;
-    min-height: 2.25rem;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 44px;
     padding: var(--space-2) var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
     color: var(--text-secondary);
     text-decoration: none;
+    /* Тише главного меню: это переход между слоями одного выпуска,
+       а не смена раздела. */
+    font-size: var(--text-sm);
     font-weight: 600;
     transition: all var(--duration) var(--ease-out);
 }
 
-.layer-nav a:hover,
+.layer-nav a small {
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.layer-nav a:hover {
+    color: var(--text);
+    border-color: var(--border-interactive);
+    background: var(--surface-2);
+}
+
+/* Активный слой раньше был визуально неотличим от наведения — по ряду нельзя
+   было понять, на каком слое ты стоишь, пока не уведёшь мышь. */
 .layer-nav a.active {
     color: var(--accent-bright);
-    border-color: var(--accent);
+    border-color: var(--accent-bright);
     background: var(--accent-dim);
 }
+
+.layer-nav a.active small { color: var(--accent-bright); }
 
 .story-list {
     display: grid;
@@ -1767,7 +1933,7 @@ a.story-card {
     transition: all var(--duration) var(--ease-out);
 }
 
-.list li:hover { padding-left: 0.5rem; color: var(--text); }
+.list li:hover { padding-left: var(--space-2); color: var(--text); }
 
 /* ─── Empty state ───────────────────────────────────────────────────────── */
 
@@ -1776,7 +1942,7 @@ a.story-card {
     padding: var(--space-8) var(--space-4);
 }
 
-.empty-state h1 { margin-bottom: 1rem; }
+.empty-state h1 { margin-bottom: var(--space-4); }
 
 .empty-state pre {
     background: var(--surface);
@@ -1823,42 +1989,44 @@ a.story-card {
     margin: 0;
 }
 
-.footer-meta {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
-    margin: 0;
-}
-
-.footer a { color: var(--text-muted); text-decoration: none; }
-.footer a:hover { color: var(--accent-2-bright); }
-
-/* ─── Secondary nav (under main header) ─────────────────────────────────── */
-
-.nav-secondary {
+/* Ссылки подвала были 20px высотой и красились --text-muted с контрастом
+   2.4:1 — отсюда ощущение «внизу всё очень мелкое». Теперь это полноценная
+   навигация: 14px, цели ≥44px, читаемый цвет. */
+.footer-links {
     display: flex;
+    flex-wrap: wrap;
+    gap: 0 var(--space-4);
+}
+
+.footer-links a {
+    display: inline-flex;
     align-items: center;
-    gap: var(--space-1);
-    max-width: 1320px;
-    margin: 0 auto;
-    padding: var(--space-1) 0 0;
-    border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
+    min-height: 44px;
+    font-size: var(--text-sm);
 }
 
-.nav-secondary a {
-    font-family: var(--font-mono);
-    font-size: var(--text-xs);
-    font-weight: 500;
+.footer a { color: var(--text-secondary); text-decoration: none; }
+.footer a:hover { color: var(--accent-2-bright); text-decoration: underline; }
+
+/* ─── Курсор и прочитанное ──────────────────────────────────────────────── */
+/* Список проходят сверху вниз каждое утро: j/k ведут курсор, открытая ссылка
+   гасит строку. Прочитанное приглушается, но не исчезает — иначе теряется
+   ощущение, сколько ещё осталось. */
+
+.is-cursor {
+    box-shadow: inset 3px 0 0 var(--accent-bright);
+    background: var(--surface-2);
+}
+
+.is-read .item-row-title a,
+.is-read .pulse-link-title,
+.is-read h3 a {
     color: var(--text-muted);
-    text-decoration: none;
-    padding: var(--space-1) var(--space-2);
-    border-radius: 4px;
-    letter-spacing: 0.02em;
-    transition: color 0.15s, background 0.15s;
 }
 
-.nav-secondary a:hover {
-    color: var(--accent-2-bright);
-    background: color-mix(in srgb, var(--accent-2) 10%, transparent);
+.is-read .item-row-summary,
+.is-read .pulse-link-meta {
+    opacity: 0.7;
 }
 
 /* ─── Focus & accessibility ─────────────────────────────────────────────── */
@@ -1867,6 +2035,31 @@ a.story-card {
     outline: 2px solid var(--accent-2-bright);
     outline-offset: 2px;
 }
+
+/* Цели нажатия. Ни один интерактивный элемент не достигал 44×44px: хуже
+   всего были ссылки подвала (около 20px) и вторичная навигация (26px
+   с зазором 2.4px между шестью соседними целями). Задаём минимум там,
+   где элемент кликабелен, но остаётся визуально компактным. */
+.card-action-link,
+.cloud-node,
+.domain-tab,
+.mode-link,
+.reddit-type-chip,
+.pagination a,
+.topic-cloud {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+}
+
+.domain-tab,
+.topic-cloud {
+    flex-direction: column;
+    justify-content: center;
+    align-items: stretch;
+}
+
+/* .chip не интерактивен — это метка рубрики, а не цель нажатия. */
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -1879,26 +2072,73 @@ a.story-card {
 
 /* ─── Mobile ────────────────────────────────────────────────────────────── */
 
-@media (max-width: 720px) {
-    .main { padding: 1.5rem 1rem 3rem; }
+/* Планшет: двухколоночные разборы перестают помещаться раньше телефона. */
+@media (max-width: 1024px) {
+    .detail-grid { grid-template-columns: 1fr; }
+    .today-overview, .today-grid { grid-template-columns: 1fr; }
+    /* Полоса источников уходит под текст строки, а не жмёт его до нечитаемого. */
+    .item-row { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+    .main { padding: var(--space-5) var(--space-4) var(--space-7); }
 
     .story-grid, .story-grid.compact { grid-template-columns: 1fr; }
     .shelf-grid { grid-template-columns: 1fr; }
     .topic-cloud-grid { grid-template-columns: 1fr; }
     .kpi-grid { grid-template-columns: repeat(2, 1fr); }
 
-    .date-switcher { flex-direction: column; gap: 0.75rem; }
+    .date-switcher { flex-direction: column; gap: var(--space-3); }
     .filters { flex-direction: column; }
     .filters input, .filters select { width: 100%; }
-    .detail-grid { grid-template-columns: 1fr; }
-    .today-overview, .today-grid { grid-template-columns: 1fr; }
     .reading-item { grid-template-columns: 1fr; }
     .reading-actions { justify-content: flex-start; }
-    .evidence-list li { flex-direction: column; gap: 0.25rem; }
+    .evidence-list li { flex-direction: column; gap: var(--space-1); }
     .radar-cta { flex-direction: column; align-items: flex-start; }
     .table { display: block; overflow-x: auto; }
-    .nav { flex-wrap: wrap; }
-    .nav-brand { margin-right: auto; }
+    .glossary { grid-template-columns: 1fr; gap: var(--space-1) 0; }
+
+    /* Липкая шапка занимала около 88px при высоте экрана 667px — 13% экрана
+       под навигацию. Меню уезжает в горизонтальную прокрутку одной строкой. */
+    .header { padding: var(--space-1) var(--space-3); }
+    .nav {
+        gap: 0;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .nav::-webkit-scrollbar { display: none; }
+    .nav-brand {
+        margin-right: var(--space-3);
+        font-size: var(--text-base);
+        flex-shrink: 0;
+    }
+    .nav-link, .nav-more > summary {
+        white-space: nowrap;
+        flex-shrink: 0;
+        font-size: var(--text-sm);
+        padding: var(--space-2);
+    }
+    .nav-spacer { display: none; }
+    /* Абсолютное меню за краем прокручиваемой полосы недостижимо. */
+    .nav-more { position: static; }
+    .nav-more-menu { right: var(--space-3); }
+}
+
+@media (max-width: 480px) {
+    .main { padding: var(--space-4) var(--space-3) var(--space-6); }
+
+    .kpi-grid { grid-template-columns: 1fr; }
+    /* 40px моноширинного числа в двух колонках на 320px не помещались. */
+    .kpi-num { font-size: var(--text-xl); }
+
+    /* Отступ 2.4rem под счётчик съедал 12% ширины экрана. */
+    .pulse-link-item { padding-left: var(--space-6); }
+
+    .footer { padding: var(--space-5) var(--space-4); }
+    .footer-links { gap: 0 var(--space-3); }
+
+    .item-row { padding: var(--space-3); }
+    .item-row-major { padding-left: calc(var(--space-3) - 3px); }
 }
 
 /* ─── Reddit Pulse ──────────────────────────────────────────────────────── */

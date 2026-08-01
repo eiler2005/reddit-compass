@@ -6,7 +6,7 @@
 <div class="container">
     {% with active_layer="news" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    {% with page_title="News", page_note="Сырой входящий корпус из опубликованного Data Release. Это inbox, а не сюжеты и не тренды." %}{% include "components/page_header.html" %}{% endwith %}
+    {% with page_title="News", page_note="Всё, что собрано за выпуск, без группировки и оценок. Это входящий поток и хранилище доказательств, а не тренды.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
 
     {% if news.preview %}
     <section class="section">

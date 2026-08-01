@@ -141,7 +141,7 @@
             <code>{{ pulse.signal_release_id }}</code>
         </p>
 
-        <h3>🔥 Hot discussions</h3>
+        <h3><span aria-hidden="true">🔥</span> Hot discussions</h3>
         <div class="shelf-grid">
             {% for s in pulse.top_pulse %}
             <article class="story-card">
@@ -156,7 +156,7 @@
         </div>
 
         {% if pulse.top_pain %}
-        <h3>😤 Pain points</h3>
+        <h3><span aria-hidden="true">😤</span> Pain points</h3>
         <div class="shelf-grid">
             {% for s in pulse.top_pain %}
             <article class="story-card">
@@ -172,7 +172,7 @@
         {% endif %}
 
         {% if pulse.top_ai %}
-        <h3>🤖 AI / tooling pulse</h3>
+        <h3><span aria-hidden="true">🤖</span> AI / tooling pulse</h3>
         <div class="shelf-grid">
             {% for s in pulse.top_ai %}
             <article class="story-card">
@@ -188,7 +188,7 @@
         {% endif %}
 
         {% if pulse.mainstream_gap %}
-        <h3>🔍 Mainstream gap — обсуждают, но СМИ молчат</h3>
+        <h3><span aria-hidden="true">🔍</span> Mainstream gap — обсуждают, но СМИ молчат</h3>
         <div class="shelf-grid">
             {% for s in pulse.mainstream_gap %}
             <article class="story-card">

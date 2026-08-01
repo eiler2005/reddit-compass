@@ -14,29 +14,54 @@
     <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
 </head>
 <body>
+    {# Активный раздел считается из пути запроса на сервере. Раньше класс
+       проставлял JS после загрузки, поэтому текущий раздел не подсвечивался
+       без скриптов и никогда не озвучивался скринридером. #}
+    {% set path = request.url.path if request else "/" %}
+    {% set section = "today" if path.startswith("/today") else
+                     "news" if path.startswith("/news") else
+                     "trends" if path.startswith("/trends") else
+                     "pulse" if path.startswith("/pulse") else
+                     "about" if path.startswith("/about") else "" %}
+    <a class="skip-link" href="#main">К содержимому</a>
     <header class="header">
         <nav class="nav" aria-label="Основная навигация">
             <a href="/today" class="nav-brand">
                 <span class="brand-mark" aria-hidden="true"></span>
                 reddit-compass
             </a>
-            <a href="/today" class="nav-link">Сегодня</a>
-            <a href="/news" class="nav-link">Лента</a>
-            <a href="/trends" class="nav-link">Тренды</a>
-            <a href="/pulse" class="nav-link">Reddit Pulse</a>
+            {% for href, label, key in [
+                ("/today", "Сегодня", "today"),
+                ("/news", "Лента", "news"),
+                ("/trends", "Тренды", "trends"),
+                ("/pulse", "Reddit Pulse", "pulse"),
+                ("/about", "О сервисе", "about")
+            ] %}
+            <a href="{{ href }}" class="nav-link{% if section == key %} active{% endif %}"{% if section == key %} aria-current="page"{% endif %}>{{ label }}</a>
+            {% endfor %}
             <span class="nav-spacer"></span>
+            {# Служебные разделы жили вторым рядом по 11.2px с зазором 2.4px
+               между шестью соседними целями — в самой заметной части экрана.
+               details/summary работает без JS и с клавиатуры. #}
+            <details class="nav-more">
+                <summary aria-label="Ещё разделы">Ещё</summary>
+                {# Разбор выпуска ведётся в конкретном канале и публикации.
+                   Ссылка, потерявшая analysis_query, молча возвращает на
+                   broad — поэтому контекст переносится и сюда. #}
+                {% set q = "?" ~ analysis_query if analysis_query else "" %}
+                <div class="nav-more-menu">
+                    <a href="/stories{{ q }}">Сюжеты</a>
+                    <a href="/radar{{ q }}">Radar</a>
+                    <a href="/projects/rbc{{ q }}">Project Lens</a>
+                    <a href="/runs">Запуски</a>
+                    <a href="/engine">Engine</a>
+                    <a href="/docs">API Docs</a>
+                </div>
+            </details>
             <button class="theme-toggle" type="button" aria-label="Переключить тему">☀️</button>
         </nav>
-        <nav class="nav-secondary" aria-label="Служебная навигация">
-            <a href="/runs">Запуски</a>
-            <a href="/engine">Engine</a>
-            <a href="/projects/rbc">Проекты</a>
-            <a href="/stories">Stories</a>
-            <a href="/explore">Обзор</a>
-            <a href="/radar">Radar</a>
-        </nav>
     </header>
-    <main class="main">
+    <main class="main" id="main">
         {% block content %}{% endblock %}
     </main>
     <footer class="footer">
@@ -51,13 +76,20 @@
                 и превращает в управляемые сюжеты, тренды и рекомендации для книги, колонок РБК
                 и бизнес-решений. Config-driven, read-only, без аккаунтов.
             </p>
-            <p class="footer-meta">
-                <a href="https://github.com/eiler2005/reddit-compass">GitHub</a> ·
-                <a href="/docs">API Docs</a> ·
+            <nav class="footer-links" aria-label="Навигация в подвале">
+                <a href="/about">О сервисе</a>
+                <a href="/today">Сегодня</a>
+                <a href="/news">Лента</a>
+                <a href="/stories">Сюжеты</a>
+                <a href="/trends">Тренды</a>
+                <a href="/pulse">Reddit Pulse</a>
                 <a href="/runs">Статус запусков</a>
-            </p>
+                <a href="/docs">API Docs</a>
+                <a href="https://github.com/eiler2005/reddit-compass">GitHub</a>
+            </nav>
         </div>
     </footer>
     <script src="/static/app.js?v={{ asset_version }}"></script>
+    <script src="/static/reading.js?v={{ asset_version }}" defer></script>
 </body>
 </html>

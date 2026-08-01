@@ -56,8 +56,10 @@ def test_scale_stays_small() -> None:
 
 
 def test_spacing_goes_through_the_scale() -> None:
-    pattern = rf"^\s*(?:{'|'.join(SPACING_PROPS)}):\s*[^;]*?\d\.?\d*rem"
-    literals = re.findall(pattern, CSS, re.MULTILINE)
+    # Свойство ищется не только в начале строки: однострочные правила вида
+    # `.main { padding: 1.5rem 1rem 3rem; }` первый проход по файлу пропустил.
+    pattern = rf"(?<![\w-])(?:{'|'.join(SPACING_PROPS)}):[^;{{}}]*?\d\.?\d*rem"
+    literals = re.findall(pattern, CSS)
     # calc() с токеном внутри — легальный способ задать отрицательный отступ.
     literals = [line for line in literals if "var(" not in line]
     assert literals == [], f"интервалы мимо шкалы: {literals}"
@@ -181,3 +183,114 @@ def test_item_row_drops_summary_that_repeats_the_title() -> None:
 
     assert html.count("Одно и то же") == 1
     assert "item-row-summary" not in html
+
+
+def _client():
+    from fastapi.testclient import TestClient
+
+    from reddit_compass.api.app import create_app
+
+    return TestClient(create_app())
+
+
+def test_active_section_is_marked_server_side() -> None:
+    """Раньше класс active проставлял JS после загрузки.
+
+    Без скриптов текущий раздел не подсвечивался вовсе, а скринридер о нём
+    не узнавал никогда: aria-current не было ни на одной ссылке.
+    """
+    response = _client().get("/about")
+
+    assert response.status_code == 200
+    assert '<a href="/about" class="nav-link active"' in response.text
+    assert 'aria-current="page"' in response.text
+    # Соседний раздел не должен помечаться заодно.
+    assert '<a href="/today" class="nav-link">' in response.text
+
+
+def test_header_has_two_levels_not_three() -> None:
+    """Служебные ссылки уехали из шапки в «Ещё».
+
+    Второй ряд был набран 11.2px с зазором 2.4px между шестью соседними
+    целями — в самой заметной части экрана.
+    """
+    text = _client().get("/about").text
+
+    assert "nav-secondary" not in text
+    assert "nav-more" in text
+    # details/summary работает без скриптов.
+    assert '<details class="nav-more">' in text
+
+
+def test_about_explains_the_product_and_its_terms() -> None:
+    text = _client().get("/about").text
+
+    for term in ("News", "Stories", "Trends", "Project Lens"):
+        assert term in text
+    for term in ("Source scope", "Confidence", "Pulse score", "Preview mode"):
+        assert term in text
+    # Почему выпуск может быть вчерашним — вопрос, который возникает первым.
+    assert "проверенный выпуск" in text
+
+
+def test_skip_link_targets_main() -> None:
+    text = _client().get("/about").text
+
+    assert 'class="skip-link" href="#main"' in text
+    assert '<main class="main" id="main">' in text
+
+
+def test_long_words_cannot_widen_the_page() -> None:
+    """Ни одного overflow-wrap на 2043 строки — отсюда уезжающая вбок вёрстка.
+
+    Заголовки Reddit и ссылки без пробелов растягивали grid-колонки: у grid
+    минимальный размер элемента по умолчанию auto, то есть ширина содержимого.
+    """
+    assert "overflow-wrap: anywhere" in CSS
+    assert re.search(r"img,\s*svg,\s*video\s*\{[^}]*max-width:\s*100%", CSS)
+
+
+def test_narrow_screens_have_their_own_breakpoints() -> None:
+    """Было три @media на весь файл, из них один — prefers-reduced-motion."""
+    widths = {int(w) for w in re.findall(r"@media \(max-width: (\d+)px\)", CSS)}
+    assert {1024, 768, 480} <= widths, f"брейкпоинты: {sorted(widths)}"
+
+
+def test_wide_grids_collapse_before_they_overflow() -> None:
+    """.pipeline-stages требовала 916px, а схлопывалась только на 900px.
+
+    Между примерно 900 и 960px страница переполнялась по горизонтали —
+    ровно на ширине планшета в портретной ориентации.
+    """
+    assert "grid-template-columns: repeat(6, minmax(9rem, 1fr))" in CSS
+    tablet = CSS[CSS.index("@media (max-width: 1024px)") :]
+    assert "grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr))" in tablet
+
+
+def test_reddit_filter_has_a_fragment_endpoint() -> None:
+    """Клик по чипу тематики перезагружал весь /today.
+
+    Заново считались радар, дашборд, лента чтения и облака тематик — ради
+    подмены одного списка из двадцати ссылок.
+    """
+    client = _client()
+
+    everything = client.get("/ui/today-reddit")
+    pains = client.get("/ui/today-reddit?reddit_type=pain_point")
+
+    assert everything.status_code == 200
+    assert pains.status_code == 200
+    assert "pulse-link-item" in everything.text
+    # Фрагмент — только список, без шапки и подвала страницы.
+    assert "<html" not in everything.text
+    assert "nav-link" not in everything.text
+    assert everything.text != pains.text
+
+
+def test_reddit_chips_stay_real_links() -> None:
+    """Progressive enhancement: без JS фильтр обязан работать как раньше."""
+    text = _client().get("/today").text
+
+    assert 'href="/today?reddit_type=' in text
+    assert "data-reddit-filters" in text
+    assert "data-reddit-endpoint" in text

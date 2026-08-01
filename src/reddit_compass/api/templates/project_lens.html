@@ -6,7 +6,7 @@
 <div class="container">
     {% with active_layer="projects" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    {% with page_title="Project Lens · " ~ lens.project_id, page_note="Рабочий слой для книги, РБК и других проектов поверх опубликованных stories/trends." %}{% include "components/page_header.html" %}{% endwith %}
+    {% with page_title="Project Lens · " ~ lens.project_id, page_note="Тот же выпуск, отсортированный под конкретную задачу: материал для книги, тема для колонки, бизнес-решение.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
 
     {% if lens.preview %}
     <section class="section">

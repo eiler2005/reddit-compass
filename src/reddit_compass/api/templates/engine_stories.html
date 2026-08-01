@@ -6,7 +6,7 @@
 <div class="container">
     {% with active_layer="stories" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    {% with page_title="Stories", page_note="Конкретные события, собранные из нескольких материалов. Это слой дедупликации и evidence matrix." %}{% include "components/page_header.html" %}{% endwith %}
+    {% with page_title="Stories", page_note="Конкретные события, собранные из нескольких материалов. Если обсуждение на Reddit, тред на HN и статья издания про одно и то же — это один сюжет.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
 
     {% with preview=stories.preview, release_type="StoryRelease" %}{% include "components/preview_banner.html" %}{% endwith %}
 

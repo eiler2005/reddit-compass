@@ -68,6 +68,7 @@ def create_app() -> FastAPI:
         response.headers["Referrer-Policy"] = "no-referrer-when-downgrade"
         if request.url.path.startswith(
             (
+                "/about",
                 "/today",
                 "/news",
                 "/stories",

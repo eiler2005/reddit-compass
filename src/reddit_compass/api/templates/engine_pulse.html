@@ -6,7 +6,7 @@
 <div class="container">
     {% with active_layer="pulse" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    {% with page_title="🔴 Reddit Pulse", page_note="Reddit-native сигналы: что обсуждают сообщества прямо сейчас. Reddit сам ранжирует посты (score, comments, ratio) — мы добавляем editorial слой поверх: percentile внутри саба, velocity, depth, cross-subreddit repetition, novelty." %}{% include "components/page_header.html" %}{% endwith %}
+    {% with page_title="🔴 Reddit Pulse", page_note="Что обсуждают сообщества прямо сейчас: боли, страхи, желания, раздражение. Важна не популярность поста, а какой нерв он задевает.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
 
     {% if pulse_summary %}
     {% if not pulse_summary.perspective_gap_available %}

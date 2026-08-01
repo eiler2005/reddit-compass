@@ -6,7 +6,7 @@
 <div class="container">
     {% with active_layer="trends" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    {% with page_title="Trends", page_note="Повторяющиеся паттерны поверх разных stories. Копии одной новости сюда не должны попадать." %}{% include "components/page_header.html" %}{% endwith %}
+    {% with page_title="Trends", page_note="Повторяющиеся паттерны поверх разных событий. Одна новость трендом не является, сколько бы её ни перепечатали.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
 
     {% with preview=trends.preview, release_type="TrendRelease" %}{% include "components/preview_banner.html" %}{% endwith %}
 

@@ -117,33 +117,21 @@
             {{ reddit_quotas.per_subreddit }} из одного сабреддита,
             политика ограничена жёстче остальных — иначе она вытесняет всё.
         </p>
-        <div class="reddit-type-filters">
+        {# Чипы остаются настоящими ссылками: без JS фильтр работает как раньше,
+           перезагрузкой страницы. Скрипт перехватывает клик и подменяет только
+           список — раньше смена тематики перерисовывала весь /today целиком. #}
+        <div class="reddit-type-filters" data-reddit-filters
+             data-reddit-endpoint="{{ reddit_endpoint }}">
             <a class="reddit-type-chip{% if not reddit_type %} reddit-type-chip-active{% endif %}"
-               href="/today">Все темы</a>
+               href="/today" data-reddit-type="">Все темы</a>
             {% for rt in reddit_types %}
             <a class="reddit-type-chip{% if reddit_type == rt.signal_type %} reddit-type-chip-active{% endif %}"
-               href="/today?reddit_type={{ rt.signal_type }}">{{ rt.label }} <span class="reddit-type-count">{{ rt.total }}</span></a>
+               href="/today?reddit_type={{ rt.signal_type }}"
+               data-reddit-type="{{ rt.signal_type }}">{{ rt.label }} <span class="reddit-type-count">{{ rt.total }}</span></a>
             {% endfor %}
         </div>
-        <ol class="pulse-link-list">
-            {% for post in reddit_new %}
-            <li class="pulse-link-item">
-                <a class="pulse-link-title" href="{{ post.discussion_url }}" target="_blank" rel="noopener">{{ post.title }}</a>
-                <div class="pulse-link-meta">
-                    <span class="pulse-subreddit">r/{{ post.subreddit }}</span>
-                    <span>{{ post.signal_type_label }}</span>
-                    <span title="Reddit upvotes">▲ {{ post.reddit_score }}</span>
-                    <span title="Комментарии">💬 {{ post.reddit_comments }}</span>
-                    <span title="Pulse score">pulse {{ post.pulse_score }}</span>
-                    {% if post.published_at %}<span>{{ post.published_at }}</span>{% endif %}
-                    {% if post.target_url %}
-                    <a href="{{ post.target_url }}" target="_blank" rel="noopener">первоисточник</a>
-                    {% endif %}
-                </div>
-            </li>
-            {% else %}
-            <li class="section-note">Свежих постов по этой теме в выпуске нет.</li>
-            {% endfor %}
+        <ol class="pulse-link-list" data-reddit-list aria-live="polite">
+            {% include "components/reddit_new_list.html" %}
         </ol>
         <p class="section-note"><a href="/pulse">Все сигналы Reddit Pulse →</a></p>
     </section>

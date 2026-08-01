@@ -1,5 +1,14 @@
-{# Page header with title and optional note. Expects: page_title, page_note (optional) #}
+{# Заголовок раздела. Expects: page_title, page_note (optional), page_help (optional)
+
+   page_help — короткая ссылка на объяснение. Термины продукта (Stories,
+   source scope, confidence) встречались только в интерфейсе, где их некому
+   расшифровать; теперь у каждого раздела есть выход в словарь. #}
 <div class="page-header">
     <h1>{{ page_title }}</h1>
-    {% if page_note %}<p class="section-note">{{ page_note }}</p>{% endif %}
+    {% if page_note %}
+    <p class="section-note">
+        {{ page_note }}
+        {% if page_help %}<a class="page-help" href="/about">Что это значит →</a>{% endif %}
+    </p>
+    {% endif %}
 </div>

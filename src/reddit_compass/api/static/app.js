@@ -117,17 +117,9 @@
         });
     }
 
-    // ─── Active nav link ─────────────────────────────────────────────────
-    function initActiveNav() {
-        const path = window.location.pathname;
-        const links = document.querySelectorAll(".nav-link");
-        links.forEach(function (link) {
-            const href = link.getAttribute("href");
-            if (href === path || (path.startsWith(href) && href !== "/")) {
-                link.classList.add("active");
-            }
-        });
-    }
+    // Подсветку активного раздела ставит сервер (см. base.html): она нужна
+    // и без скриптов, и должна озвучиваться через aria-current, чего класс,
+    // проставленный после загрузки, не давал.
 
     // ─── Keyboard navigation for story cards ─────────────────────────────
     function initCardKeyboard() {
@@ -164,7 +156,6 @@
             initCounters();
             initScrollReveal();
         }
-        initActiveNav();
         initCardKeyboard();
         initCardClick();
     });

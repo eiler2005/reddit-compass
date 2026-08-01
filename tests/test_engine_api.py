@@ -863,7 +863,7 @@ def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:
     trend_detail = engine_client.get("/trends/trend_1")
 
     assert news.status_code == 200
-    assert "Сырой входящий корпус" in news.text
+    assert "хранилище доказательств" in news.text
     assert "A verified story" in news.text
     assert stories.status_code == 200
     assert "Конкретные события" in stories.text

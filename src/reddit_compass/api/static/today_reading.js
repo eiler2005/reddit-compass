@@ -52,6 +52,60 @@
         }
     }
 
+    // ─── Фильтры тематик без перезагрузки ────────────────────────────────
+    // Чипы остаются обычными ссылками, поэтому без скриптов фильтр работает
+    // как прежде. Скрипт перехватывает клик и подменяет только список: раньше
+    // смена тематики заново считала радар, дашборд и ленту чтения целиком.
+    const filters = document.querySelector("[data-reddit-filters]");
+    const redditList = document.querySelector("[data-reddit-list]");
+    if (filters instanceof HTMLElement && redditList instanceof HTMLElement) {
+        const endpoint = filters.dataset.redditEndpoint || "";
+
+        const markActive = (type) => {
+            filters.querySelectorAll("[data-reddit-type]").forEach((chip) => {
+                chip.classList.toggle(
+                    "reddit-type-chip-active",
+                    (chip.dataset.redditType || "") === type
+                );
+            });
+        };
+
+        const load = (type) => {
+            if (!endpoint) return Promise.resolve();
+            const separator = endpoint.includes("?") ? "&" : "?";
+            const url = type ? `${endpoint}${separator}reddit_type=${encodeURIComponent(type)}` : endpoint;
+            redditList.setAttribute("aria-busy", "true");
+            return fetchFragment(url)
+                .then((html) => {
+                    redditList.innerHTML =
+                        html.trim() || '<li class="section-note">Свежих постов по этой теме в выпуске нет.</li>';
+                })
+                .catch(() => {
+                    redditList.innerHTML =
+                        '<li class="section-note">Не удалось обновить список. Откройте Reddit Pulse.</li>';
+                })
+                .finally(() => redditList.removeAttribute("aria-busy"));
+        };
+
+        filters.addEventListener("click", (event) => {
+            const chip = event.target.closest("[data-reddit-type]");
+            if (!chip || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+            event.preventDefault();
+            const type = chip.dataset.redditType || "";
+            markActive(type);
+            // Адрес обязан меняться вместе со списком: иначе ссылку нельзя
+            // отправить, а «назад» уведёт со страницы вместо снятия фильтра.
+            window.history.pushState({ redditType: type }, "", chip.getAttribute("href"));
+            load(type);
+        });
+
+        window.addEventListener("popstate", () => {
+            const type = new URLSearchParams(window.location.search).get("reddit_type") || "";
+            markActive(type);
+            load(type);
+        });
+    }
+
     const readingSection = document.querySelector("[data-reading-feed-url]");
     if (!(readingSection instanceof HTMLElement)) return;
 

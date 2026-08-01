@@ -1,0 +1,23 @@
+{# Свежие посты Reddit прямыми ссылками. Expects: reddit_new
+
+   Отдельный партиал, потому что тот же список отдаётся фрагментом
+   на /ui/today-reddit при смене тематики: разметка остаётся в одном месте,
+   а клиенту нужно только подставить её. #}
+{% for post in reddit_new %}
+<li class="pulse-link-item">
+    <a class="pulse-link-title" href="{{ post.discussion_url }}" target="_blank" rel="noopener">{{ post.title }}</a>
+    <div class="pulse-link-meta">
+        <span class="pulse-subreddit">r/{{ post.subreddit }}</span>
+        <span>{{ post.signal_type_label }}</span>
+        <span title="Reddit upvotes">▲ {{ post.reddit_score }}</span>
+        <span title="Комментарии">💬 {{ post.reddit_comments }}</span>
+        <span title="Pulse score">pulse {{ post.pulse_score }}</span>
+        {% if post.published_at %}<span>{{ post.published_at }}</span>{% endif %}
+        {% if post.target_url %}
+        <a href="{{ post.target_url }}" target="_blank" rel="noopener">первоисточник</a>
+        {% endif %}
+    </div>
+</li>
+{% else %}
+<li class="section-note">Свежих постов по этой теме в выпуске нет.</li>
+{% endfor %}

@@ -1000,6 +1000,8 @@ async def today_page(
                     + urlencode({"date": radar_payload["date"], "profile": profile}),
                     "changes_endpoint": "/ui/today-changes?"
                     + urlencode({"date": radar_payload["date"], "profile": profile}),
+                    "reddit_endpoint": "/ui/today-reddit?"
+                    + urlencode({"date": radar_payload["date"], "profile": profile}),
                     "analysis_query": analysis_query,
                 },
             )
@@ -1048,6 +1050,61 @@ def today_changes_feed(
                 for trend in cards
             )
         )
+    except (HTTPException, OSError, sqlite3.Error):
+        return HTMLResponse("")
+    finally:
+        engine_conn.close()
+
+
+@router.get("/ui/today-reddit", response_class=HTMLResponse)
+def today_reddit_feed(
+    date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
+    reddit_type: str | None = None,
+) -> HTMLResponse:
+    """HTML-фрагмент блока «Новое на Reddit» под выбранную тематику.
+
+    Раньше клик по чипу перезагружал весь /today: заново считались радар,
+    дашборд, лента чтения и облака тематик — ради подмены одного списка.
+    """
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return HTMLResponse("")
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
+        if radar is None:
+            return HTMLResponse("")
+        payload = radar.model_dump()
+        from .v2 import _latest_signal_release
+
+        sig_id = _latest_signal_release(
+            engine_conn,
+            data_release_id=str(payload.get("data_release_id") or "") or None,
+        ) or _latest_signal_release(engine_conn)
+        if not sig_id:
+            return HTMLResponse("")
+        # Исключения те же, что и при серверном рендере: посты, уже показанные
+        # в ленте чтения выше, не должны дублироваться после смены фильтра.
+        already_shown = {
+            str(item.get("item_id"))
+            for item in _cached_today_reading_list(
+                str(engine_path),
+                publication_id=str(payload.get("publication_id") or "preview"),
+                data_release_id=str(payload.get("data_release_id") or ""),
+                story_release_id=str(payload.get("story_release_id") or ""),
+                date=str(payload["date"]),
+                profile=profile,
+            )[:10]
+            if item.get("item_id")
+        }
+        posts = _build_today_reddit_new(
+            engine_conn,
+            sig_id,
+            exclude_item_ids=already_shown,
+            signal_type=reddit_type or None,
+        )
+        return _render_fragment("components/reddit_new_list.html", {"reddit_new": posts})
     except (HTTPException, OSError, sqlite3.Error):
         return HTMLResponse("")
     finally:
@@ -2042,6 +2099,17 @@ async def engine_page(request: Request) -> HTMLResponse:
         name="engine.html",
         context=context,
     )
+
+
+@router.get("/about", response_class=HTMLResponse)
+async def about_page(request: Request) -> HTMLResponse:
+    """Что это за сервис и что означают его термины.
+
+    Stories, Project Lens, source scope, confidence, preview mode встречались
+    только в интерфейсе, где их некому расшифровать. Страница статична: она
+    описывает продуктовый контракт, а не состояние данных.
+    """
+    return templates.TemplateResponse(request=request, name="about.html", context={})
 
 
 @router.get("/dashboard", include_in_schema=False)
