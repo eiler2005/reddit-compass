@@ -21,6 +21,11 @@ services:
       DATA_DIR: /data
       REDDIT_COMPASS_CONFIG: /app/config/profiles/broad.json
       REDDIT_COMPASS_ENGINE: playwright
+      # Ladder — сосед по сети compose, а не сервис на хосте. Значение по
+      # умолчанию (localhost:8080) внутри контейнера указывает на сам контейнер,
+      # то есть источник молча не работал бы, а на новом хосте порт 8080 к тому же
+      # занят другим проектом. Имя сервиса не зависит ни от хоста, ни от портов.
+      LADDER_URL: http://ladder:8080
     restart: "no"
     volumes:
       - rc_data:/data
@@ -81,6 +86,27 @@ services:
       - caddy_config:/config
     networks: [rc_net]
     mem_limit: 128m
+    security_opt: ["no-new-privileges:true"]
+    logging:
+      driver: json-file
+      options: {max-size: "5m", max-file: "2"}
+
+  # Ladder — источник кластера ladder-paywall. На прежнем хосте он был запущен
+  # руками через docker run, без compose-проекта, и держал сеть reddit-compass_net,
+  # мешая снести стек. При переезде это обнаружилось тем, что источник просто
+  # не поехал бы следом. Теперь он часть стека и переезжает вместе с ним.
+  ladder:
+    image: ghcr.io/everywall/ladder:latest
+    container_name: ladder
+    restart: always
+    environment:
+      RULESET: https://raw.githubusercontent.com/everywall/ladder-rules/main/ruleset.yaml
+    # Host-порт не публикуется: прокси нужен только коллектору, который ходит
+    # к нему по имени сервиса внутри сети. Публикация на 8080 к тому же
+    # конфликтует с чужим сервисом на этом хосте.
+    expose: ["8080"]
+    networks: [rc_net]
+    mem_limit: 256m
     security_opt: ["no-new-privileges:true"]
     logging:
       driver: json-file

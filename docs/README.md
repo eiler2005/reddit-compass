@@ -23,6 +23,7 @@
 | [`DATA_FLOW_DIAGRAMS.md`](DATA_FLOW_DIAGRAMS.md) | Схемы потоков (mermaid): item → story → trend, Pulse, таксономия, обратная связь |
 | [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) | Таблицы `compass.db` и `trend_engine.db` |
 | [`UI_DESIGN_SYSTEM.md`](UI_DESIGN_SYSTEM.md) | Токены, плотный список, полоса источников, навигация, мобильная версия, клавиатура |
+| [`HOSTING.md`](HOSTING.md) | Где живёт сервис, как переносить между VPS, гигиена диска |
 | [`VERSIONING.md`](VERSIONING.md) | Реестр версий: что развёрнуто и на каких данных работает |
 | [`SECRET_SCANNING.md`](SECRET_SCANNING.md) | Обязательный pre-commit gate на секреты |
 

@@ -14,6 +14,7 @@
         <form class="filters" method="get" action="/trends">
             <input type="hidden" name="channel" value="{{ channel }}">
             {% if publication_id %}<input type="hidden" name="publication_id" value="{{ publication_id }}">{% endif %}
+            <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по трендам">
             <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
             <input type="text" name="lifecycle" value="{{ filters.lifecycle }}" placeholder="new, growing, fading">
             <input type="text" name="review_status" value="{{ filters.review_status }}" placeholder="pending или confirmed">
@@ -51,6 +52,7 @@
             {% with empty_message="Trends не найдены." %}{% include "components/empty_state.html" %}{% endwith %}
             {% endfor %}
         </div>
+        {% with total=trends.total, page=trends.page, page_size=trends.page_size %}{% include "components/pagination.html" %}{% endwith %}
     </section>
 </div>
 {% endblock %}

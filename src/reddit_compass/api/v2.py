@@ -967,6 +967,7 @@ def _engine_trends(
     lifecycle: str | None = None,
     review_status: str | None = None,
     project_id: str | None = None,
+    q: str | None = None,
     include_stories: bool = True,
     page: int = 1,
     page_size: int = 50,
@@ -997,6 +998,12 @@ def _engine_trends(
             continue
         if project_id and project_scores.get(project_id, 0) <= 0:
             continue
+        if q:
+            # Тренды искались только по точному domain_id. Найти паттерн
+            # по слову в названии было нечем, хотя их около двух тысяч.
+            haystack = f"{row['name_ru'] or ''} {row['pattern'] or ''}".lower()
+            if q.lower() not in haystack:
+                continue
         filtered.append(row)
     if project_id:
         filtered.sort(
@@ -2063,6 +2070,7 @@ def _engine_pulse_signals(
     *,
     signal_type: str | None = None,
     subreddit: str | None = None,
+    q: str | None = None,
     sort: str = "pulse",
     limit: int = 50,
     offset: int = 0,
@@ -2076,6 +2084,11 @@ def _engine_pulse_signals(
     if subreddit:
         where += " AND LOWER(cs.subreddit) = ?"
         params.append(subreddit.lower())
+    if q:
+        # Поиска по сигналам не было вовсе, хотя тысячи постов листаются
+        # только постранично: найти конкретное обсуждение было нечем.
+        where += " AND LOWER(cs.title) LIKE ?"
+        params.append(f"%{q.lower()}%")
 
     # Resolve data_release_id for JOIN with release_items.
     if not data_release_id:
@@ -2097,7 +2110,8 @@ def _engine_pulse_signals(
             f"SELECT COUNT(*) FROM community_signals cs WHERE {where}",
             [signal_release_id]
             + ([signal_type] if signal_type else [])
-            + ([subreddit.lower()] if subreddit else []),
+            + ([subreddit.lower()] if subreddit else [])
+            + ([f"%{q.lower()}%"] if q else []),
         ).fetchone()[0]
     except sqlite3.OperationalError:
         return [], 0

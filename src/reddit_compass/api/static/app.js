@@ -28,7 +28,10 @@
     }
 
     function initTheme() {
-        applyTheme(getPreferredTheme());
+        // Сама тема уже выставлена инлайновым скриптом в <head> — до первой
+        // отрисовки. Здесь остаётся синхронизировать иконку и повесить
+        // переключатель; повторно красить документ не нужно.
+        updateToggleIcon(document.documentElement.getAttribute("data-theme") || getPreferredTheme());
 
         const toggle = document.querySelector(".theme-toggle");
         if (toggle) {

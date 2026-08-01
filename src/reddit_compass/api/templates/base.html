@@ -12,6 +12,21 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="/static/app.css?v={{ asset_version }}">
+
+    {# Тема ставится до первой отрисовки. Раньше её применял app.js в
+       DOMContentLoaded, поэтому у выбравших светлую тему страница успевала
+       мигнуть тёмной при каждой загрузке. Скрипт обязан быть инлайновым
+       и синхронным — внешний файл этой гарантии не даёт. #}
+    <script>
+        (function () {
+            try {
+                var stored = localStorage.getItem("rc-theme");
+                document.documentElement.setAttribute("data-theme", stored || "dark");
+            } catch (e) {
+                document.documentElement.setAttribute("data-theme", "dark");
+            }
+        })();
+    </script>
 </head>
 <body>
     {# Активный раздел считается из пути запроса на сервере. Раньше класс

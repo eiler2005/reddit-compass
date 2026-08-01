@@ -291,9 +291,10 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 ┌─── VPS HostKey «Hermes» (${RC_DEPLOY_HOST}) ─────────────────────────┐
 │                                                                     │
 │  /opt/reddit-compass/                                               │
-│  ├── docker-compose.yml          ← 3 сервиса                       │
+│  ├── docker-compose.yml          ← 4 сервиса                       │
 │  │   ├── rc-api                  ← FastAPI :8900 (restart: always)  │
 │  │   ├── rc-caddy                ← reverse proxy (loopback)         │
+│  │   ├── ladder                  ← paywall-прокси, только в сети    │
 │  │   └── rc-collector            ← batch (host-cron, не daemon)     │
 │  ├── Dockerfile                  ← Playwright (batch)               │
 │  ├── Dockerfile.api              ← Slim (API, без Chromium)         │

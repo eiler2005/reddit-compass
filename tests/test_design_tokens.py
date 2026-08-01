@@ -314,3 +314,55 @@ def test_chip_cloud_drops_single_character_domains() -> None:
 
     assert html.count('<span class="chip">') == 1
     assert "ai_technology" in html
+
+
+def test_theme_is_set_before_first_paint() -> None:
+    """Тему применял app.js в DOMContentLoaded.
+
+    У выбравших светлую тему страница успевала мигнуть тёмной при каждой
+    загрузке. Скрипт обязан быть инлайновым, синхронным и стоять в <head>:
+    внешний файл такой гарантии не даёт.
+    """
+    head = _client().get("/about").text.split("</head>")[0]
+
+    assert "rc-theme" in head
+    assert 'setAttribute("data-theme"' in head
+    assert "<script src=" not in head
+
+
+def test_dense_rows_reached_news_and_pulse() -> None:
+    """Плотность была сделана наполовину: /news и /pulse остались сетками."""
+    client = _client()
+
+    news = client.get("/news?channel=broad").text
+    pulse = client.get("/pulse").text
+
+    assert 'class="item-row' in news
+    assert 'class="pulse-row' in pulse
+    # h2 больше не работает заголовком карточки: он рисовал каждой статье
+    # градиентный маркер уровня раздела.
+    assert 'class="story-card"' not in news
+    assert 'class="pulse-card"' not in pulse
+
+
+def test_long_lists_are_paginated() -> None:
+    """/stories и /trends отдавали 50 записей и молча обрезали остальное."""
+    text = _client().get("/stories?channel=broad").text
+
+    assert 'class="pagination"' in text
+    assert "page=2" in text
+    # Фильтры обязаны переезжать на следующую страницу вместе с номером.
+    assert "channel=broad" in text.split('class="pagination"')[1][:400]
+
+
+def test_search_reaches_trends_and_pulse() -> None:
+    """Клавиша / вела в поиск, которого на этих разделах не существовало."""
+    client = _client()
+
+    assert 'name="q"' in client.get("/trends?channel=broad").text
+    assert 'name="q"' in client.get("/pulse").text
+
+    everything = client.get("/pulse").text
+    nothing = client.get("/pulse?q=zzzнетничего").text
+    assert everything != nothing
+    assert "0 сигналов" in nothing

@@ -974,6 +974,62 @@ a.story-card {
     min-width: 0;
 }
 
+.item-row-link {
+    margin: 0;
+    font-size: var(--text-xs);
+}
+
+/* Строка сигнала Pulse: та же плотность, но со своей метрикой — полосой
+   pulse score, ради которой раздел и существует. */
+.pulse-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 18rem);
+    gap: var(--space-4);
+    align-items: center;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    transition: background var(--duration) var(--ease-out);
+}
+
+.pulse-row:last-child { border-bottom: none; }
+.pulse-row:hover { background: var(--surface-2); }
+
+.pulse-row-gap {
+    border-left: 3px solid var(--warning);
+    padding-left: calc(var(--space-4) - 3px);
+}
+
+.pulse-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.pulse-row-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+.pulse-row-title {
+    font-size: var(--text-base);
+    font-weight: 600;
+    line-height: 1.35;
+    margin: 0;
+}
+
+.pulse-row-title a { color: var(--text); }
+.pulse-row-title a:hover { color: var(--accent-bright); }
+
+.pulse-row-metrics {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
 /* ─── Полоса источников ─────────────────────────────────────────────────── */
 /* Состав охвата — главное отличие продукта, и до сих пор он подавался
    бейджем «🔗 Reddit + СМИ» в ряду прочих бейджей. Здесь он занимает

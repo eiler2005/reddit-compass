@@ -152,7 +152,7 @@ WSJ, Bloomberg, The Economist, Reuters (бесплатен, не нужен).
 
 ### Что взять для reddit-compass (Phase 6)
 
-1. **Ladder на HostKey** — Docker-контейнер, loopback:8080. Ruleset: NYT, WaPo, FT, Wired, Medium.
+1. **Ladder на HostKey** — сервис в compose, доступен коллектору по `http://ladder:8080` внутри сети (host-порт не публикуется). Ruleset: NYT, WaPo, FT, Wired, Medium.
 2. **Source-адаптеры** — `sources/hackernews/` (Algolia API), `sources/news/` (через Ladder).
 3. **Единый JSONL** — поле `source`, общий `trends_analysis.py`.
 4. **Hacker News** — первый кандидат (бесплатно, без ключей, без paywall, ~1 дн).

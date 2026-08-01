@@ -46,6 +46,7 @@
             {% with empty_message="Stories не найдены." %}{% include "components/empty_state.html" %}{% endwith %}
             {% endfor %}
         </div>
+        {% with total=stories.total, page=stories.page, page_size=stories.page_size %}{% include "components/pagination.html" %}{% endwith %}
     </section>
 </div>
 {% endblock %}

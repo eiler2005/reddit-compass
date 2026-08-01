@@ -1,0 +1,20 @@
+{# Постраничная навигация. Expects: page_url (str без параметра page), page, total, page_size
+
+   /stories и /trends отдавали по 50 записей и молча обрезали остальное:
+   при 1900 трендов пользователь видел первые 50 и не имел признака, что
+   есть что-то ещё. Пагинация была только на /pulse. #}
+{% set size = page_size | default(50, true) | int %}
+{% set current = page | default(1, true) | int %}
+{% set pages = ((total | default(0, true) | int) + size - 1) // size if size else 1 %}
+{% if pages > 1 %}
+{% set sep = "&" if "?" in page_url else "?" %}
+<nav class="pagination" aria-label="Постраничная навигация">
+    {% if current > 1 %}
+    <a class="btn-secondary" rel="prev" href="{{ page_url }}{{ sep }}page={{ current - 1 }}">← Назад</a>
+    {% endif %}
+    <span class="section-note">Страница {{ current }} из {{ pages }} · всего {{ total }}</span>
+    {% if current < pages %}
+    <a class="btn-secondary" rel="next" href="{{ page_url }}{{ sep }}page={{ current + 1 }}">Далее →</a>
+    {% endif %}
+</nav>
+{% endif %}

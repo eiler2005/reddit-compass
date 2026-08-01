@@ -1,0 +1,34 @@
+{# Строка сигнала Reddit Pulse. Expects: s (сигнал), show_gap (bool, необязательно)
+
+   На странице было пять почти одинаковых блоков карточек, отличавшихся только
+   источником списка: hot / pain / ai / gap / все сигналы. Разметка теперь одна.
+
+   Сигнал не сводится к общей item_row: у него есть собственная метрика —
+   полоса pulse score, ради которой страница и существует. Поэтому здесь своя
+   строка, но той же плотности, что и остальные списки. #}
+<article class="pulse-row{% if show_gap %} pulse-row-gap{% endif %}">
+    <div class="pulse-row-main">
+        <div class="pulse-row-head">
+            <span class="signal-type-badge signal-type-{{ s.signal_type }}">{{ signal_type_label(s.signal_type) }}</span>
+            <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
+            {% if show_gap and s.perspective_gap %}
+            <span class="scope-badge scope-community_only" title="Разрыв перспективы">разрыв {{ "%.2f"|format(s.perspective_gap) }}</span>
+            {% endif %}
+        </div>
+        <h3 class="pulse-row-title">
+            <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
+        </h3>
+    </div>
+    <div class="pulse-row-metrics">
+        <div class="reddit-raw">
+            <span class="reddit-score" title="Reddit score">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
+            <span class="reddit-comments" title="Комментарии">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
+            <span class="reddit-ratio {% if s.upvote_ratio >= 0.9 %}ratio-high{% elif s.upvote_ratio >= 0.7 %}ratio-mid{% else %}ratio-low{% endif %}"
+                  title="Доля апвоутов">👍 {{ "%.0f"|format(s.upvote_ratio * 100) }}%</span>
+        </div>
+        <div class="pulse-score-compact">
+            <div class="pulse-score-bar"><div class="fill" style="width:{{ s.pulse_score }}%"></div></div>
+            <span class="pulse-score-num" title="Pulse score">{{ "%.0f"|format(s.pulse_score) }}</span>
+        </div>
+    </div>
+</article>

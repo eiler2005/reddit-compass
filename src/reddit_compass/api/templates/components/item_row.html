@@ -36,6 +36,14 @@
         {% if domain_ids or project_scores %}
         {% with chip_limit=4 %}{% include "components/chip_cloud.html" %}{% endwith %}
         {% endif %}
+        {% if row_pains %}
+        <p class="chip-cloud">
+            {% for pain in row_pains %}<span class="chip chip-pain">{{ pain }}</span>{% endfor %}
+        </p>
+        {% endif %}
+        {% if row_link_url %}
+        <p class="item-row-link"><a href="{{ row_link_url }}">{{ row_link_label or 'Подробнее' }}</a></p>
+        {% endif %}
     </div>
     <div class="item-row-sources">
         {% include "components/source_bar.html" %}

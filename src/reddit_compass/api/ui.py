@@ -101,6 +101,17 @@ def _analysis_query(channel: str = "broad", publication_id: str | None = None) -
     return urlencode(params)
 
 
+def _page_url(path: str, **filters: str | None) -> str:
+    """Адрес страницы со всеми активными фильтрами, но без ``page``.
+
+    Партиал пагинации дописывает номер сам. Собирать этот адрес в шаблоне
+    значило бы вручную перечислять фильтры в каждой ссылке — ровно так на
+    /pulse и появились строки на 200 символов, где легко потерять параметр.
+    """
+    query = urlencode({key: value for key, value in filters.items() if value})
+    return f"{path}?{query}" if query else path
+
+
 _LIFECYCLE_LABELS = {
     "new": "новое",
     "growing": "растёт",
@@ -215,6 +226,11 @@ _SIGNAL_TYPE_LABELS = {
 
 def signal_type_label(signal_type: str) -> str:
     return _SIGNAL_TYPE_LABELS.get(signal_type, signal_type.replace("_", " "))
+
+
+# Строка сигнала подписывает тип по-человечески: «Боли» вместо pain_point.
+# Раньше сырой идентификатор просачивался прямо в разметку /pulse.
+templates.env.globals["signal_type_label"] = signal_type_label
 
 
 # Сколько постов одной тематики и одного сабреддита пускаем в блок «Новое на Reddit».
@@ -1272,6 +1288,14 @@ async def stories_page(
             "channel": channel,
             "publication_id": publication_id or "",
             "analysis_query": _analysis_query(channel, publication_id),
+            "page_url": _page_url(
+                "/stories",
+                channel=channel,
+                publication_id=publication_id,
+                domain=domain,
+                q=q,
+                project_id=project_id,
+            ),
         },
     )
 
@@ -1283,6 +1307,7 @@ async def trends_page(
     lifecycle: str | None = None,
     review_status: str | None = None,
     project_id: str | None = None,
+    q: str | None = None,
     channel: str = "broad",
     publication_id: str | None = None,
     page: int = 1,
@@ -1308,6 +1333,7 @@ async def trends_page(
             lifecycle=lifecycle,
             review_status=review_status,
             project_id=project_id,
+            q=q,
             page=max(page, 1),
             page_size=50,
         )
@@ -1330,10 +1356,21 @@ async def trends_page(
                 "lifecycle": lifecycle or "",
                 "review_status": review_status or "",
                 "project_id": project_id or "",
+                "q": q or "",
             },
             "channel": channel,
             "publication_id": publication_id or "",
             "analysis_query": _analysis_query(channel, publication_id),
+            "page_url": _page_url(
+                "/trends",
+                channel=channel,
+                publication_id=publication_id,
+                domain=domain,
+                lifecycle=lifecycle,
+                review_status=review_status,
+                project_id=project_id,
+                q=q,
+            ),
         },
     )
 
@@ -1344,6 +1381,7 @@ async def pulse_page(
     sort: str = "pulse",
     signal_type: str | None = None,
     subreddit: str | None = None,
+    q: str | None = None,
     page: int = 1,
     view: str = "cards",
 ) -> HTMLResponse:
@@ -1382,6 +1420,7 @@ async def pulse_page(
             sig_id,
             signal_type=signal_type,
             subreddit=subreddit,
+            q=q,
             sort=sort,
             limit=page_size,
             offset=offset,
@@ -1477,8 +1516,17 @@ async def pulse_page(
                 "sort": sort,
                 "signal_type": signal_type or "",
                 "subreddit": subreddit or "",
+                "q": q or "",
                 "view": view,
             },
+            "page_url": _page_url(
+                "/pulse",
+                sort=sort,
+                signal_type=signal_type,
+                subreddit=subreddit,
+                q=q,
+                view=view,
+            ),
             "signal_type_labels": _SIGNAL_TYPE_LABELS,
             "signal_types": signal_types,
             "sort_options": [

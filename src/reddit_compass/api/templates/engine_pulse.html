@@ -46,28 +46,9 @@
     {# ── Categorized shelves ── #}
     <section class="section">
         <h2>🔥 Hot discussions</h2>
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for s in pulse_summary.top_pulse %}
-            <article class="pulse-card">
-                <header class="pulse-card-header">
-                    <span class="signal-type-badge signal-type-{{ s.signal_type }}">{{ s.signal_type }}</span>
-                    <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
-                </header>
-                <h3 class="pulse-title">
-                    <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
-                </h3>
-                <div class="pulse-metrics-row">
-                    <div class="reddit-raw">
-                        <span class="reddit-score" title="Reddit score">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
-                        <span class="reddit-comments" title="Comments">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
-                        <span class="reddit-ratio {% if s.upvote_ratio >= 0.9 %}ratio-high{% elif s.upvote_ratio >= 0.7 %}ratio-mid{% else %}ratio-low{% endif %}" title="Upvote ratio">👍 {{ "%.0f"|format(s.upvote_ratio * 100) }}%</span>
-                    </div>
-                    <div class="pulse-score-compact">
-                        <div class="pulse-score-bar"><div class="fill" style="width:{{ s.pulse_score }}%"></div></div>
-                        <span class="pulse-score-num">{{ "%.0f"|format(s.pulse_score) }}</span>
-                    </div>
-                </div>
-            </article>
+            {% with s=s %}{% include "components/pulse_row.html" %}{% endwith %}
             {% endfor %}
         </div>
     </section>
@@ -75,28 +56,9 @@
     {% if pulse_summary.top_pain %}
     <section class="section">
         <h2>😤 Pain points</h2>
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for s in pulse_summary.top_pain %}
-            <article class="pulse-card">
-                <header class="pulse-card-header">
-                    <span class="signal-type-badge signal-type-pain_point">{{ s.signal_type }}</span>
-                    <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
-                </header>
-                <h3 class="pulse-title">
-                    <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
-                </h3>
-                <div class="pulse-metrics-row">
-                    <div class="reddit-raw">
-                        <span class="reddit-score">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
-                        <span class="reddit-comments">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
-                        <span class="reddit-ratio {% if s.upvote_ratio >= 0.9 %}ratio-high{% elif s.upvote_ratio >= 0.7 %}ratio-mid{% else %}ratio-low{% endif %}">👍 {{ "%.0f"|format(s.upvote_ratio * 100) }}%</span>
-                    </div>
-                    <div class="pulse-score-compact">
-                        <div class="pulse-score-bar"><div class="fill" style="width:{{ s.pulse_score }}%"></div></div>
-                        <span class="pulse-score-num">{{ "%.0f"|format(s.pulse_score) }}</span>
-                    </div>
-                </div>
-            </article>
+            {% with s=s %}{% include "components/pulse_row.html" %}{% endwith %}
             {% endfor %}
         </div>
     </section>
@@ -105,28 +67,9 @@
     {% if pulse_summary.top_ai %}
     <section class="section">
         <h2>🤖 AI / tooling pulse</h2>
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for s in pulse_summary.top_ai %}
-            <article class="pulse-card">
-                <header class="pulse-card-header">
-                    <span class="signal-type-badge signal-type-{{ s.signal_type }}">{{ s.signal_type }}</span>
-                    <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
-                </header>
-                <h3 class="pulse-title">
-                    <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
-                </h3>
-                <div class="pulse-metrics-row">
-                    <div class="reddit-raw">
-                        <span class="reddit-score">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
-                        <span class="reddit-comments">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
-                        <span class="reddit-ratio {% if s.upvote_ratio >= 0.9 %}ratio-high{% elif s.upvote_ratio >= 0.7 %}ratio-mid{% else %}ratio-low{% endif %}">👍 {{ "%.0f"|format(s.upvote_ratio * 100) }}%</span>
-                    </div>
-                    <div class="pulse-score-compact">
-                        <div class="pulse-score-bar"><div class="fill" style="width:{{ s.pulse_score }}%"></div></div>
-                        <span class="pulse-score-num">{{ "%.0f"|format(s.pulse_score) }}</span>
-                    </div>
-                </div>
-            </article>
+            {% with s=s %}{% include "components/pulse_row.html" %}{% endwith %}
             {% endfor %}
         </div>
     </section>
@@ -135,30 +78,9 @@
     {% if pulse_summary.mainstream_gap %}
     <section class="section">
         <h2>🔍 Mainstream gap — обсуждают, но СМИ молчат</h2>
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for s in pulse_summary.mainstream_gap %}
-            <article class="pulse-card pulse-card-gap">
-                <header class="pulse-card-header">
-                    <span class="signal-type-badge signal-type-gap">gap</span>
-                    <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
-                    {% if s.perspective_gap %}
-                    <span class="scope-badge scope-community_only" title="Разрыв перспективы">разрыв {{ "%.2f"|format(s.perspective_gap) }}</span>
-                    {% endif %}
-                </header>
-                <h3 class="pulse-title">
-                    <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
-                </h3>
-                <div class="pulse-metrics-row">
-                    <div class="reddit-raw">
-                        <span class="reddit-score">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
-                        <span class="reddit-comments">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
-                    </div>
-                    <div class="pulse-score-compact">
-                        <div class="pulse-score-bar"><div class="fill" style="width:{{ s.pulse_score }}%"></div></div>
-                        <span class="pulse-score-num">{{ "%.0f"|format(s.pulse_score) }}</span>
-                    </div>
-                </div>
-            </article>
+            {% with s=s, show_gap=true %}{% include "components/pulse_row.html" %}{% endwith %}
             {% endfor %}
         </div>
     </section>
@@ -208,6 +130,7 @@
                 <option value="{{ st }}" {% if filters.signal_type == st %}selected{% endif %}>{{ signal_type_labels.get(st, st) }}</option>
                 {% endfor %}
             </select>
+            <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по заголовкам">
             <input type="text" name="subreddit" value="{{ filters.subreddit }}" placeholder="subreddit">
             <input type="hidden" name="view" value="{{ filters.view }}">
             <button class="btn-primary" type="submit">Фильтр</button>
@@ -240,55 +163,19 @@
             {% endfor %}
         </ol>
         {% else %}
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for s in signals %}
-            <article class="pulse-card">
-                <header class="pulse-card-header">
-                    <span class="signal-type-badge signal-type-{{ s.signal_type }}">{{ s.signal_type }}</span>
-                    <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
-                    {% if s.is_self %}<span class="pulse-self">self</span>{% endif %}
-                    {% if s.link_flair_text %}<span class="pulse-flair">{{ s.link_flair_text }}</span>{% endif %}
-                </header>
-                <h3 class="pulse-title">
-                    <a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a>
-                </h3>
-                <div class="pulse-metrics-row">
-                    <div class="reddit-raw">
-                        <span class="reddit-score" title="Reddit upvotes">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
-                        <span class="reddit-comments" title="Comments">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
-                        <span class="reddit-ratio {% if s.upvote_ratio >= 0.9 %}ratio-high{% elif s.upvote_ratio >= 0.7 %}ratio-mid{% else %}ratio-low{% endif %}" title="Upvote ratio">👍 {{ "%.0f"|format(s.upvote_ratio * 100) }}%</span>
-                    </div>
-                    <div class="pulse-metrics-detail">
-                        <div class="pulse-score-compact">
-                            <div class="pulse-score-bar"><div class="fill" style="width:{{ s.pulse_score }}%"></div></div>
-                            <span class="pulse-score-num">{{ "%.0f"|format(s.pulse_score) }}</span>
-                        </div>
-                        <div class="pulse-sub-metrics">
-                            <span title="Percentile within subreddit">Pctl {{ "%.0f"|format(s.subreddit_percentile) }}%</span>
-                            <span title="Comments per hour">Vel {{ "%.1f"|format(s.comment_velocity) }}/h</span>
-                            <span title="Discussion depth">Depth {{ "%.1f"|format(s.discussion_depth) }}</span>
-                            <span title="Cross-subreddit repetition">Cross {{ "%.0f"|format(s.cross_subreddit_repetition * 100) }}%</span>
-                            <span title="Novelty">Nov {{ "%.0f"|format(s.novelty * 100) }}%</span>
-                        </div>
-                    </div>
-                </div>
-            </article>
+            {% with s=s %}{% include "components/pulse_row.html" %}{% endwith %}
             {% endfor %}
         </div>
         {% endif %}
 
-        {# Pagination #}
-        {% if total_pages > 1 %}
-        <nav class="pagination" aria-label="Pagination">
-            {% if page > 1 %}
-            <a href="/pulse?sort={{ filters.sort }}&signal_type={{ filters.signal_type }}&subreddit={{ filters.subreddit }}&view={{ filters.view }}&page={{ page - 1 }}" class="btn-secondary">← Назад</a>
-            {% endif %}
-            <span class="section-note">{{ page }} / {{ total_pages }}</span>
-            {% if page < total_pages %}
-            <a href="/pulse?sort={{ filters.sort }}&signal_type={{ filters.signal_type }}&subreddit={{ filters.subreddit }}&view={{ filters.view }}&page={{ page + 1 }}" class="btn-secondary">Далее →</a>
-            {% endif %}
-        </nav>
-        {% endif %}
+        {# Ссылки собирались вручную и перечисляли фильтры по одному — добавив
+           поиск, легко было забыть его в одной из двух ссылок и потерять
+           фильтр при переходе на следующую страницу. #}
+        {% with total=total, page=page, page_size=50, page_url=page_url %}
+        {% include "components/pagination.html" %}
+        {% endwith %}
     </section>
 </div>
 {% endblock %}

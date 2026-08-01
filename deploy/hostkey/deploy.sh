@@ -108,8 +108,8 @@ ssh "${VPS_USER}@${VPS_HOST}" \
 echo "🐳 Собираю образы api + collector (первый раз — долго: базовый Playwright)..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose build api reddit-compass"
 
-echo "🐳 Запускаю api + caddy..."
-ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api caddy"
+echo "🐳 Запускаю api + caddy + ladder..."
+ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api caddy ladder"
 
 echo "🔄 Рестарт Caddy (Docker DNS refresh)..."
 ssh "${VPS_USER}@${VPS_HOST}" "docker restart rc-caddy"
