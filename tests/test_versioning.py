@@ -121,3 +121,26 @@ def test_build_info_falls_back_to_git_when_file_is_absent(tmp_path, monkeypatch)
 
     assert "git_sha" in info
     assert "version" in info
+
+
+def test_unreadable_build_info_degrades_instead_of_crashing(tmp_path, monkeypatch) -> None:
+    """`version --record` падал на проде с PermissionError.
+
+    mktemp создаёт файл с правами 0600, scp их сохраняет, а контейнер работает
+    не от root. Версия обязана деградировать до «unknown», а не до трассировки.
+    """
+    from reddit_compass import versioning
+
+    build_info = tmp_path / "BUILD_INFO"
+    build_info.write_text("git_sha=abc1234\n")
+    build_info.chmod(0o000)
+    monkeypatch.setenv("RC_BUILD_INFO", str(build_info))
+    monkeypatch.setattr(versioning, "PROJECT_ROOT", tmp_path / "нет-корня")
+
+    try:
+        info = versioning.build_info()
+    finally:
+        build_info.chmod(0o644)
+
+    assert info["git_sha"]
+    assert info["version"]

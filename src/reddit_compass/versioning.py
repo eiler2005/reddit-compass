@@ -88,7 +88,14 @@ def build_info() -> dict[str, str]:
     info: dict[str, str] = {}
     path = _build_info_path()
     if path is not None:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        try:
+            content = path.read_text(encoding="utf-8")
+        except OSError:
+            # Нечитаемый файл — не повод ронять команду: версия обязана
+            # деградировать до «unknown», а не до трассировки. Ровно так
+            # `version --record` падал на проде с PermissionError.
+            content = ""
+        for line in content.splitlines():
             key, _, value = line.partition("=")
             if key.strip():
                 info[key.strip()] = value.strip()

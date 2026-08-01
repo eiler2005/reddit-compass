@@ -86,6 +86,10 @@ BUILD_INFO_FILE="$(mktemp)"
 echo "🏷  Версия: $(grep git_sha "${BUILD_INFO_FILE}" | cut -d= -f2)"
 scp "${BUILD_INFO_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/BUILD_INFO"
 rm -f "${BUILD_INFO_FILE}"
+# mktemp создаёт файл с правами 0600, и scp их сохраняет. Контейнер работает
+# не от root, поэтому смонтированный BUILD_INFO оказывался нечитаемым и
+# `version --record` падал с PermissionError.
+ssh "${VPS_USER}@${VPS_HOST}" "chmod 0644 ${REMOTE_DIR}/BUILD_INFO"
 
 scp "${PROJECT_ROOT}/Dockerfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
