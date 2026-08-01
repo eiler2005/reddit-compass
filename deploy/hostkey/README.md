@@ -90,22 +90,27 @@ Reddit поступает с local approved route как `posts.jsonl` в Docker
 
 ## HTTPS-доступ (Caddy на хосте)
 
-```caddy
-# /etc/caddy/Caddyfile
-{$RC_PUBLIC_BASE_URL_HOST} {
-    basicauth { admin <bcrypt-hash> }
-    reverse_proxy 127.0.0.1:8900
-}
-```
+Реализовано в [`Caddyfile`](Caddyfile) этого каталога — отдельный host-Caddy
+не нужен, всё делает `rc-caddy` из compose.
 
-- DNS: configured outside tracked docs
-- TLS: Let's Encrypt (авто)
-- Auth: Basic Auth (credentials in `.env.secrets`)
+- Имя: `RC_PUBLIC_HOST`, сейчас sslip.io — резолвится в IP без своей DNS-зоны
+- TLS: Let's Encrypt по HTTP-01 (порт 80 открыт только ради challenge)
+- Порт: `RC_PUBLIC_HTTPS_PORT` (не 443 — он занят L4-роутером соседнего проекта)
+- Auth: Basic Auth, хэш в `RC_BASIC_HASH` в `.env.secrets`
+
+Подробнее, включая смену пароля и то, почему Docker публикует порты мимо UFW:
+[`docs/HOSTING.md`](../../docs/HOSTING.md).
 
 ## Ladder (paywall proxy)
 
+Ladder — сервис в [`docker-compose.yml`](docker-compose.yml), поднимается
+вместе со стеком. Коллектор ходит к нему по `http://ladder:8080` внутри сети.
+
+Раньше он запускался руками и не входил ни в один compose-проект — из-за этого
+при переезде он держал сеть и не поехал бы следом за сервисом:
+
 ```bash
-# Запущен как отдельный контейнер, подключён к reddit-compass_net:
+# Как было (больше не используется):
 docker run -d --restart always --name ladder -p 127.0.0.1:8080:8080 \
   --env RULESET=https://raw.githubusercontent.com/everywall/ladder-rules/main/ruleset.yaml \
   ghcr.io/everywall/ladder:latest

@@ -368,18 +368,29 @@ def test_search_reaches_trends_and_pulse() -> None:
     assert "0 сигналов" in nothing
 
 
-def test_published_ports_stay_on_loopback() -> None:
+def test_only_authenticated_entry_points_face_the_internet() -> None:
     """Docker публикует порты мимо UFW.
 
     Без явного ``127.0.0.1`` в ``ports:`` он пишет DNAT ``0.0.0.0/0`` прямо
     в цепочку DOCKER таблицы nat, и ``default deny (incoming)`` в UFW на это
-    не влияет. Так интерфейс без авторизации отвечал из интернета, пока
-    и Caddyfile, и ARCHITECTURE.md заявляли «loopback only».
-    """
-    compose = (Path(__file__).resolve().parents[1] / "deploy/hostkey/docker-compose.yml").read_text(
-        encoding="utf-8"
-    )
+    не влияет. Так интерфейс без авторизации какое-то время отвечал
+    из интернета.
 
-    published = re.findall(r'^\s*-\s*"([^"]+:\d+)"', compose, re.MULTILINE)
-    exposed = [p for p in published if not p.startswith("127.0.0.1:")]
-    assert exposed == [], f"порты опубликованы наружу: {exposed}"
+    Наружу разрешены ровно две вещи: порт 80 для ACME HTTP-01 и публичный
+    HTTPS, за которым стоит Basic Auth. Всё остальное — только loopback.
+    """
+    deploy_dir = Path(__file__).resolve().parents[1] / "deploy/hostkey"
+    compose = (deploy_dir / "docker-compose.yml").read_text(encoding="utf-8")
+    caddyfile = (deploy_dir / "Caddyfile").read_text(encoding="utf-8")
+
+    published = re.findall(r'^\s*-\s*"([^"]+)"', compose, re.MULTILINE)
+    mappings = [p for p in published if re.match(r"^[\d.$:{}\w-]+:\d+", p) and ":" in p]
+    public = [m for m in mappings if not m.startswith("127.0.0.1:")]
+
+    allowed_public = {"80:80", "${RC_PUBLIC_HTTPS_PORT:-8450}:${RC_PUBLIC_HTTPS_PORT:-8450}"}
+    unexpected = sorted(set(public) - allowed_public)
+    assert unexpected == [], f"порты наружу без разбора: {unexpected}"
+
+    # Публичное имя обязано быть закрыто паролем: авторизации в UI нет.
+    public_site = caddyfile[caddyfile.index("{$RC_PUBLIC_HOST}") :]
+    assert "basic_auth" in public_site

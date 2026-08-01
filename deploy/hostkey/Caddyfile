@@ -1,17 +1,51 @@
-# Caddyfile для reddit-compass API на HostKey «Hermes».
-# HTTP на :80 без TLS. Loopback обеспечивается не этим файлом, а привязкой
-# порта в docker-compose.yml: без явного 127.0.0.1 Docker публикует порт
-# наружу мимо UFW. Авторизации перед UI нет, поэтому это критично.
+# Caddyfile для reddit-compass.
 #
-# Доступ: curl http://127.0.0.1:8900/health (host port 8900 → container :80)
+# Два входа в один и тот же API:
+#
+#   1. Локальный — контейнерный :80, опубликованный на 127.0.0.1:8900.
+#      Для SSH-туннеля и curl с самого хоста. Без пароля: наружу не смотрит.
+#
+#   2. Публичный — HTTPS на {$RC_PUBLIC_HTTPS_PORT} с Basic Auth.
+#      Сертификат Let's Encrypt берётся по HTTP-01 через порт 80, поэтому он
+#      и опубликован наружу: без него ACME не пройдёт.
+#
+# Порт 443 на этом хосте занят L4-роутером чужого проекта (SNI-маршрутизация
+# на xray и на inner-caddy соседнего приложения), и его маршрут жёстко привязан
+# к одному имени с проверкой в плейбуке. Поэтому публичный HTTPS живёт
+# на своём порту, а чужой конфиг не трогается.
+#
+# Авторизации в самом интерфейсе нет, поэтому Basic Auth здесь — единственное,
+# что стоит между интернетом и всем собранным корпусом.
 
+{
+	email {$ACME_EMAIL}
+	https_port {$RC_PUBLIC_HTTPS_PORT}
+}
+
+# ── Локальный вход (SSH-туннель, curl с хоста) ────────────────────────────
 :80 {
-	# Reverse proxy на FastAPI
 	reverse_proxy api:8900
 
-	# Security headers
 	header {
 		X-Content-Type-Options nosniff
 		X-Frame-Options DENY
 	}
+}
+
+# ── Публичный вход ────────────────────────────────────────────────────────
+{$RC_PUBLIC_HOST} {
+	basic_auth {
+		{$RC_BASIC_USER} {$RC_BASIC_HASH}
+	}
+
+	reverse_proxy api:8900
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+	}
+
+	encode zstd gzip
 }
