@@ -1187,6 +1187,21 @@ a.story-card {
     color: var(--text-muted);
 }
 
+.digest-section h2 { margin-bottom: var(--space-2); }
+.digest-section .section-note { margin-bottom: var(--space-4); }
+
+/* Пустая рубрика объясняет, чего не хватило. Это не ошибка страницы,
+   а знание о границах метода, поэтому и выглядит как текст, а не как сбой. */
+.digest-gap {
+    max-width: 68ch;
+    padding-left: var(--space-4);
+    border-left: 2px solid var(--border-interactive);
+    color: var(--text-muted);
+    line-height: 1.55;
+}
+
+.digest-next .digest-gap { border-left-color: var(--accent); }
+
 .digest-foot {
     margin-top: var(--space-7);
     padding-top: var(--space-4);
