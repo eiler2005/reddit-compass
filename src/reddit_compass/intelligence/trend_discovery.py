@@ -243,23 +243,169 @@ def _date_key(value: str) -> str:
 
 
 def _ctfidf_name(cluster_titles: list[str], corpus_titles: list[list[str]]) -> str:
-    """Имя кластера через c-TF-IDF: самые различающие многословные термы."""
-
+    """Имя кластера через c-TF-IDF: самые различающие термы + биграммы."""
+    stop = {
+        "the",
+        "a",
+        "an",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "can",
+        "need",
+        "dare",
+        "ought",
+        "used",
+        "to",
+        "of",
+        "in",
+        "for",
+        "on",
+        "with",
+        "at",
+        "by",
+        "from",
+        "as",
+        "into",
+        "through",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+        "out",
+        "off",
+        "over",
+        "under",
+        "again",
+        "further",
+        "then",
+        "once",
+        "here",
+        "there",
+        "when",
+        "where",
+        "why",
+        "how",
+        "all",
+        "each",
+        "every",
+        "both",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "such",
+        "no",
+        "nor",
+        "not",
+        "only",
+        "own",
+        "same",
+        "so",
+        "than",
+        "too",
+        "very",
+        "just",
+        "because",
+        "but",
+        "and",
+        "or",
+        "if",
+        "while",
+        "about",
+        "against",
+        "up",
+        "down",
+        "it",
+        "its",
+        "this",
+        "that",
+        "these",
+        "those",
+        "i",
+        "me",
+        "my",
+        "we",
+        "our",
+        "you",
+        "your",
+        "he",
+        "him",
+        "his",
+        "she",
+        "her",
+        "they",
+        "them",
+        "their",
+        "what",
+        "which",
+        "who",
+        "whom",
+        "new",
+        "one",
+        "like",
+        "get",
+        "got",
+        "make",
+        "made",
+        "say",
+        "said",
+    }
     cluster_tokens: Counter[str] = Counter()
+    cluster_bigrams: Counter[str] = Counter()
     for title in cluster_titles:
-        cluster_tokens.update(_normalize_token(t) for t in _tokenize(title))
+        tokens = [
+            _normalize_token(t)
+            for t in _tokenize(title)
+            if _normalize_token(t) not in stop and len(_normalize_token(t)) > 2
+        ]
+        cluster_tokens.update(tokens)
+        for i in range(len(tokens) - 1):
+            cluster_bigrams[f"{tokens[i]} {tokens[i + 1]}"] += 1
     if not cluster_tokens:
         return ""
     total = sum(cluster_tokens.values())
     n_clusters = max(len(corpus_titles), 1)
     doc_freq: Counter[str] = Counter()
+    doc_freq_bi: Counter[str] = Counter()
     for tokens in corpus_titles:
-        doc_freq.update({t for t in {_normalize_token(tok) for tok in tokens}})
+        clean = [
+            _normalize_token(t)
+            for t in tokens
+            if _normalize_token(t) not in stop and len(_normalize_token(t)) > 2
+        ]
+        doc_freq.update(set(clean))
+        for i in range(len(clean) - 1):
+            doc_freq_bi[f"{clean[i]} {clean[i + 1]}"] += 1
     scored: list[tuple[float, str]] = []
     for term, count in cluster_tokens.items():
         tf = count / total
         idf = math.log((1 + n_clusters) / (1 + doc_freq.get(term, 0))) + 1.0
         scored.append((tf * idf, term))
+    for term, count in cluster_bigrams.items():
+        tf = count / total
+        idf = math.log((1 + n_clusters) / (1 + doc_freq_bi.get(term, 0))) + 1.0
+        scored.append((tf * idf * 1.3, term))  # bigram bonus
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
     terms = [term for _, term in scored[:4]]
     return " ".join(terms)

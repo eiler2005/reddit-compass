@@ -2268,6 +2268,23 @@ a.story-card {
     .table { display: block; overflow-x: auto; }
     .glossary { grid-template-columns: 1fr; gap: var(--space-1) 0; }
 
+    /* Pulse rows: single column on mobile — title + metrics stack vertically */
+    .pulse-row {
+        grid-template-columns: 1fr;
+        gap: var(--space-2);
+        padding: var(--space-3);
+    }
+    .pulse-row-metrics {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: var(--space-3);
+        align-items: center;
+    }
+    .pulse-row-title { font-size: var(--text-sm); }
+
+    /* Topic cloud cards: cap height on mobile */
+    .topic-cloud { max-height: 220px; overflow: hidden; }
+
     /* Липкая шапка занимала около 88px при высоте экрана 667px — 13% экрана
        под навигацию. Меню уезжает в горизонтальную прокрутку одной строкой. */
     .header { padding: var(--space-1) var(--space-3); }

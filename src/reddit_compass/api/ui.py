@@ -256,6 +256,8 @@ _SIGNAL_TYPE_LABELS = {
     "ai_capability": "Возможности AI",
     "ai_risk": "Риски AI",
     "ai_tools": "AI-инструменты",
+    "ai_agents": "AI-агенты и автономность",
+    "open_source_ai": "Open source AI",
     "career_labor": "Работа и карьера",
     "complaint": "Жалобы",
     "discussion": "Дискуссии",
@@ -266,6 +268,11 @@ _SIGNAL_TYPE_LABELS = {
     "policy_politics": "Политика и регулирование",
     "product_request": "Запросы на продукт",
     "question": "Вопросы",
+    "surveillance_privacy": "Слежка и приватность",
+    "datacenter_energy": "Дата-центры и энергия",
+    "health_science": "Здоровье и наука",
+    "education": "Образование и обучение",
+    "geopolitics": "Геополитика и торговля",
     "other": "Прочее",
 }
 

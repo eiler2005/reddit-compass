@@ -100,7 +100,12 @@ def build_trend_review_prompt(stories: list[dict[str, object]]) -> str:
         f"Candidate stories: {json.dumps(stories, ensure_ascii=False, sort_keys=True)}\n\n"
         "Return JSON only with: decision (coherent_trend|reject), trend_name_ru, "
         "pattern, story_ids, evidence_story_ids, counterpoints, domains, confidence "
-        "0..1. Use only allowed IDs and include counterexamples when present."
+        "0..1. Use only allowed IDs and include counterexamples when present.\n\n"
+        "IMPORTANT for trend_name_ru: write a short descriptive Russian phrase "
+        "(3-8 words) that captures the recurring pattern or theme, NOT a list of "
+        "keywords. Good: 'AI-агенты выходят из-под контроля', 'Массовые увольнения "
+        "в tech после AI-ставок', 'Сопротивление строительству дата-центров'. "
+        "Bad: 'ai agent model code', 'job layoff tech'."
     )
 
 

@@ -31,6 +31,13 @@ SignalType = Literal[
     "ai_capability",
     "ai_risk",
     "ai_tools",
+    "ai_agents",
+    "open_source_ai",
+    "surveillance_privacy",
+    "datacenter_energy",
+    "health_science",
+    "education",
+    "geopolitics",
     "other",
 ]
 
@@ -75,6 +82,47 @@ _PRODUCT_REQUEST_PATTERNS = re.compile(
     r"recommend( me)? (an? )?(app|tool|library))\b",
     re.IGNORECASE,
 )
+_AI_AGENTS_PATTERNS = re.compile(
+    r"\b(agent|agentic|autonomous|multi.?agent|crewai|langgraph|autogen|"
+    r"forward deployed|orchestrat|workflow automation|ai worker|"
+    r"digital employee|robotic process)\b",
+    re.IGNORECASE,
+)
+_OPEN_SOURCE_AI_PATTERNS = re.compile(
+    r"\b(open.?source|open.?weight|llama|mistral|qwen|deepseek|kimi|"
+    r"ollama|local.?llm|self.?host|fine.?tun|quantiz|gguf|vllm)\b",
+    re.IGNORECASE,
+)
+_SURVEILLANCE_PATTERNS = re.compile(
+    r"\b(surveillance|flock|camera|tracking|privacy|grapheneos|duress|"
+    r"alpr|license plate|facial recognition|spy|monitor|wiretap|"
+    r"data collection|fingerprint|biometric)\b",
+    re.IGNORECASE,
+)
+_DATACENTER_PATTERNS = re.compile(
+    r"\b(data.?center|datacentre|hyperscaler|gpu cluster|power grid|"
+    r"electricity demand|water usage|eminent domain|nimby|energy crisis|"
+    r"cooling|server farm)\b",
+    re.IGNORECASE,
+)
+_HEALTH_SCIENCE_PATTERNS = re.compile(
+    r"\b(cancer|drug|therapy|vaccine|clinical trial|fda|diagnosis|"
+    r"mental health|adhd|depression|anxiety|treatment|patient|doctor|"
+    r"hospital|surgery|prescription|glp-?1|obesity)\b",
+    re.IGNORECASE,
+)
+_EDUCATION_PATTERNS = re.compile(
+    r"\b(school|university|college|student|teacher|professor|classroom|"
+    r"curriculum|cheating|plagiarism|homework|exam|lecture|enrollment|"
+    r"chromebook|screen time|learning)\b",
+    re.IGNORECASE,
+)
+_GEOPOLITICS_PATTERNS = re.compile(
+    r"\b(tariff|sanction|trade war|nato|china|taiwan|ukraine|russia|"
+    r"iran|israel|gaza|pentagon|missile|ceasefire|diplomat|embassy|"
+    r"export control|chip ban)\b",
+    re.IGNORECASE,
+)
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'_-]*", re.IGNORECASE)
 
 _CAREER_SUBS = {
@@ -88,7 +136,11 @@ _CAREER_SUBS = {
     "professors",
 }
 _MARKET_SUBS = {"wallstreetbets", "stocks", "investing", "finance", "economy"}
-_POLICY_SUBS = {"politics", "geopolitics", "worldnews", "news", "privacy"}
+_POLICY_SUBS = {"politics", "law", "socialmedia"}
+_PRIVACY_SUBS = {"privacy", "netsec", "cybersecurity", "hacking", "selfhosted"}
+_SCIENCE_SUBS = {"science", "medicine", "health", "dataisbeautiful"}
+_EDUCATION_SUBS = {"education", "askacademia"}
+_GEO_SUBS = {"geopolitics", "worldnews", "europe", "china", "middleeast", "ukrainianconflict"}
 
 
 def classify_signal_type(item: ContentItem) -> SignalType:
@@ -96,15 +148,43 @@ def classify_signal_type(item: ContentItem) -> SignalType:
     text = f"{item.title} {item.excerpt}".lower()
     sub = item.source_section.lower()
 
-    # Subreddit-based classification
+    # Subreddit-based classification (highest priority for topic subreddits)
     if sub in _CAREER_SUBS:
         return "career_labor"
     if sub in _MARKET_SUBS:
         return "market_investing"
+    if sub in _PRIVACY_SUBS:
+        return "surveillance_privacy"
+    if sub in _SCIENCE_SUBS:
+        return "health_science"
+    if sub in _EDUCATION_SUBS:
+        return "education"
+    if sub in _GEO_SUBS:
+        return "geopolitics"
     if sub in _POLICY_SUBS:
         return "policy_politics"
 
-    # Pattern-based classification
+    # Pattern-based classification (topic patterns before format patterns)
+    if _SURVEILLANCE_PATTERNS.search(text):
+        return "surveillance_privacy"
+    if _DATACENTER_PATTERNS.search(text):
+        return "datacenter_energy"
+    if _GEOPOLITICS_PATTERNS.search(text):
+        return "geopolitics"
+    if _EDUCATION_PATTERNS.search(text):
+        return "education"
+    if _HEALTH_SCIENCE_PATTERNS.search(text):
+        return "health_science"
+    if _AI_AGENTS_PATTERNS.search(text):
+        return "ai_agents"
+    if _OPEN_SOURCE_AI_PATTERNS.search(text):
+        return "open_source_ai"
+    if _AI_RISK_PATTERNS.search(text):
+        return "ai_risk"
+    if _AI_CAPABILITY_PATTERNS.search(text):
+        return "ai_capability"
+    if _AI_TOOLS_PATTERNS.search(text):
+        return "ai_tools"
     if _QUESTION_PATTERNS.search(text):
         return "question"
     if _PRODUCT_REQUEST_PATTERNS.search(text):
@@ -113,12 +193,6 @@ def classify_signal_type(item: ContentItem) -> SignalType:
         return "pain_point"
     if _COMPLAINT_PATTERNS.search(text):
         return "complaint"
-    if _AI_RISK_PATTERNS.search(text):
-        return "ai_risk"
-    if _AI_CAPABILITY_PATTERNS.search(text):
-        return "ai_capability"
-    if _AI_TOOLS_PATTERNS.search(text):
-        return "ai_tools"
     if _MEME_PATTERNS.search(text):
         return "meme_culture"
 

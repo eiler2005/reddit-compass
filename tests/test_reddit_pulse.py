@@ -274,7 +274,7 @@ class TestBuildRedditPulseSignals:
     def test_show_hn_items_classified_as_ai_tools(self):
         item = _make_reddit_item(title="Show HN: I built an AI agent")
         signals = build_reddit_pulse_signals([item])
-        assert signals[0].signal_type == "ai_tools"
+        assert signals[0].signal_type == "ai_agents"
 
     def test_build_uses_story_linkage_pack_and_mainstream_coverage(self):
         item = _make_reddit_item(item_id="r1", subreddit="ChatGPT")
