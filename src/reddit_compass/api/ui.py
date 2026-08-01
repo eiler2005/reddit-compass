@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 
 from ..config import DEFAULT_PROFILE
 from ..intelligence.digest import build_digest
+from ..intelligence.digest_book import build_book_digest
 from ..intelligence.engine import (
     DEFAULT_ENGINE_DB_PATH,
     engine_db,
@@ -2158,38 +2159,26 @@ async def engine_page(request: Request) -> HTMLResponse:
     )
 
 
-@router.get("/digest", response_class=HTMLResponse)
-@router.get("/digest/{date}", response_class=HTMLResponse)
-async def digest_page(
-    request: Request,
-    date: str | None = None,
-    profile: str = DEFAULT_PROFILE,
-) -> HTMLResponse:
-    """Дайджест за день: выжимка вместо разглядывания шести разделов.
+def _digest_material(
+    date: str | None, profile: str
+) -> tuple[dict[str, Any], dict[str, Any], list[Any], list[Any], list[Any], list[Any]] | str:
+    """Куски опубликованного выпуска, из которых собираются оба дайджеста.
 
-    Собирается из того же опубликованного выпуска, что и /today, поэтому
-    страница не может разойтись с будущей рассылкой: расходятся рендеры,
-    а источник один.
+    Дайджестов два: основной («что произошло за день») и экспериментальный
+    по оптике книги. Данные у них общие — расходятся только раскладка
+    и рендер, поэтому сбор живёт в одном месте.
+
+    Возвращает либо материал, либо строку с причиной, почему его нет.
     """
     engine_path = _engine_path()
     if not engine_path.exists():
-        return templates.TemplateResponse(
-            request=request,
-            name="empty.html",
-            context={"message": "Trend Engine publication не найдена."},
-            status_code=404,
-        )
+        return "Trend Engine publication не найдена."
 
     engine_conn = open_engine_readonly(engine_path)
     try:
         radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
         if radar is None:
-            return templates.TemplateResponse(
-                request=request,
-                name="empty.html",
-                context={"message": "Опубликованного выпуска за эту дату нет."},
-                status_code=404,
-            )
+            return "Опубликованного выпуска за эту дату нет."
         payload = radar.model_dump()
         analysis_query = _analysis_query("broad", None)
         trends = _today_change_candidates(radar, analysis_query)
@@ -2224,16 +2213,23 @@ async def digest_page(
                 },
             )
     except (HTTPException, OSError, sqlite3.Error):
-        return templates.TemplateResponse(
-            request=request,
-            name="empty.html",
-            context={"message": "Дайджест собрать не удалось."},
-            status_code=503,
-        )
+        return "Дайджест собрать не удалось."
     finally:
         engine_conn.close()
 
-    digest = build_digest(
+    return payload, dashboard, trends, reading, reddit_new, gap_signals
+
+
+def _digest_response(
+    request: Request,
+    material: tuple[dict[str, Any], dict[str, Any], list[Any], list[Any], list[Any], list[Any]],
+    *,
+    builder: Any,
+    template: str,
+) -> HTMLResponse:
+    """Собрать и отрисовать дайджест выбранным сборщиком."""
+    payload, dashboard, trends, reading, reddit_new, gap_signals = material
+    digest = builder(
         date=str(payload["date"]),
         dashboard=dashboard,
         trends=[dict(trend) for trend in trends],
@@ -2243,16 +2239,66 @@ async def digest_page(
         preview=bool(payload.get("preview")),
         publication_id=str(payload.get("publication_id") or ""),
     )
-
     return templates.TemplateResponse(
         request=request,
-        name="digest.html",
+        name=template,
         context={
             "digest": digest,
             "radar": payload,
-            "analysis_query": analysis_query,
+            "analysis_query": _analysis_query("broad", None),
         },
     )
+
+
+def _digest_error(request: Request, message: str) -> HTMLResponse:
+    status = 503 if message.startswith("Дайджест") else 404
+    return templates.TemplateResponse(
+        request=request,
+        name="empty.html",
+        context={"message": message},
+        status_code=status,
+    )
+
+
+# Маршрут /digest/book объявлен раньше /digest/{date}: иначе «book» будет
+# разобран как дата и эксперимент станет недостижим.
+@router.get("/digest/book", response_class=HTMLResponse)
+async def digest_book_page(
+    request: Request,
+    date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
+) -> HTMLResponse:
+    """ЭКСПЕРИМЕНТ: тот же выпуск по оптике книги.
+
+    Второй дайджест рядом с основным, а не вместо него: основной отвечает
+    «что произошло за день», этот проверяет, годится ли материал радара
+    как сырьё для недельного разбора.
+    """
+    material = _digest_material(date, profile)
+    if isinstance(material, str):
+        return _digest_error(request, material)
+    return _digest_response(
+        request, material, builder=build_book_digest, template="digest_book.html"
+    )
+
+
+@router.get("/digest", response_class=HTMLResponse)
+@router.get("/digest/{date}", response_class=HTMLResponse)
+async def digest_page(
+    request: Request,
+    date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
+) -> HTMLResponse:
+    """Дайджест за день: выжимка вместо разглядывания шести разделов.
+
+    Собирается из того же опубликованного выпуска, что и /today, поэтому
+    страница не может разойтись с будущей рассылкой: расходятся рендеры,
+    а источник один.
+    """
+    material = _digest_material(date, profile)
+    if isinstance(material, str):
+        return _digest_error(request, material)
+    return _digest_response(request, material, builder=build_digest, template="digest.html")
 
 
 @router.get("/about", response_class=HTMLResponse)

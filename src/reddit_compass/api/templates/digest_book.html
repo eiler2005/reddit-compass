@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}Разбор по оптике книги · {{ digest.date }} — reddit-compass{% endblock %}
+
+{% block content %}
+{# ЭКСПЕРИМЕНТ. Второй дайджест рядом с основным (/digest), а не вместо него.
+   Основной отвечает «что произошло за день»; этот проверяет гипотезу — годится
+   ли материал радара как сырьё для недельного разбора книги.
+
+   Сам дайджест как продукт живёт в AiNativeBook_Draft_26/services/digest-service:
+   там утверждённый редакционный контракт. Здесь только материал, разложенный
+   по четырём вопросам книги. #}
+<div class="container digest-page">
+    {% with page_title="Разбор по оптике книги", page_note="Эксперимент рядом с основным дайджестом: материал выпуска, разложенный по четырём вопросам книги. Это не выпуск — интерпретации и вывода здесь нет.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
+
+    <p class="digest-experiment">
+        Экспериментальная страница. Основной дайджест — <a href="/digest">здесь</a>.
+        Если гипотеза не подтвердится, эта страница будет убрана.
+    </p>
+
+    {% with preview=digest.preview, release_type="Digest" %}{% include "components/preview_banner.html" %}{% endwith %}
+
+    <p class="digest-headline">{{ digest.headline }}</p>
+
+    <p class="digest-facts">
+        Выпуск за {{ digest.date }} ·
+        <strong>{{ digest.item_count }}</strong> материалов
+        из <strong>{{ digest.source_count }}</strong> источников ·
+        <strong>{{ digest.considered_count }}</strong> паттернов рассмотрено
+        {% if digest.publication_id %}· <a href="/today">полная версия</a>{% endif %}
+    </p>
+
+    {% for section in digest.sections %}
+    <section class="section digest-section">
+        <h2>{{ section.title }}</h2>
+        <p class="section-note">{{ section.question }}</p>
+
+        {% if section.is_empty %}
+        {# Пустая рубрика без объяснения читается как поломка; с объяснением —
+           как знание о границах метода. #}
+        <p class="digest-gap">{{ section.gap_note }}</p>
+        {% else %}
+        {% with digest_items=section.items, digest_external=(section.key not in ["changed"]) %}
+        {% include "components/digest_list.html" %}
+        {% endwith %}
+        {% endif %}
+    </section>
+    {% endfor %}
+
+    <section class="section digest-next">
+        <h2>Следующий разумный ход</h2>
+        {% if digest.next_move %}
+        <p class="prose">{{ digest.next_move }}</p>
+        {% else %}
+        <p class="digest-gap">
+            Формулирует автор. Радар показывает материал, но не решает,
+            что с ним делать — в этом и состоит разница между лентой и разбором.
+        </p>
+        {% endif %}
+    </section>
+
+    <p class="section-note digest-foot">
+        Основной дайджест — <a href="/digest">/digest</a>. Слои выпуска целиком —
+        в <a href="/news?{{ analysis_query }}">Ленте</a>,
+        <a href="/stories?{{ analysis_query }}">Сюжетах</a> и
+        <a href="/trends?{{ analysis_query }}">Трендах</a>;
+        сигналы сообщества — в <a href="/pulse">Reddit Pulse</a>.
+    </p>
+</div>
+{% endblock %}
