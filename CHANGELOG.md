@@ -7,6 +7,10 @@
 
 ### Added
 
+- **IPRoyal proxy handoff.** Added a credential-free operational note for the
+  IPRoyal Residential sticky-session configuration, Hermes connectivity check,
+  and Reddit runtime boundary in `docs/IPROYAL_HANDOFF.md`.
+
 - **Облака тематик на `/pulse`.** Рядом со списком сигналов — все типы с счётчиком, средним
   pulse и тремя живыми примерами заголовков: название вроде «Прочее» или «Боли» само по себе
   не объясняет, что внутри. Клик по тематике открывает `?view=links` — топ-20 **прямыми
