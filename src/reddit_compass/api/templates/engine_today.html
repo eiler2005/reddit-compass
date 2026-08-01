@@ -35,28 +35,19 @@
     </div>
 
     <section class="section today-overview">
-        <div class="kpi-grid today-kpis" aria-label="Сводка выпуска">
-            <a class="kpi-card" href="/news?{{ analysis_query }}">
-                <div class="kpi-num">{{ dashboard.item_count }}</div>
-                <div class="kpi-label">материалов</div>
-            </a>
-            <a class="kpi-card" href="/trends?{{ analysis_query }}">
-                <div class="kpi-num">{{ dashboard.trend_count }}</div>
-                <div class="kpi-label">trend-кандидатов</div>
-            </a>
-            <a class="kpi-card" href="/trends?{{ analysis_query }}">
-                <div class="kpi-num">{{ dashboard.cross_source_trend_count }}</div>
-                <div class="kpi-label">cross-source</div>
-            </a>
-            <a class="kpi-card" href="/engine">
-                <div class="kpi-num">{{ dashboard.source_count }}</div>
-                <div class="kpi-label">source feeds</div>
-            </a>
-            <a class="kpi-card" href="/stories?{{ analysis_query }}">
-                <div class="kpi-num">{{ dashboard.source_cluster_count }}</div>
-                <div class="kpi-label">source clusters</div>
-            </a>
-        </div>
+        {# Вместо пяти KPI-плиток — связная строка. Ни одно из тех чисел
+           (материалов, trend-кандидатов, cross-source, source feeds,
+           source clusters) не вело к решению «что читать»; операционные
+           метрики переехали в components/kpi_row.html на /runs и /engine. #}
+        <p class="today-lede">
+            Собрано <strong>{{ dashboard.item_count }}</strong> материалов
+            из <strong>{{ dashboard.source_count }}</strong> источников;
+            Engine свёл их в <strong>{{ dashboard.source_cluster_count }}</strong> кластеров
+            и выделил <strong>{{ dashboard.trend_count }}</strong> трендов,
+            из которых <strong>{{ dashboard.cross_source_trend_count }}</strong>
+            подтверждены больше чем одним источником.
+            <a href="/runs">Как это собиралось</a>.
+        </p>
 
         <div class="status-panel">
             <h2>Качество и ограничения</h2>

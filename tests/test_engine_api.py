@@ -497,8 +497,11 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert response.status_code == 200
     assert reading_response.status_code == 200
     assert changes_response.status_code == 200
-    assert "Сводка выпуска" in response.text
-    assert "trend-кандидатов" in response.text
+    # Вверху /today стоит связная строка, а не пять KPI-плиток: ни материалов,
+    # ни trend-кандидатов, ни source clusters не отвечали на вопрос «что читать».
+    assert "today-lede" in response.text
+    assert "подтверждены больше чем одним источником" in response.text
+    assert "kpi-num" not in response.text
     assert "Качество и ограничения" in response.text
     assert "Что прочитать сегодня" in response.text
     assert "Тематический срез" in response.text

@@ -25,23 +25,23 @@
     </section>
 
     <section class="section">
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for story in stories["items"] %}
-            <article class="story-card">
-                <div class="story-meta">
-                    <span class="direction-badge">{{ story.confidence }}</span>
-                    {% with source_scope=story.source_scope %}{% include "components/scope_badge.html" %}{% endwith %}
-                    <span>{{ story.source_count }} source clusters</span>
-                    <span>{{ story.item_count }} materials</span>
-                    <span>{{ story.first_seen }} → {{ story.last_seen }}</span>
-                </div>
-                <h2 class="story-title"><a href="/stories/{{ story.story_id }}?{{ analysis_query }}">{{ story.title }}</a></h2>
-                {% if story.summary_ru %}
-                <p>{{ story.summary_ru }}</p>
-                {% endif %}
-                {% with domain_ids=story.domain_ids, project_scores=story.project_scores %}{% include "components/chip_cloud.html" %}{% endwith %}
-                {% with evidence_items=story.evidence_items, list_title="Evidence" %}{% include "components/evidence_list.html" %}{% endwith %}
-            </article>
+            {% with
+                row_url="/stories/" ~ story.story_id ~ "?" ~ analysis_query,
+                row_title=story.title,
+                row_summary=story.summary_ru,
+                row_weight=story.source_count,
+                row_badges=[("confidence-badge confidence-" ~ story.confidence, story.confidence ~ " confidence")],
+                row_meta=[
+                    story.source_count ~ " кластеров источников",
+                    story.item_count ~ " материалов",
+                    story.first_seen ~ " → " ~ story.last_seen
+                ],
+                domain_ids=story.domain_ids,
+                project_scores=story.project_scores,
+                source_clusters=story.source_clusters
+            %}{% include "components/item_row.html" %}{% endwith %}
             {% else %}
             {% with empty_message="Stories не найдены." %}{% include "components/empty_state.html" %}{% endwith %}
             {% endfor %}

@@ -1,0 +1,30 @@
+{# Сводка выпуска в цифрах. Expects: dashboard, analysis_query
+
+   Жила вверху /today, где ни одно из пяти чисел не отвечало на вопрос
+   «что читать»: материалов, trend-кандидатов, cross-source, source feeds,
+   source clusters. Это операционные метрики, и их место — на страницах,
+   где смотрят на состояние конвейера.
+
+   Чтобы вернуть блок на /today, достаточно снова включить этот партиал. #}
+<div class="kpi-grid" aria-label="Сводка выпуска">
+    <a class="kpi-card" href="/news?{{ analysis_query }}">
+        <div class="kpi-num">{{ dashboard.item_count }}</div>
+        <div class="kpi-label">материалов</div>
+    </a>
+    <a class="kpi-card" href="/trends?{{ analysis_query }}">
+        <div class="kpi-num">{{ dashboard.trend_count }}</div>
+        <div class="kpi-label">trend-кандидатов</div>
+    </a>
+    <a class="kpi-card" href="/trends?{{ analysis_query }}">
+        <div class="kpi-num">{{ dashboard.cross_source_trend_count }}</div>
+        <div class="kpi-label">cross-source</div>
+    </a>
+    <a class="kpi-card" href="/engine">
+        <div class="kpi-num">{{ dashboard.source_count }}</div>
+        <div class="kpi-label">source feeds</div>
+    </a>
+    <a class="kpi-card" href="/stories?{{ analysis_query }}">
+        <div class="kpi-num">{{ dashboard.source_cluster_count }}</div>
+        <div class="kpi-label">source clusters</div>
+    </a>
+</div>

@@ -39,6 +39,7 @@ from ..intelligence.repository import (
 )
 from ..intelligence.taxonomy import BROAD_DOMAINS
 from ..versioning import assets_version
+from .view_models import cluster_label
 
 router = APIRouter()
 
@@ -51,6 +52,9 @@ templates.env.autoescape = True
 # помнить про бамп при каждой правке скрипта, а забытый бамп означает старый JS против
 # новой разметки — ровно тот класс расхождений, который не виден в тестах.
 templates.env.globals["asset_version"] = assets_version()
+# Полоса источников подписывает свои сегменты человеческими названиями кластеров,
+# а не их идентификаторами: «🗣 Голоса» вместо voices.
+templates.env.globals["cluster_label"] = cluster_label
 
 _CSRF_SECRET = secrets.token_hex(32)
 

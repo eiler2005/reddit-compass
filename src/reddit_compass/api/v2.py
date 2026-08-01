@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -226,6 +226,10 @@ class PublishedStoryOut(BaseModel):
     confidence: str = "low"
     source_count: int = 0
     item_count: int = 0
+    # Какие кластеры источников стоят за событием, с числом материалов в каждом.
+    # Раньше наружу выходило только их количество, поэтому «о чём молчат СМИ» —
+    # главное отличие продукта — интерфейс показать не мог.
+    source_clusters: dict[str, int] = Field(default_factory=dict)
     evidence_items: list[NewsItemOut] = Field(default_factory=list)
 
 
@@ -261,6 +265,9 @@ class TrendOut(BaseModel):
     last_seen: str = ""
     story_count: int = 0
     source_count: int = 0
+    # Состав кластеров источников: source_count говорит только «сколько»,
+    # а полосе в интерфейсе нужно «каких и в какой пропорции».
+    source_clusters: dict[str, int] = Field(default_factory=dict)
     project_scores: dict[str, int] = Field(default_factory=dict)
     evidence_story_ids: list[str] = Field(default_factory=list)
     counterpoints: list[str] = Field(default_factory=list)
@@ -671,10 +678,46 @@ def _story_evidence(
     return [_news_item_out(row) for row in rows]
 
 
+def _story_source_clusters(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    story_release_id: str,
+    story_ids: Sequence[str],
+) -> dict[str, dict[str, int]]:
+    """Состав кластеров источников по сюжетам одним запросом.
+
+    Считается по всем материалам сюжета, а не по выборке evidence (там лимит 5):
+    полоса источников обязана отражать реальный охват, иначе она врёт ровно
+    в том месте, ради которого сделана.
+    """
+    if not story_ids:
+        return {}
+    placeholders = ",".join("?" for _ in story_ids)
+    rows = conn.execute(
+        f"""
+        SELECT si.story_id, i.source_cluster, COUNT(*) AS cnt
+        FROM engine_story_items si
+        JOIN release_items i ON i.item_id = si.item_id AND i.release_id = ?
+        WHERE si.story_release_id = ? AND si.story_id IN ({placeholders})
+        GROUP BY si.story_id, i.source_cluster
+        """,
+        (data_release_id, story_release_id, *story_ids),
+    ).fetchall()
+    clusters: dict[str, dict[str, int]] = {}
+    for row in rows:
+        cluster = str(row["source_cluster"] or "")
+        if not cluster:
+            continue
+        clusters.setdefault(str(row["story_id"]), {})[cluster] = int(row["cnt"] or 0)
+    return clusters
+
+
 def _published_story_out(
     row: sqlite3.Row,
     *,
     evidence_items: list[NewsItemOut] | None = None,
+    source_clusters: dict[str, int] | None = None,
 ) -> PublishedStoryOut:
     return PublishedStoryOut(
         story_id=str(row["story_id"]),
@@ -689,6 +732,7 @@ def _published_story_out(
         confidence=str(row["confidence"] or "low"),
         source_count=int(row["source_count"] or 0),
         item_count=int(row["item_count"] or 0),
+        source_clusters=source_clusters or {},
         evidence_items=evidence_items or [],
     )
 
@@ -745,6 +789,12 @@ def _engine_stories(
         )
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
+    clusters_by_story = _story_source_clusters(
+        conn,
+        data_release_id=data_release.release_id,
+        story_release_id=story_release.story_release_id,
+        story_ids=[str(row["story_id"]) for row in page_rows],
+    )
     stories = []
     for row in page_rows:
         evidence = (
@@ -758,7 +808,13 @@ def _engine_stories(
             if include_items
             else []
         )
-        stories.append(_published_story_out(row, evidence_items=evidence))
+        stories.append(
+            _published_story_out(
+                row,
+                evidence_items=evidence,
+                source_clusters=clusters_by_story.get(str(row["story_id"]), {}),
+            )
+        )
     return PaginatedPublishedStories(
         items=stories,
         total=len(filtered),
@@ -771,10 +827,49 @@ def _engine_stories(
     )
 
 
+def _trend_source_clusters(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    story_release_id: str,
+    trend_release_id: str,
+    trend_ids: Sequence[str],
+) -> dict[str, dict[str, int]]:
+    """Состав кластеров источников по трендам одним запросом.
+
+    Тренд хранит только ``source_count`` и ``source_scope``: сколько кластеров
+    и попал ли он в оба лагеря. Для полосы нужен сам состав, поэтому он
+    собирается по материалам входящих сюжетов.
+    """
+    if not trend_ids:
+        return {}
+    placeholders = ",".join("?" for _ in trend_ids)
+    rows = conn.execute(
+        f"""
+        SELECT ts.trend_id, i.source_cluster, COUNT(*) AS cnt
+        FROM engine_trend_stories ts
+        JOIN engine_story_items si
+          ON si.story_id = ts.story_id AND si.story_release_id = ?
+        JOIN release_items i ON i.item_id = si.item_id AND i.release_id = ?
+        WHERE ts.trend_release_id = ? AND ts.trend_id IN ({placeholders})
+        GROUP BY ts.trend_id, i.source_cluster
+        """,
+        (story_release_id, data_release_id, trend_release_id, *trend_ids),
+    ).fetchall()
+    clusters: dict[str, dict[str, int]] = {}
+    for row in rows:
+        cluster = str(row["source_cluster"] or "")
+        if not cluster:
+            continue
+        clusters.setdefault(str(row["trend_id"]), {})[cluster] = int(row["cnt"] or 0)
+    return clusters
+
+
 def _trend_out(
     row: sqlite3.Row,
     *,
     stories: list[PublishedStoryOut] | None = None,
+    source_clusters: dict[str, int] | None = None,
 ) -> TrendOut:
     return TrendOut(
         trend_id=str(row["trend_id"]),
@@ -792,6 +887,7 @@ def _trend_out(
         evidence_story_ids=_json_list(row["evidence_story_ids"]),
         counterpoints=_json_list(row["counterpoints"]),
         review_status=str(_row_value(row, "review_status", "pending") or "pending"),
+        source_clusters=source_clusters or {},
         stories=stories or [],
     )
 
@@ -913,6 +1009,13 @@ def _engine_trends(
         )
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
+    clusters_by_trend = _trend_source_clusters(
+        conn,
+        data_release_id=data_release.release_id,
+        story_release_id=story_release.story_release_id,
+        trend_release_id=trend_release.trend_release_id,
+        trend_ids=[str(row["trend_id"]) for row in page_rows],
+    )
     trends = []
     for row in page_rows:
         stories = (
@@ -925,7 +1028,13 @@ def _engine_trends(
             if include_stories
             else []
         )
-        trends.append(_trend_out(row, stories=stories))
+        trends.append(
+            _trend_out(
+                row,
+                stories=stories,
+                source_clusters=clusters_by_trend.get(str(row["trend_id"]), {}),
+            )
+        )
     return PaginatedTrends(
         items=trends,
         total=len(filtered),

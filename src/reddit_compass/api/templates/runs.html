@@ -47,7 +47,7 @@
 
                 <div class="run-detail-grid">
                     <section>
-                        <h3>Источники</h3>
+                        <h3 class="eyebrow">Источники</h3>
                         {% if run.source_health %}
                         <ul class="source-stage-list">
                             {% for source in run.source_health %}
@@ -66,7 +66,7 @@
                     </section>
 
                     <section>
-                        <h3>Версия анализа</h3>
+                        <h3 class="eyebrow">Версия анализа</h3>
                         {% if run.release %}
                         <dl class="release-facts">
                             <dt>Data Release</dt><dd><code>{{ run.release.release_id }}</code> · {{ run.release.input_status }}</dd>

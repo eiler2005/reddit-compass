@@ -39,6 +39,24 @@
         }
     }
 
+    // ─── Motion preference ───────────────────────────────────────────────
+    // Декоративное движение выключено по умолчанию: счётчики, перематывающие
+    // число от нуля, и появление секций при прокрутке — шум в инструменте,
+    // который открывают каждое утро. Чтобы вернуть, достаточно поменять
+    // MOTION на "full": и CSS, и JS смотрят на один и тот же атрибут.
+    const MOTION = "off";
+
+    function motionEnabled() {
+        if (MOTION !== "full") return false;
+        return !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    }
+
+    function initMotion() {
+        if (motionEnabled()) {
+            document.documentElement.setAttribute("data-motion", "full");
+        }
+    }
+
     // ─── KPI count-up animation ──────────────────────────────────────────
     function animateCountUp(el) {
         const target = parseInt(el.textContent, 10);
@@ -141,8 +159,11 @@
     // ─── Init ───────────────────────────────────────────────────────────
     document.addEventListener("DOMContentLoaded", function () {
         initTheme();
-        initCounters();
-        initScrollReveal();
+        initMotion();
+        if (motionEnabled()) {
+            initCounters();
+            initScrollReveal();
+        }
         initActiveNav();
         initCardKeyboard();
         initCardClick();

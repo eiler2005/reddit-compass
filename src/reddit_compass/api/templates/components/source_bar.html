@@ -1,0 +1,50 @@
+{# Состав источников события. Expects:
+     source_clusters (dict cluster_id -> count, необязательно)
+     source_scope    (str, необязательно)
+     source_count    (int, необязательно)
+
+   «Что обсуждает Reddit, о чём молчат СМИ» — главное отличие продукта, и до
+   сих пор оно подавалось бейджем в ряду других бейджей. У аналогов (Ground
+   News) распределение охвата является центром карточки, а односторонние
+   сюжеты вынесены в отдельную названную функцию. Здесь то же самое:
+   полоса состава плюс заметная пометка для сюжетов, живущих только в одном
+   лагере.
+
+   Полоса не опирается на один только цвет: доли подписаны числами, у каждого
+   сегмента есть title, а сам scope продублирован текстом. #}
+{% set clusters = source_clusters if source_clusters is mapping else {} %}
+{% set total = clusters.values() | sum if clusters else 0 %}
+{% if total > 0 or source_scope %}
+<div class="source-bar" role="group" aria-label="Состав источников">
+    {% if total > 0 %}
+    <div class="source-bar-track">
+        {% for cluster_id, count in clusters | dictsort(by='value', reverse=true) %}
+        <span class="source-bar-seg source-seg-{{ cluster_id }}"
+              style="width: {{ (100 * count / total) | round(1) }}%"
+              title="{{ cluster_label(cluster_id) }} — {{ count }} из {{ total }}"></span>
+        {% endfor %}
+    </div>
+    {# В легенде — три ведущих кластера: они и отвечают на вопрос «кто об этом
+       говорит». Полный состав остаётся в полосе и в её подсказках. #}
+    {% set ranked = clusters | dictsort(by='value', reverse=true) %}
+    <p class="source-bar-legend">
+        {% for cluster_id, count in ranked[:3] %}
+        <span class="source-bar-item">
+            <span class="source-bar-dot source-seg-{{ cluster_id }}" aria-hidden="true"></span>
+            {{ cluster_label(cluster_id) }} <b>{{ count }}</b>
+        </span>
+        {% endfor %}
+        {% if ranked | length > 3 %}
+        <span class="source-bar-item">и ещё {{ ranked | length - 3 }}</span>
+        {% endif %}
+    </p>
+    {% endif %}
+    {% if source_scope == "community_only" %}
+    <p class="source-gap">Только сообщество — крупные СМИ об этом молчат</p>
+    {% elif source_scope == "mainstream_only" %}
+    <p class="source-gap source-gap-quiet">Только СМИ — на Reddit не обсуждают</p>
+    {% elif source_scope == "cross_source" %}
+    <p class="source-bar-scope">Подтверждено сообществом и СМИ</p>
+    {% endif %}
+</div>
+{% endif %}

@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import re
 from collections import Counter
@@ -383,7 +384,7 @@ def discover_trends(
             distinct_dates=len(dates),
         )
         domain_ids = sorted(
-            {domain for story in member_stories for domain in (story.get("domain_ids") or [])}
+            {domain for story in member_stories for domain in _story_domains(story)}
         ) or ["other"]
         project_scores = _merge_project_scores(member_stories)
         story_ids = [str(s["story_id"]) for s in member_stories]
@@ -454,10 +455,36 @@ def _confidence(
     return round(min(0.99, combined), 4), components
 
 
+def _story_domains(story: Mapping[str, Any]) -> list[str]:
+    """Рубрики истории из строки ``engine_stories``.
+
+    Истории приходят сырыми строками SQLite, где ``domain_ids`` — JSON-текст.
+    Итерация по нему давала не рубрики, а отдельные символы: у тренда
+    ``my ai job me`` в чипах оказались ``"``, ``,``, ``[``, ``_``, ``a``, ``b``…
+    Граф-путь этой ошибки не допускал, потому что везде разбирал JSON явно.
+    """
+    value = story.get("domain_ids")
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError):
+            return []
+    if not isinstance(value, list):
+        return []
+    return [str(domain) for domain in value if isinstance(domain, str) and domain]
+
+
 def _merge_project_scores(stories: list[dict[str, Any]]) -> dict[str, int]:
     merged: dict[str, int] = {}
     for story in stories:
         scores = story.get("project_scores") or {}
+        # Тот же сырой JSON, что и у domain_ids: без разбора оценки проектов
+        # молча терялись — тренд получал пустой project_scores.
+        if isinstance(scores, str):
+            try:
+                scores = json.loads(scores)
+            except (TypeError, ValueError):
+                continue
         if not isinstance(scores, dict):
             continue
         for project, score in scores.items():

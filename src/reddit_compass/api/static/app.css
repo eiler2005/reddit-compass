@@ -17,10 +17,17 @@
     --surface-3: #1c2433;
     --surface-hover: #1f2937;
     --text: #e6edf3;
-    --text-secondary: #8b949e;
-    --text-muted: #484f58;
+    /* Три уровня текста различимы и все проходят 4.5:1 на самой светлой
+       поверхности темы. Прежний --text-muted (#484f58) давал 1.88–2.54:1
+       и при этом красил футер, вторичную навигацию и мета-строки карточек.
+       Проверяется scripts/check_contrast.py. */
+    --text-secondary: #adb6c0;
+    --text-muted: #848d97;
     --border: #21262d;
     --border-strong: #30363d;
+    /* Рамки полей и кнопок: WCAG 1.4.11 требует 3:1 для интерактивных границ.
+       --border (1.13–1.31:1) годится только как разделитель. */
+    --border-interactive: #5d6673;
     --border-accent: rgba(29, 64, 134, 0.4);
 
     /* Brand: icreon blue → purple → magenta */
@@ -48,7 +55,31 @@
     --font-body: "Inter", -apple-system, sans-serif;
     --font-mono: "JetBrains Mono", "SF Mono", "Fira Code", monospace;
 
-    /* Spacing & radii */
+    /* Размерная шкала. Раньше здесь было 23 значения, набранных на глаз, из них
+       63% мельче 14px — включая h3 в 12.8px, то есть меньше основного текста.
+       Правило: связный текст не мельче --text-sm; --text-2xs допустим только
+       для моноширинных метрик и бейджей, где читать нечего. */
+    --text-2xs: 0.75rem;    /* 12px — счётчики, бейджи, мета в моно */
+    --text-xs: 0.8125rem;   /* 13px — мета-строки карточек */
+    --text-sm: 0.875rem;    /* 14px — вторичный текст и навигация */
+    --text-base: 1rem;      /* 16px — основной */
+    --text-lg: 1.125rem;    /* 18px — заголовки карточек, лид */
+    --text-xl: 1.375rem;    /* 22px — h2, крупные числа в карточках */
+    --text-2xl: clamp(1.75rem, 4vw, 2.5rem);   /* h1 и заголовок даты */
+    --text-num: 2.25rem;    /* витринное число KPI */
+
+    /* Шаг интервалов — 4px. До этого 18 значений gap (включая шаги по 0.8px,
+       визуально неразличимые) и 38 комбинаций padding. */
+    --space-1: 0.25rem;
+    --space-2: 0.5rem;
+    --space-3: 0.75rem;
+    --space-4: 1rem;
+    --space-5: 1.5rem;
+    --space-6: 2rem;
+    --space-7: 3rem;
+    --space-8: 4rem;
+
+    /* Radii */
     --radius-sm: 6px;
     --radius: 12px;
     --radius-lg: 20px;
@@ -80,10 +111,11 @@
     --surface-3: #e5e7eb;
     --surface-hover: #f9fafb;
     --text: #1f2937;
-    --text-secondary: #6b7280;
-    --text-muted: #9ca3af;
+    --text-secondary: #48505b;
+    --text-muted: #5f6873;
     --border: #e5e7eb;
     --border-strong: #d1d5db;
+    --border-interactive: #7d8794;
     --border-accent: rgba(29, 64, 134, 0.2);
     --accent: #1d4086;
     --accent-bright: #2563eb;
@@ -95,6 +127,12 @@
     --accent-3-dim: rgba(162, 28, 175, 0.06);
     --gradient-brand: linear-gradient(135deg, #1d4086 0%, #6d28d9 50%, #a21caf 100%);
     --gradient-subtle: linear-gradient(135deg, rgba(29, 64, 134, 0.05) 0%, rgba(109, 40, 217, 0.03) 100%);
+    /* Семантические цвета подобраны под тёмный фон; на белом они давали
+       2.29–3.35:1 в бейджах статусов, набранных 12px. Светлая тема их
+       переопределяет — фоны (--*-dim) остаются общими, они полупрозрачные. */
+    --success: #1a7f37;
+    --warning: #8a5c00;
+    --error: #b3202c;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 4px 16px rgba(0, 0, 0, 0.04);
     --shadow-lg: 0 4px 12px rgba(0, 0, 0, 0.1), 0 16px 48px rgba(0, 0, 0, 0.06);
     --shadow-glow: 0 0 16px rgba(29, 64, 134, 0.1), 0 0 48px rgba(109, 40, 217, 0.05);
@@ -118,7 +156,9 @@ html {
 body {
     font-family: var(--font-body);
     background: var(--bg-gradient);
-    background-attachment: fixed;
+    /* background-attachment: fixed убран: в iOS Safari он даёт рывки и
+       перерисовку фона при прокрутке, а градиент и без него неподвижен
+       ровно настолько, насколько нужно. */
     color: var(--text);
     line-height: 1.65;
     min-height: 100vh;
@@ -152,17 +192,17 @@ h1, h2, h3, h4 {
 }
 
 h1 {
-    font-size: clamp(1.75rem, 4vw, 2.75rem);
+    font-size: var(--text-2xl);
     font-weight: 700;
     letter-spacing: -0.035em;
 }
 
 h2 {
-    font-size: clamp(1.15rem, 2.5vw, 1.4rem);
-    margin-bottom: 1.25rem;
+    font-size: var(--text-xl);
+    margin-bottom: var(--space-5);
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 h2::before {
@@ -174,11 +214,14 @@ h2::before {
     flex-shrink: 0;
 }
 
+/* h3 — заголовок карточки или события: почти везде это заголовок тренда,
+   сюжета или поста. Раньше он был 12.8px uppercase muted, то есть мельче
+   и тише основного текста, и каждая карточка вынуждена была переопределять
+   его у себя. Роль «метка раздела» осталась за .eyebrow. */
 h3 {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
+    font-size: var(--text-lg);
+    color: var(--text);
+    letter-spacing: -0.01em;
     font-weight: 600;
 }
 
@@ -192,13 +235,13 @@ h3 {
     backdrop-filter: blur(20px) saturate(1.5);
     -webkit-backdrop-filter: blur(20px) saturate(1.5);
     border-bottom: 1px solid var(--border);
-    padding: 0.6rem 1.5rem 0.4rem;
+    padding: var(--space-2) var(--space-5) var(--space-2);
 }
 
 .nav {
     display: flex;
     align-items: center;
-    gap: 0.25rem;
+    gap: var(--space-1);
     max-width: 1320px;
     margin: 0 auto;
 }
@@ -206,13 +249,13 @@ h3 {
 .nav-brand {
     font-family: var(--font-display);
     font-weight: 700;
-    font-size: 1.1rem;
+    font-size: var(--text-lg);
     color: var(--text);
     text-decoration: none;
-    margin-right: 2rem;
+    margin-right: var(--space-6);
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: var(--space-2);
     letter-spacing: -0.02em;
 }
 
@@ -222,6 +265,9 @@ h3 {
     background: var(--gradient-brand);
     border-radius: 50%;
     box-shadow: 0 0 12px rgba(116, 58, 174, 0.5);
+}
+
+[data-motion="full"] .nav-brand .brand-mark {
     animation: pulse-glow 3s ease-in-out infinite;
 }
 
@@ -233,9 +279,9 @@ h3 {
 .nav-link {
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     font-weight: 500;
-    padding: 0.5rem 0.875rem;
+    padding: var(--space-2) var(--space-3);
     border-radius: var(--radius);
     transition: all var(--duration) var(--ease-out);
     position: relative;
@@ -264,7 +310,7 @@ h3 {
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 1rem;
+    font-size: var(--text-base);
     transition: all var(--duration) var(--ease-spring);
 }
 
@@ -280,21 +326,29 @@ h3 {
 .main {
     max-width: 1320px;
     margin: 0 auto;
-    padding: 2.5rem 1.5rem 5rem;
+    padding: var(--space-6) var(--space-5) var(--space-8);
 }
 
 .container { width: 100%; }
 
 .section {
-    margin-bottom: 3.5rem;
+    margin-bottom: var(--space-7);
+}
+
+/* Появление секций со сдвигом на 30px при каждой прокрутке — для витрины,
+   а не для инструмента, который открывают каждое утро. Правила сохранены
+   целиком: чтобы вернуть движение, достаточно выставить data-motion="full"
+   на <html> (см. initMotion в app.js). Задержки покрывали только шесть
+   секций, поэтому на /radar седьмая появлялась вне очереди. */
+[data-motion="full"] .section {
     animation: reveal-up 0.7s var(--ease-out) both;
 }
 
-.section:nth-child(2) { animation-delay: 0.06s; }
-.section:nth-child(3) { animation-delay: 0.12s; }
-.section:nth-child(4) { animation-delay: 0.18s; }
-.section:nth-child(5) { animation-delay: 0.24s; }
-.section:nth-child(6) { animation-delay: 0.30s; }
+[data-motion="full"] .section:nth-child(2) { animation-delay: 0.06s; }
+[data-motion="full"] .section:nth-child(3) { animation-delay: 0.12s; }
+[data-motion="full"] .section:nth-child(4) { animation-delay: 0.18s; }
+[data-motion="full"] .section:nth-child(5) { animation-delay: 0.24s; }
+[data-motion="full"] .section:nth-child(6) { animation-delay: 0.30s; }
 
 @keyframes reveal-up {
     from { opacity: 0; transform: translateY(30px); }
@@ -303,8 +357,8 @@ h3 {
 
 .section-note {
     color: var(--text-muted);
-    font-size: 0.85rem;
-    margin-bottom: 1rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
 }
 
 /* ─── Page header ───────────────────────────────────────────────────────── */
@@ -312,11 +366,11 @@ h3 {
    h1 + a short section-note describing the layer. */
 
 .page-header {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-6);
 }
 
 .page-header h1 {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
 }
 
 .page-header .section-note {
@@ -330,13 +384,13 @@ h3 {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 1.5rem;
-    margin-bottom: 1.75rem;
+    gap: var(--space-5);
+    margin-bottom: var(--space-5);
 }
 
 .date-title {
     font-family: var(--font-mono);
-    font-size: clamp(1.5rem, 3.5vw, 2.25rem);
+    font-size: var(--text-2xl);
     font-weight: 600;
     background: var(--gradient-brand);
     -webkit-background-clip: text;
@@ -349,13 +403,13 @@ h3 {
 .freshness-bar {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: var(--space-4);
     flex-wrap: wrap;
-    padding: 1rem 1.5rem;
+    padding: var(--space-4) var(--space-5);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    margin-bottom: 2.5rem;
+    margin-bottom: var(--space-6);
     box-shadow: var(--shadow-card);
     position: relative;
     overflow: hidden;
@@ -374,18 +428,18 @@ h3 {
 
 .freshness-text {
     color: var(--text-secondary);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     font-family: var(--font-mono);
 }
 
 .release-info-bar {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
-    padding: 0.5rem 1.5rem;
-    margin: -1.5rem 0 2rem;
-    font-size: 0.72rem;
+    padding: var(--space-2) var(--space-5);
+    margin: calc(-1 * var(--space-5)) 0 var(--space-6);
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }
 
@@ -395,15 +449,15 @@ h3 {
     color: var(--accent-2-bright);
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
 }
 
 .release-id {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
     color: var(--text-secondary);
     background: var(--surface);
-    padding: 0.15rem 0.4rem;
+    padding: var(--space-1) var(--space-2);
     border-radius: 3px;
     border: 1px solid var(--border);
 }
@@ -415,7 +469,7 @@ h3 {
 
 .profile {
     margin-left: auto;
-    font-size: 0.75rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.1em;
@@ -427,10 +481,10 @@ h3 {
 .status-badge {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.3rem 0.75rem;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
     border-radius: 999px;
-    font-size: 0.75rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
     font-family: var(--font-mono);
     text-transform: uppercase;
@@ -472,14 +526,14 @@ h3 {
 .kpi-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 1rem;
+    gap: var(--space-4);
 }
 
 .kpi-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.5rem 1.25rem;
+    padding: var(--space-5) var(--space-4);
     text-align: center;
     transition: all var(--duration) var(--ease-out);
     position: relative;
@@ -515,20 +569,20 @@ a.kpi-card {
 
 .kpi-num {
     font-family: var(--font-mono);
-    font-size: 2.5rem;
+    font-size: var(--text-num);
     font-weight: 700;
     background: var(--gradient-brand);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
     line-height: 1.1;
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
     position: relative;
     z-index: 1;
 }
 
 .kpi-label {
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.12em;
@@ -542,7 +596,7 @@ a.kpi-card {
 .story-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-    gap: 1.25rem;
+    gap: var(--space-4);
 }
 
 .story-grid.compact {
@@ -556,14 +610,14 @@ a.kpi-card {
 .shelf-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 1.25rem;
+    gap: var(--space-4);
 }
 
 .story-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.5rem;
+    padding: var(--space-5);
     transition: all var(--duration) var(--ease-out);
     position: relative;
     overflow: hidden;
@@ -598,17 +652,17 @@ a.story-card {
 .story-meta {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
-    margin-bottom: 0.9rem;
+    margin-bottom: var(--space-4);
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
 }
 
 .direction-badge {
-    font-size: 0.7rem;
-    padding: 0.25rem 0.6rem;
+    font-size: var(--text-2xs);
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
     color: var(--text-secondary);
@@ -620,8 +674,8 @@ a.story-card {
 
 /* Фаза 4/6: индикатор разрыва перспективы (source_scope) на карточках. */
 .scope-badge {
-    font-size: 0.7rem;
-    padding: 0.25rem 0.6rem;
+    font-size: var(--text-2xs);
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     font-weight: 600;
     letter-spacing: 0.02em;
@@ -635,7 +689,7 @@ a.story-card {
 .trend-score {
     font-family: var(--font-mono);
     font-weight: 700;
-    font-size: 1.6rem;
+    font-size: var(--text-xl);
     background: var(--gradient-brand);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -643,13 +697,13 @@ a.story-card {
 }
 
 .story-title {
-    font-size: 1.05rem;
+    font-size: var(--text-lg);
     font-weight: 600;
-    margin-bottom: 0.6rem;
+    margin-bottom: var(--space-2);
     line-height: 1.4;
     display: flex;
     align-items: baseline;
-    gap: 0.5rem;
+    gap: var(--space-2);
 }
 
 .story-title a {
@@ -662,27 +716,27 @@ a.story-card {
 
 .clusters {
     display: flex;
-    gap: 0.4rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
-    margin-bottom: 0.75rem;
+    margin-bottom: var(--space-3);
 }
 
 .meta {
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
 }
 
 .confidence {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
 }
 
 .confidence-badge {
-    font-size: 0.7rem;
-    padding: 0.25rem 0.6rem;
+    font-size: var(--text-2xs);
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--surface-2);
     color: var(--text-secondary);
@@ -693,11 +747,11 @@ a.story-card {
 .confidence-high { color: var(--success); }
 
 .card-action-link {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     font-weight: 600;
     color: var(--text-muted);
     text-decoration: none;
-    padding: 0.3rem 0.6rem;
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     border: 1px solid var(--border);
     transition: all var(--duration) var(--ease-out);
@@ -719,6 +773,185 @@ a.story-card {
     border-color: var(--border-accent);
 }
 
+/* ─── Плотный список ────────────────────────────────────────────────────── */
+/* Сюжеты, тренды и сигналы просматривают подряд — там, где раньше стояла
+   сетка .shelf-grid с minmax(320px) и padding 1.5rem и на экран помещалось
+   3–4 объекта. Список сканируется быстрее: позиции атрибутов фиксированы,
+   глаз идёт по одной вертикали. */
+
+.row-list {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    background: var(--surface);
+    overflow: hidden;
+}
+
+.item-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 15rem);
+    gap: var(--space-4);
+    align-items: start;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border);
+    transition: background var(--duration) var(--ease-out);
+}
+
+.item-row:last-child { border-bottom: none; }
+.item-row:hover { background: var(--surface-2); }
+
+.item-row-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+}
+
+.item-row-head {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+.item-row-head:empty { display: none; }
+
+.item-row-title {
+    font-size: var(--text-base);
+    line-height: 1.35;
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.item-row-title a { color: var(--text); }
+.item-row-title a:hover { color: var(--accent-bright); }
+
+/* Вес события — типографикой, а не цифрой в ряду метаданных: у Techmeme
+   размер блока сам сообщает масштаб события до того, как прочитан текст. */
+.item-row-notable .item-row-title { font-size: var(--text-lg); }
+
+.item-row-major .item-row-title {
+    font-size: var(--text-lg);
+    font-weight: 700;
+}
+
+.item-row-major {
+    border-left: 3px solid var(--accent);
+    padding-left: calc(var(--space-4) - 3px);
+}
+
+.item-row-summary {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    line-height: 1.45;
+    margin: 0;
+    /* Описание помогает понять, о чём событие, а не заменяет саму страницу. */
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.item-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-muted);
+}
+
+.item-row-meta:empty { display: none; }
+
+.item-row-sources {
+    min-width: 0;
+}
+
+/* ─── Полоса источников ─────────────────────────────────────────────────── */
+/* Состав охвата — главное отличие продукта, и до сих пор он подавался
+   бейджем «🔗 Reddit + СМИ» в ряду прочих бейджей. Здесь он занимает
+   собственную колонку строки. */
+
+.source-bar {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+}
+
+.source-bar-track {
+    display: flex;
+    height: 6px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: var(--surface-3);
+}
+
+.source-bar-seg {
+    display: block;
+    height: 100%;
+    background: var(--text-muted);
+}
+
+/* Кластеры источников. Цвет — вспомогательный признак: доли подписаны
+   числами, у сегментов есть title, а односторонний охват назван словами. */
+.source-seg-voices { background: #d95c2b; }
+.source-seg-mainstream { background: #3d7ec9; }
+.source-seg-business { background: #2c9e6b; }
+.source-seg-developers { background: #8b5cd6; }
+.source-seg-tech_culture { background: #c9a13d; }
+.source-seg-product_pulse { background: #c94f8f; }
+.source-seg-search_interest { background: #5aa9a3; }
+
+.source-bar-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1) var(--space-2);
+    margin: 0;
+    font-size: var(--text-2xs);
+    color: var(--text-muted);
+}
+
+.source-bar-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+}
+
+.source-bar-item b {
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.source-bar-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    flex-shrink: 0;
+}
+
+.source-bar-scope {
+    margin: 0;
+    font-size: var(--text-2xs);
+    color: var(--text-muted);
+}
+
+/* Аналог Blindspot: сюжет живёт только в одном лагере. Это ценнее всех
+   остальных бейджей вместе, поэтому подаётся текстом, а не иконкой. */
+.source-gap {
+    margin: 0;
+    font-size: var(--text-xs);
+    font-weight: 600;
+    color: var(--warning);
+}
+
+.source-gap-quiet {
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
 /* ─── Trend shelves (compact) ───────────────────────────────────────────── */
 /* Used on radar.html inside .shelf-grid: a labeled shelf ("Растёт", "Новое"…)
    holding a compact list of trend links, lighter than a full .story-card. */
@@ -727,7 +960,7 @@ a.story-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.25rem;
+    padding: var(--space-4);
 }
 
 .shelf h3 { margin-bottom: 0.75rem; }
@@ -735,22 +968,22 @@ a.story-card {
 .themes {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
-    margin-bottom: 1.5rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-5);
 }
 
 .table.timeline td:nth-child(3) { font-family: var(--font-mono); }
 
 .provider {
     color: var(--text-muted);
-    font-size: 0.8rem;
-    margin-left: 0.35rem;
+    font-size: var(--text-xs);
+    margin-left: var(--space-1);
 }
 
 .excerpt {
     color: var(--text-secondary);
-    font-size: 0.85rem;
-    margin-top: 0.3rem;
+    font-size: var(--text-sm);
+    margin-top: var(--space-1);
 }
 
 .section.research { margin-top: 3rem; }
@@ -758,20 +991,20 @@ a.story-card {
 .cloud {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-2);
 }
 
 .cloud-node {
     display: inline-flex;
     align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.75rem;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 999px;
     text-decoration: none;
     color: var(--text);
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     transition: all var(--duration) var(--ease-spring);
 }
 
@@ -784,10 +1017,10 @@ a.story-card {
 
 .cloud-count {
     font-family: var(--font-mono);
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
     background: var(--surface-2);
-    padding: 0.1rem 0.35rem;
+    padding: var(--space-1) var(--space-1);
     border-radius: var(--radius-sm);
 }
 
@@ -803,14 +1036,14 @@ a.story-card {
 }
 
 .table th, .table td {
-    padding: 0.875rem 1rem;
+    padding: var(--space-3) var(--space-4);
     text-align: left;
     border-bottom: 1px solid var(--border);
 }
 
 .table th {
     background: var(--surface-2);
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
     color: var(--text-muted);
@@ -843,14 +1076,14 @@ a.story-card {
 .btn {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.6rem 1.25rem;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
     transition: all var(--duration) var(--ease-out);
@@ -880,14 +1113,14 @@ a.story-card {
 .btn-secondary {
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.6rem 1.25rem;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     cursor: pointer;
     transition: all var(--duration) var(--ease-out);
@@ -904,54 +1137,65 @@ a.story-card {
 .radar-cta {
     display: flex;
     align-items: center;
-    gap: 1.25rem;
-    margin-top: 2.5rem;
-    padding-top: 1.5rem;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
+    padding-top: var(--space-5);
     border-top: 1px solid var(--border);
 }
 
 .radar-teaser {
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     font-family: var(--font-mono);
 }
 
 .today-dashboard .date-switcher {
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-5);
 }
 
 .today-freshness {
-    margin-bottom: 2rem;
+    margin-bottom: var(--space-6);
 }
 
 .today-overview {
     display: grid;
     grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
-    gap: 1.5rem;
-    align-items: stretch;
+    gap: var(--space-5);
+    align-items: start;
 }
 
-.today-kpis {
-    align-content: stretch;
+/* Связная строка вместо пяти KPI-плиток: что собрано и во что свелось.
+   Читается как предложение, а не как приборная панель. */
+.today-lede {
+    font-size: var(--text-lg);
+    line-height: 1.55;
+    color: var(--text-secondary);
+    max-width: 62ch;
+}
+
+.today-lede strong {
+    color: var(--text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 
 .status-panel {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.35rem;
+    padding: var(--space-5);
     box-shadow: var(--shadow-card);
 }
 
 .status-note-grid {
     display: grid;
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 .status-note {
     display: grid;
-    gap: 0.25rem;
-    padding: 0.85rem;
+    gap: var(--space-1);
+    padding: var(--space-3);
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -960,40 +1204,36 @@ a.story-card {
 .status-note strong {
     color: var(--warning);
     font-family: var(--font-mono);
-    font-size: 0.78rem;
+    font-size: var(--text-2xs);
     text-transform: uppercase;
     letter-spacing: 0.08em;
 }
 
 .status-note span {
     color: var(--text-secondary);
-    font-size: 0.86rem;
+    font-size: var(--text-sm);
 }
 
 .today-trend-card h3 {
-    font-size: 1.08rem;
-    color: var(--text);
-    text-transform: none;
-    letter-spacing: -0.01em;
-    margin-bottom: 0.65rem;
+    margin-bottom: var(--space-2);
 }
 
 .today-trend-card p {
     color: var(--text-secondary);
-    font-size: 0.9rem;
-    margin-bottom: 0.9rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-4);
 }
 
 .today-card-footer {
     display: flex;
     justify-content: space-between;
-    gap: 0.75rem;
+    gap: var(--space-3);
     flex-wrap: wrap;
-    padding-top: 0.8rem;
+    padding-top: var(--space-3);
     border-top: 1px solid var(--border);
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.76rem;
+    font-size: var(--text-xs);
 }
 
 .today-card-footer span:last-child {
@@ -1004,19 +1244,19 @@ a.story-card {
 .today-grid {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 1.5rem;
+    gap: var(--space-5);
 }
 
 .quick-link-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 .quick-link-card {
     display: grid;
-    gap: 0.25rem;
-    padding: 0.85rem;
+    gap: var(--space-1);
+    padding: var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface-2);
@@ -1033,12 +1273,12 @@ a.story-card {
 
 .quick-link-card span {
     color: var(--text-muted);
-    font-size: 0.78rem;
+    font-size: var(--text-xs);
 }
 
 .reading-feed {
     display: grid;
-    gap: 0.9rem;
+    gap: var(--space-4);
 }
 
 /* Operational run ledger: the compact summary is readable first; details
@@ -1050,13 +1290,13 @@ a.story-card {
 
 .run-list {
     display: grid;
-    gap: 0.85rem;
+    gap: var(--space-3);
 }
 
 .run-record {
-    border: 1px solid var(--border, #283044);
+    border: 1px solid var(--border);
     border-radius: 1rem;
-    background: var(--surface, #121722);
+    background: var(--surface);
     overflow: clip;
 }
 
@@ -1064,10 +1304,10 @@ a.story-card {
     align-items: center;
     cursor: pointer;
     display: grid;
-    gap: 1rem;
+    gap: var(--space-4);
     grid-template-columns: minmax(14rem, 1fr) minmax(20rem, 2fr) auto;
     list-style: none;
-    padding: 1rem 1.15rem;
+    padding: var(--space-4) var(--space-4);
 }
 
 .run-summary::-webkit-details-marker {
@@ -1080,47 +1320,47 @@ a.story-card {
     align-items: center;
     display: flex;
     flex-wrap: wrap;
-    gap: 0.7rem;
+    gap: var(--space-3);
 }
 
 .run-summary-primary strong {
-    font-size: 1.1rem;
+    font-size: var(--text-lg);
 }
 
 .run-summary-metrics,
 .run-disclosure {
-    color: var(--text-muted, #8d96ab);
-    font-size: 0.86rem;
+    color: var(--text-muted);
+    font-size: var(--text-sm);
 }
 
 .run-summary-metrics b {
-    color: var(--text, #edf1fb);
+    color: var(--text);
 }
 
 .run-record[open] .run-disclosure {
-    color: var(--accent, #bd39de);
+    color: var(--accent);
 }
 
 .run-body {
-    border-top: 1px solid var(--border, #283044);
-    padding: 1.15rem;
+    border-top: 1px solid var(--border);
+    padding: var(--space-4);
 }
 
 .pipeline-stages {
     display: grid;
-    gap: 0.65rem;
+    gap: var(--space-3);
     grid-template-columns: repeat(6, minmax(9rem, 1fr));
     list-style: none;
-    margin: 0 0 1.15rem;
+    margin: 0 0 var(--space-4);
     padding: 0;
 }
 
 .pipeline-stage {
-    border-left: 2px solid var(--border, #283044);
+    border-left: 2px solid var(--border);
     display: flex;
-    gap: 0.55rem;
+    gap: var(--space-2);
     min-height: 4.9rem;
-    padding: 0.1rem 0.5rem;
+    padding: var(--space-1) var(--space-2);
 }
 
 .pipeline-stage strong,
@@ -1129,10 +1369,10 @@ a.story-card {
 }
 
 .pipeline-stage span:last-child {
-    color: var(--text-muted, #8d96ab);
-    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
     line-height: 1.35;
-    margin-top: 0.28rem;
+    margin-top: var(--space-1);
 }
 
 .pipeline-dot {
@@ -1140,7 +1380,7 @@ a.story-card {
     border-radius: 50%;
     flex: 0 0 0.55rem;
     height: 0.55rem;
-    margin-top: 0.35rem;
+    margin-top: var(--space-1);
 }
 
 .pipeline-stage-complete .pipeline-dot,
@@ -1166,18 +1406,17 @@ a.story-card {
 
 .run-detail-grid {
     display: grid;
-    gap: 1.25rem;
+    gap: var(--space-4);
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .run-detail-grid h3 {
-    font-size: 0.95rem;
-    margin: 0 0 0.6rem;
+    margin: 0 0 var(--space-2);
 }
 
 .source-stage-list {
     display: grid;
-    gap: 0.4rem;
+    gap: var(--space-2);
     list-style: none;
     margin: 0;
     padding: 0;
@@ -1185,26 +1424,26 @@ a.story-card {
 
 .source-stage-list li {
     align-items: center;
-    border-bottom: 1px solid color-mix(in srgb, var(--border, #283044) 70%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
     display: flex;
     flex-wrap: wrap;
-    gap: 0.45rem;
-    padding: 0.35rem 0;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
 }
 
 .source-stage-list small {
-    color: var(--text-muted, #8d96ab);
+    color: var(--text-muted);
 }
 
 .release-facts {
     display: grid;
-    gap: 0.45rem 0.75rem;
+    gap: var(--space-2) var(--space-3);
     grid-template-columns: auto minmax(0, 1fr);
     margin: 0;
 }
 
 .release-facts dt {
-    color: var(--text-muted, #8d96ab);
+    color: var(--text-muted);
 }
 
 .release-facts dd {
@@ -1213,13 +1452,13 @@ a.story-card {
 }
 
 .run-links {
-    border-top: 1px solid var(--border, #283044);
-    margin-top: 1rem;
-    padding-top: 0.9rem;
+    border-top: 1px solid var(--border);
+    margin-top: var(--space-4);
+    padding-top: var(--space-4);
 }
 
 .run-links a {
-    color: var(--accent, #bd39de);
+    color: var(--accent);
 }
 
 @media (max-width: 900px) {
@@ -1241,9 +1480,9 @@ a.story-card {
 .reading-item {
     display: grid;
     grid-template-columns: 3rem minmax(0, 1fr) auto;
-    gap: 1rem;
+    gap: var(--space-4);
     align-items: start;
-    padding: 1rem;
+    padding: var(--space-4);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
@@ -1254,15 +1493,11 @@ a.story-card {
     font-family: var(--font-mono);
     font-weight: 800;
     color: var(--accent-bright);
-    font-size: 1rem;
+    font-size: var(--text-base);
 }
 
 .reading-main h3 {
-    font-size: 1rem;
-    color: var(--text);
-    text-transform: none;
-    letter-spacing: -0.01em;
-    margin-bottom: 0.35rem;
+    margin-bottom: var(--space-1);
 }
 
 .reading-main h3 a {
@@ -1275,13 +1510,13 @@ a.story-card {
 
 .reading-main p {
     color: var(--text-secondary);
-    font-size: 0.88rem;
-    margin-bottom: 0.55rem;
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-2);
 }
 
 .reading-actions {
     display: flex;
-    gap: 0.45rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
     justify-content: flex-end;
 }
@@ -1289,18 +1524,18 @@ a.story-card {
 .chip-cloud {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: var(--space-2);
 }
 
 .chip {
     display: inline-flex;
     align-items: center;
-    padding: 0.22rem 0.55rem;
+    padding: var(--space-1) var(--space-2);
     border-radius: 999px;
     background: var(--surface-2);
     border: 1px solid var(--border);
     color: var(--text-secondary);
-    font-size: 0.72rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
 }
 
@@ -1321,7 +1556,7 @@ a.story-card {
 .tabs {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    gap: 1.5rem;
+    gap: var(--space-5);
 }
 
 /* ─── Domain tabs (Radar) ───────────────────────────────────────────────── */
@@ -1329,27 +1564,27 @@ a.story-card {
 .domain-tabs {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.5rem;
+    gap: var(--space-2);
 }
 
 .domain-tab {
     display: inline-flex;
     flex-direction: column;
-    gap: 0.15rem;
-    padding: 0.6rem 1rem;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-4);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     transition: all var(--duration) var(--ease-out);
 }
 
 .domain-tab small {
     font-family: var(--font-mono);
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }
 
@@ -1374,20 +1609,20 @@ a.story-card {
 
 .mode-switcher {
     display: inline-flex;
-    gap: 0.35rem;
-    padding: 0.3rem;
+    gap: var(--space-1);
+    padding: var(--space-1);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-5);
 }
 
 .mode-link {
-    padding: 0.5rem 1rem;
+    padding: var(--space-2) var(--space-4);
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     text-decoration: none;
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     font-weight: 500;
     transition: all var(--duration) var(--ease-out);
 }
@@ -1406,25 +1641,30 @@ a.story-card {
 
 .filters {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--space-3);
     flex-wrap: wrap;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-5);
 }
 
 .filters input, .filters select {
-    padding: 0.6rem 1rem;
+    padding: var(--space-2) var(--space-4);
     background: var(--surface);
-    border: 1px solid var(--border);
+    /* Поле ввода должно быть видно как поле: --border даёт 1.13–1.31:1
+       и на прод-скриншотах фильтры сливались с фоном. */
+    border: 1px solid var(--border-interactive);
     border-radius: var(--radius);
     color: var(--text);
-    font-size: 0.875rem;
+    font-size: var(--text-sm);
     transition: all var(--duration) var(--ease-out);
 }
 
-.filters input:focus, .filters select:focus {
-    outline: none;
-    border-color: var(--accent-2);
-    box-shadow: 0 0 0 3px var(--accent-2-dim);
+/* Прежде здесь стояло outline: none, а взамен рисовалась тень цветом
+   --accent-2-dim с прозрачностью 8–15% — то есть фокус был практически
+   невидим. Кольцо рисуем непрозрачным цветом. */
+.filters input:focus-visible, .filters select:focus-visible {
+    outline: 2px solid var(--accent-2-bright);
+    outline-offset: 2px;
+    border-color: var(--accent-2-bright);
 }
 
 /* ─── Pagination ────────────────────────────────────────────────────────── */
@@ -1432,16 +1672,16 @@ a.story-card {
 .layer-nav {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
-    margin-bottom: 1.5rem;
+    margin-bottom: var(--space-5);
 }
 
 .layer-nav a {
     display: inline-flex;
     align-items: center;
     min-height: 2.25rem;
-    padding: 0.45rem 0.8rem;
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     background: var(--surface);
@@ -1461,28 +1701,28 @@ a.story-card {
 .story-list {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 1rem;
+    gap: var(--space-4);
 }
 
 .detail-grid {
     display: grid;
     grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
-    gap: 1.25rem;
+    gap: var(--space-4);
 }
 
 .evidence-list {
     display: grid;
-    gap: 0.55rem;
-    margin: 1rem 0 0;
+    gap: var(--space-2);
+    margin: var(--space-4) 0 0;
     padding: 0;
     list-style: none;
 }
 
 .evidence-list li {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--space-2);
     align-items: baseline;
-    padding: 0.7rem 0;
+    padding: var(--space-3) 0;
     border-bottom: 1px solid var(--border);
 }
 
@@ -1490,24 +1730,28 @@ a.story-card {
     flex: 0 0 auto;
     color: var(--text-muted);
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
 }
 
+/* Метка над блоком: «Story · high confidence», «Источники». Роль, которую
+   раньше исполнял h3 по умолчанию, из-за чего заголовки карточек приходилось
+   переопределять на каждой странице. */
 .eyebrow {
-    margin-bottom: 0.5rem;
+    margin-bottom: var(--space-2);
     color: var(--text-muted);
     font-family: var(--font-mono);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
+    font-weight: 600;
 }
 
 .pagination {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 1.25rem;
-    margin-top: 2rem;
+    gap: var(--space-4);
+    margin-top: var(--space-6);
     font-family: var(--font-mono);
     color: var(--text-secondary);
 }
@@ -1517,7 +1761,7 @@ a.story-card {
 .list { list-style: none; }
 
 .list li {
-    padding: 0.6rem 0;
+    padding: var(--space-2) 0;
     border-bottom: 1px solid var(--border);
     color: var(--text-secondary);
     transition: all var(--duration) var(--ease-out);
@@ -1529,7 +1773,7 @@ a.story-card {
 
 .empty-state {
     text-align: center;
-    padding: 5rem 1rem;
+    padding: var(--space-8) var(--space-4);
 }
 
 .empty-state h1 { margin-bottom: 1rem; }
@@ -1537,19 +1781,19 @@ a.story-card {
 .empty-state pre {
     background: var(--surface);
     border: 1px solid var(--border);
-    padding: 1rem 1.5rem;
+    padding: var(--space-4) var(--space-5);
     border-radius: var(--radius);
     display: inline-block;
-    margin-top: 1.5rem;
+    margin-top: var(--space-5);
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     color: var(--accent-bright);
 }
 
 /* ─── Footer ────────────────────────────────────────────────────────────── */
 
 .footer {
-    padding: 2.5rem 1.5rem;
+    padding: var(--space-6) var(--space-5);
     border-top: 1px solid var(--border);
     background: color-mix(in srgb, var(--bg) 95%, var(--accent) 5%);
 }
@@ -1559,28 +1803,28 @@ a.story-card {
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 .footer-brand {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     font-family: var(--font-display);
-    font-size: 1rem;
+    font-size: var(--text-base);
     color: var(--text);
 }
 
 .footer-desc {
     color: var(--text-muted);
-    font-size: 0.82rem;
+    font-size: var(--text-sm);
     line-height: 1.6;
     max-width: 720px;
     margin: 0;
 }
 
 .footer-meta {
-    font-size: 0.75rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
     margin: 0;
 }
@@ -1593,20 +1837,20 @@ a.story-card {
 .nav-secondary {
     display: flex;
     align-items: center;
-    gap: 0.15rem;
+    gap: var(--space-1);
     max-width: 1320px;
     margin: 0 auto;
-    padding: 0.35rem 0 0;
+    padding: var(--space-1) 0 0;
     border-top: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
 }
 
 .nav-secondary a {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: var(--text-xs);
     font-weight: 500;
     color: var(--text-muted);
     text-decoration: none;
-    padding: 0.25rem 0.6rem;
+    padding: var(--space-1) var(--space-2);
     border-radius: 4px;
     letter-spacing: 0.02em;
     transition: color 0.15s, background 0.15s;
@@ -1663,13 +1907,13 @@ a.story-card {
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 1.25rem;
+    padding: var(--space-4);
     transition: all var(--duration) var(--ease-out);
     position: relative;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: var(--space-3);
 }
 
 .pulse-card::before {
@@ -1698,17 +1942,17 @@ a.story-card {
 .pulse-card-header {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
 }
 
 .signal-type-badge {
     font-family: var(--font-mono);
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    padding: 0.2rem 0.5rem;
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--surface-3);
     color: var(--text-secondary);
@@ -1726,14 +1970,14 @@ a.story-card {
 
 .pulse-subreddit {
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }
 
 .pulse-self,
 .pulse-flair {
-    font-size: 0.65rem;
-    padding: 0.15rem 0.4rem;
+    font-size: var(--text-2xs);
+    padding: var(--space-1) var(--space-2);
     border-radius: var(--radius-sm);
     background: var(--surface-3);
     color: var(--text-muted);
@@ -1741,7 +1985,7 @@ a.story-card {
 
 .pulse-title {
     font-family: var(--font-display);
-    font-size: 0.95rem;
+    font-size: var(--text-lg);
     font-weight: 600;
     line-height: 1.35;
     margin: 0;
@@ -1757,17 +2001,17 @@ a.story-card {
 
 .pulse-metrics-row {
     display: flex;
-    gap: 1rem;
+    gap: var(--space-4);
     align-items: flex-start;
     flex-wrap: wrap;
 }
 
 .reddit-raw {
     display: flex;
-    gap: 0.75rem;
+    gap: var(--space-3);
     align-items: center;
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     flex-shrink: 0;
 }
 
@@ -1786,7 +2030,7 @@ a.story-card {
 .pulse-score-compact {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: var(--space-2);
     flex: 1;
     min-width: 120px;
 }
@@ -1808,7 +2052,7 @@ a.story-card {
 
 .pulse-score-num {
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     font-weight: 700;
     color: var(--accent-bright);
     min-width: 2.5rem;
@@ -1818,17 +2062,17 @@ a.story-card {
 .pulse-metrics-detail {
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: var(--space-1);
     flex: 1;
     min-width: 140px;
 }
 
 .pulse-sub-metrics {
     display: flex;
-    gap: 0.6rem;
+    gap: var(--space-2);
     flex-wrap: wrap;
     font-family: var(--font-mono);
-    font-size: 0.65rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }
 
@@ -1836,28 +2080,9 @@ a.story-card {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 1rem;
-    margin-top: 1.5rem;
-    padding: 1rem 0;
-}
-
-/* ─── Footer navigation ─────────────────────────────────────────────────── */
-
-.footer-nav {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-bottom: 0.5rem;
-}
-
-.footer-nav a {
-    color: var(--text-muted);
-    text-decoration: none;
-    font-size: 0.8rem;
-}
-
-.footer-nav a:hover {
-    color: var(--accent-bright);
+    gap: var(--space-4);
+    margin-top: var(--space-5);
+    padding: var(--space-4) 0;
 }
 
 /* ── Тематики Pulse: облака с примерами ───────────────────────────────────
@@ -1866,14 +2091,14 @@ a.story-card {
 .topic-cloud-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1rem;
+    gap: var(--space-4);
 }
 
 .topic-cloud {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
-    padding: 1rem;
+    gap: var(--space-2);
+    padding: var(--space-4);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -1897,17 +2122,17 @@ a.story-card {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    gap: 0.5rem;
+    gap: var(--space-2);
 }
 
 .topic-cloud-label {
     font-weight: 600;
-    color: var(--text-primary);
+    color: var(--text);
 }
 
 .topic-cloud-count {
     font-family: var(--font-mono);
-    font-size: 0.85rem;
+    font-size: var(--text-sm);
     color: var(--accent-2-bright);
 }
 
@@ -1917,11 +2142,11 @@ a.story-card {
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.3rem;
+    gap: var(--space-1);
 }
 
 .topic-cloud-examples li {
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     line-height: 1.35;
     color: var(--text-secondary);
     /* Пример нужен, чтобы понять тематику, а не прочитать заголовок целиком. */
@@ -1933,7 +2158,7 @@ a.story-card {
 
 .topic-cloud-foot {
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }
 
@@ -1953,8 +2178,8 @@ a.story-card {
     counter-increment: pulse-link;
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
-    padding: 0.7rem 0 0.7rem 2.4rem;
+    gap: var(--space-1);
+    padding: var(--space-3) 0 var(--space-3) var(--space-6);
     border-bottom: 1px solid var(--border);
     position: relative;
 }
@@ -1965,7 +2190,7 @@ a.story-card {
     left: 0;
     top: 0.75rem;
     font-family: var(--font-mono);
-    font-size: 0.8rem;
+    font-size: var(--text-xs);
     color: var(--text-muted);
 }
 
@@ -1974,7 +2199,7 @@ a.story-card {
 }
 
 .pulse-link-title {
-    color: var(--text-primary);
+    color: var(--text);
     text-decoration: none;
     font-weight: 500;
     line-height: 1.4;
@@ -1988,9 +2213,9 @@ a.story-card {
 .pulse-link-meta {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.75rem;
+    gap: var(--space-3);
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }
 
@@ -2007,19 +2232,19 @@ a.story-card {
 .reddit-type-filters {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.4rem;
-    margin-bottom: 1rem;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
 }
 
 .reddit-type-chip {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
-    padding: 0.3rem 0.7rem;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-3);
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 999px;
-    font-size: 0.8rem;
+    font-size: var(--text-sm);
     color: var(--text-secondary);
     text-decoration: none;
     transition: border-color 0.2s ease, color 0.2s ease;
@@ -2038,6 +2263,6 @@ a.story-card {
 
 .reddit-type-count {
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: var(--text-2xs);
     color: var(--text-muted);
 }

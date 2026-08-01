@@ -1,6 +1,6 @@
 {# Evidence items list. Expects: evidence_items (list of dicts with provider, title, canonical_url), list_title (optional) #}
 {% if evidence_items %}
-{% if list_title %}<h3>{{ list_title }}</h3>{% endif %}
+{% if list_title %}<h3 class="eyebrow">{{ list_title }}</h3>{% endif %}
 <ul class="evidence-list">
     {% for item in evidence_items %}
     <li>

@@ -1,0 +1,43 @@
+{# Строка списка: сюжет, тренд или сигнал. Expects:
+     row_url      — ссылка на объект
+     row_title    — заголовок
+     row_summary  — короткое описание (необязательно)
+     row_weight   — число, задающее вес события (источники или сюжеты)
+     row_badges   — список кортежей (css_class, текст) перед заголовком
+     row_meta     — список строк мета (дата, confidence, счётчики)
+     плюс всё, что понимает source_bar.html и chip_cloud.html
+
+   Заменяет карточку в сетке .shelf-grid (minmax(320px) + padding 1.5rem),
+   где на экран помещалось 3–4 объекта. Список сканируется быстрее сетки,
+   потому что позиции атрибутов фиксированы, а глаз идёт по одной вертикали —
+   это ровно тот случай, когда элементы просматривают подряд.
+
+   Вес события кодируется классом строки, а не цифрой в ряду метаданных:
+   крупное событие должно читаться до того, как прочитан текст. #}
+{% set weight = row_weight | default(0, true) | int %}
+<article class="item-row{% if weight >= 5 %} item-row-major{% elif weight >= 3 %} item-row-notable{% endif %}">
+    <div class="item-row-main">
+        <div class="item-row-head">
+            {% for badge_class, badge_text in row_badges | default([], true) %}
+            <span class="{{ badge_class }}">{{ badge_text }}</span>
+            {% endfor %}
+        </div>
+        <h3 class="item-row-title"><a href="{{ row_url }}">{{ row_title }}</a></h3>
+        {# У части сюжетов summary_ru совпадает с заголовком: повторять его
+           строкой ниже — чистый шум, особенно в плотном списке. #}
+        {% if row_summary and row_summary != row_title %}
+        <p class="item-row-summary">{{ row_summary }}</p>
+        {% endif %}
+        <p class="item-row-meta">
+            {% for fact in row_meta | default([], true) %}
+            <span>{{ fact }}</span>
+            {% endfor %}
+        </p>
+        {% if domain_ids or project_scores %}
+        {% with chip_limit=4 %}{% include "components/chip_cloud.html" %}{% endwith %}
+        {% endif %}
+    </div>
+    <div class="item-row-sources">
+        {% include "components/source_bar.html" %}
+    </div>
+</article>

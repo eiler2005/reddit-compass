@@ -1,9 +1,24 @@
-{# Domain + project score chips. Expects: domain_ids (list), project_scores (dict) #}
+{# Domain + project score chips. Expects: domain_ids (list), project_scores (dict)
+
+   Строка вместо списка означает, что данные испорчены выше по конвейеру
+   (см. _story_domains в trend_discovery.py). Итерация по строке в Jinja даёт
+   по чипу на символ — именно так на проде появились чипы «"», «,», «[», «_».
+   Партиал показывает только то, что действительно является списком рубрик. #}
+{% set domains = domain_ids if domain_ids is sequence and domain_ids is not string else [] %}
+{% set scores = project_scores if project_scores is mapping else {} %}
+{# chip_limit ограничивает рубрики в плотном списке: у широких трендов их
+   бывает по десять, и ряд чипов перевешивает сам заголовок. На детальной
+   странице лимит не задаётся и показываются все. #}
+{% set limit = chip_limit | default(0, true) | int %}
+{% set shown = domains[:limit] if limit else domains %}
 <div class="chip-cloud">
-    {% for domain_id in domain_ids %}
+    {% for domain_id in shown %}
     <span class="chip">{{ domain_id }}</span>
     {% endfor %}
-    {% for project_id, score in project_scores.items() %}
+    {% if limit and domains | length > limit %}
+    <span class="chip chip-more" title="{{ domains | join(', ') }}">+{{ domains | length - limit }}</span>
+    {% endif %}
+    {% for project_id, score in scores.items() %}
     <span class="chip">{{ project_id }} {{ score }}</span>
     {% endfor %}
 </div>

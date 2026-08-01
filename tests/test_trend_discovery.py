@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from reddit_compass.intelligence.trend_discovery import (
     _ctfidf_name,
     _is_specific_name,
@@ -129,3 +131,50 @@ def test_ctfidf_name_prefers_distinctive_terms() -> None:
     name = _ctfidf_name(cluster, corpus)
     assert "quantum" in name
     assert len(name.split()) >= 1
+
+
+def test_domains_survive_raw_sqlite_rows() -> None:
+    """Истории приходят сырыми строками БД, где ``domain_ids`` — JSON-текст.
+
+    Итерация по строке давала по «рубрике» на символ: на проде у тренда
+    ``my ai job me`` в чипах оказались ``"``, ``,``, ``[``, ``_``, ``a``, ``b``…
+    Здесь тот же вход, что даёт ``_load_engine_stories``.
+    """
+    stories = [
+        _story("s1", "OpenAI launches quantum AI agent platform", "2026-07-25"),
+        _story("s2", "OpenAI quantum AI agent rollout expands", "2026-07-26"),
+        _story("s3", "Anthropic responds to OpenAI quantum agent", "2026-07-28"),
+        _story("s4", "Google weighs OpenAI quantum agent deal", "2026-07-29"),
+    ]
+    for story in stories:
+        story["domain_ids"] = json.dumps(["ai_technology", "business"])
+        story["project_scores"] = json.dumps({"book": 7})
+
+    item_ids_by_story, provider_by_item = _providers(
+        {"s1": ["reuters"], "s2": ["nytimes"], "s3": ["reddit"], "s4": ["bbc"]}
+    )
+    trends = discover_trends(stories, item_ids_by_story, provider_by_item)
+
+    assert len(trends) == 1
+    assert trends[0]["domain_ids"] == ["ai_technology", "business"]
+    # Оценки проектов терялись молча по той же причине.
+    assert trends[0]["project_scores"] == {"book": 7}
+
+
+def test_broken_domains_do_not_become_characters() -> None:
+    """Нечитаемый JSON лучше пустых рубрик, чем списка символов."""
+    stories = [
+        _story("s1", "OpenAI launches quantum AI agent platform", "2026-07-25"),
+        _story("s2", "OpenAI quantum AI agent rollout expands", "2026-07-26"),
+        _story("s3", "Anthropic responds to OpenAI quantum agent", "2026-07-28"),
+    ]
+    for story in stories:
+        story["domain_ids"] = "не json"
+
+    item_ids_by_story, provider_by_item = _providers(
+        {"s1": ["reuters"], "s2": ["nytimes"], "s3": ["bbc"]}
+    )
+    trends = discover_trends(stories, item_ids_by_story, provider_by_item)
+
+    assert len(trends) == 1
+    assert trends[0]["domain_ids"] == ["other"]

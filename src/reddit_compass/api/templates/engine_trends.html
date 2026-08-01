@@ -26,29 +26,27 @@
     </section>
 
     <section class="section">
-        <div class="shelf-grid">
+        <div class="row-list">
             {% for trend in trends["items"] %}
-            <article class="story-card">
-                <div class="story-meta">
-                    <span class="direction-badge">{{ trend.lifecycle }}</span>
-                    {% with source_scope=trend.source_scope %}{% include "components/scope_badge.html" %}{% endwith %}
-                    <span>{{ trend.review_status }}</span>
-                    <span>{{ "%.0f"|format(trend.confidence * 100) }}% confidence</span>
-                    <span>{{ trend.story_count }} stories</span>
-                    <span>{{ trend.source_count }} sources</span>
-                </div>
-                <h2 class="story-title"><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h2>
-                <p>{{ trend.pattern }}</p>
-                {% with domain_ids=trend.domain_ids, project_scores=trend.project_scores %}{% include "components/chip_cloud.html" %}{% endwith %}
-                {% if trend.stories %}
-                <h3>Stories inside trend</h3>
-                <ul class="evidence-list">
-                    {% for story in trend.stories %}
-                    <li><a href="/stories/{{ story.story_id }}?{{ analysis_query }}">{{ story.title }}</a> <span class="section-note">{{ story.source_count }} sources</span></li>
-                    {% endfor %}
-                </ul>
-                {% endif %}
-            </article>
+            {% with
+                row_url="/trends/" ~ trend.trend_id ~ "?" ~ analysis_query,
+                row_title=trend.title,
+                row_summary=trend.pattern,
+                row_weight=trend.source_count,
+                row_badges=[
+                    ("direction-badge", trend.lifecycle),
+                    ("confidence-badge", "%.0f"|format(trend.confidence * 100) ~ "% confidence")
+                ],
+                row_meta=[
+                    trend.story_count ~ " событий",
+                    trend.source_count ~ " источников",
+                    trend.review_status
+                ],
+                domain_ids=trend.domain_ids,
+                project_scores=trend.project_scores,
+                source_scope=trend.source_scope,
+                source_clusters=trend.source_clusters
+            %}{% include "components/item_row.html" %}{% endwith %}
             {% else %}
             {% with empty_message="Trends не найдены." %}{% include "components/empty_state.html" %}{% endwith %}
             {% endfor %}
