@@ -34,6 +34,26 @@ VPS_HOST="${RC_DEPLOY_HOST:-reddit-compass-vps}"
 VPS_USER="${RC_DEPLOY_USER:-deploy}"
 PUBLIC_BASE_URL="${RC_PUBLIC_BASE_URL:-http://localhost:8900}"
 
+# Деплой открывает около десятка отдельных SSH-соединений (семь scp плюс ssh
+# на каждый шаг). На нестабильном канале любое из них рвётся и роняет весь
+# скрипт на середине копирования. Мультиплексирование сводит всё к одному
+# TCP-соединению, а keepalive не даёт ему отвалиться во время долгой сборки.
+CONTROL_PATH="$(mktemp -u /tmp/rc-deploy-%r@%h.sock)"
+SSH_OPTS=(
+    -o ControlMaster=auto
+    -o "ControlPath=${CONTROL_PATH}"
+    -o ControlPersist=10m
+    -o ServerAliveInterval=15
+    -o ServerAliveCountMax=8
+    -o ConnectTimeout=20
+)
+ssh() { command ssh "${SSH_OPTS[@]}" "$@"; }
+scp() { command scp "${SSH_OPTS[@]}" "$@"; }
+cleanup_control() {
+    command ssh "${SSH_OPTS[@]}" -O exit "${VPS_USER}@${VPS_HOST}" 2>/dev/null || true
+}
+trap cleanup_control EXIT
+
 echo "🚀 Деплой reddit-compass на ${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}"
 
 echo "📁 Создаю ${REMOTE_DIR} на VPS..."
@@ -57,7 +77,9 @@ BUILD_INFO_FILE="$(mktemp)"
 {
     echo "git_sha=$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    echo "version=$(grep -m1 '^version' "${PROJECT_ROOT}/pyproject.toml" | cut -d'\"' -f2)"
+    # cut -d'\"' внутри двойных кавычек получал экранированную кавычку как
+    # разделитель и падал с «bad delimiter», оставляя version пустым.
+    echo "version=$(sed -n 's/^version *= *"\(.*\)"/\1/p' "${PROJECT_ROOT}/pyproject.toml" | head -1)"
     echo "branch=$(git -C "${PROJECT_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
     echo "dirty=$(git -C "${PROJECT_ROOT}" status --porcelain 2>/dev/null | head -c1 | wc -c | tr -d ' ')"
 } > "${BUILD_INFO_FILE}"
@@ -70,6 +92,14 @@ scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/README.md" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp -r "${PROJECT_ROOT}/src/reddit_compass" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/src/"
 scp -r "${PROJECT_ROOT}/config/." "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/config/"
+
+# Диск 38GB. Каждая пересборка оставляет предыдущий образ висячим и добавляет
+# кэш сборки — двух деплоёв подряд хватает, чтобы упереться в 100% и получить
+# «no space left on device» уже после успешной компиляции. Чистим до сборки,
+# а не после: место нужно именно сейчас.
+echo "🧹 Освобождаю место (висячие образы и кэш сборки)..."
+ssh "${VPS_USER}@${VPS_HOST}" \
+    "docker image prune -f >/dev/null; docker builder prune -f --keep-storage 2GB >/dev/null; df -h / | tail -1"
 
 echo "🐳 Собираю образы api + collector (первый раз — долго: базовый Playwright)..."
 ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose build api reddit-compass"

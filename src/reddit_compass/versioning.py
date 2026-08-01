@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import sqlite3
 import subprocess
 from functools import lru_cache
@@ -28,7 +29,26 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STATIC_DIR = Path(__file__).resolve().parent / "api" / "static"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "api" / "templates"
-BUILD_INFO_PATH = PROJECT_ROOT / "BUILD_INFO"
+
+
+def _build_info_path() -> Path | None:
+    """Где искать ``BUILD_INFO``.
+
+    В контейнере пакет установлен в site-packages, поэтому ``parents[2]``
+    указывает куда угодно, только не в ``/app``, куда deploy.sh монтирует файл.
+    Из-за этого ``/version`` на проде отвечал ``git_sha: unknown`` при живом
+    и правильно скопированном BUILD_INFO.
+    """
+    candidates = [
+        Path(os.environ["RC_BUILD_INFO"]) if os.environ.get("RC_BUILD_INFO") else None,
+        PROJECT_ROOT / "BUILD_INFO",
+        Path("/app/BUILD_INFO"),
+    ]
+    for candidate in candidates:
+        if candidate is not None and candidate.exists():
+            return candidate
+    return None
+
 
 APP_COMPONENT = "app"
 ASSETS_COMPONENT = "assets"
@@ -66,8 +86,9 @@ def build_info() -> dict[str, str]:
     Локально файла обычно нет, поэтому SHA берётся из git напрямую.
     """
     info: dict[str, str] = {}
-    if BUILD_INFO_PATH.exists():
-        for line in BUILD_INFO_PATH.read_text(encoding="utf-8").splitlines():
+    path = _build_info_path()
+    if path is not None:
+        for line in path.read_text(encoding="utf-8").splitlines():
             key, _, value = line.partition("=")
             if key.strip():
                 info[key.strip()] = value.strip()

@@ -1,14 +1,25 @@
-{# Domain + project score chips. Expects: domain_ids (list), project_scores (dict)
+{# Domain + project score chips. Expects: domain_ids (list), project_scores (dict),
+   chip_limit (int, необязательно)
 
-   Строка вместо списка означает, что данные испорчены выше по конвейеру
-   (см. _story_domains в trend_discovery.py). Итерация по строке в Jinja даёт
-   по чипу на символ — именно так на проде появились чипы «"», «,», «[», «_».
-   Партиал показывает только то, что действительно является списком рубрик. #}
-{% set domains = domain_ids if domain_ids is sequence and domain_ids is not string else [] %}
-{% set scores = project_scores if project_scores is mapping else {} %}
-{# chip_limit ограничивает рубрики в плотном списке: у широких трендов их
-   бывает по десять, и ряд чипов перевешивает сам заголовок. На детальной
+   Две защиты от одной и той же порчи данных (см. _story_domains в
+   trend_discovery.py, где JSON-строка domain_ids итерировалась посимвольно):
+
+   1. Строка вместо списка — Jinja выдала бы по чипу на символ.
+   2. Односимвольные значения в самом списке — след уже записанной порчи.
+      Релизы иммутабельны, переписать их нельзя, поэтому мусор отсекается
+      на отображении. Настоящих рубрик короче двух символов не бывает.
+
+   chip_limit ограничивает число рубрик в плотном списке: у широких трендов
+   их бывает по десять, и ряд чипов перевешивает сам заголовок. На детальной
    странице лимит не задаётся и показываются все. #}
+{% set raw = domain_ids if domain_ids is sequence and domain_ids is not string else [] %}
+{% set domains = [] %}
+{% for domain_id in raw %}
+    {% if domain_id is string and domain_id | length > 1 %}
+        {% set _ = domains.append(domain_id) %}
+    {% endif %}
+{% endfor %}
+{% set scores = project_scores if project_scores is mapping else {} %}
 {% set limit = chip_limit | default(0, true) | int %}
 {% set shown = domains[:limit] if limit else domains %}
 <div class="chip-cloud">

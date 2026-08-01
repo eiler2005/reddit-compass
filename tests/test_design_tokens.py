@@ -294,3 +294,23 @@ def test_reddit_chips_stay_real_links() -> None:
     assert 'href="/today?reddit_type=' in text
     assert "data-reddit-filters" in text
     assert "data-reddit-endpoint" in text
+
+
+def test_chip_cloud_drops_single_character_domains() -> None:
+    """Порча, уже записанная в иммутабельный релиз.
+
+    Там ``domain_ids`` — корректный список, просто состоящий из символов
+    разобранной по буквам JSON-строки: на проде так рендерились 150 чипов
+    вида ``"``, ``,``, ``[``. Переписать релиз нельзя, поэтому мусор
+    отсекается на отображении — настоящих рубрик короче двух символов нет.
+    """
+    from reddit_compass.api.ui import templates
+
+    template = templates.env.get_template("components/chip_cloud.html")
+    html = template.render(
+        domain_ids=['"', ",", "[", "]", "_", "a", "ai_technology"],
+        project_scores={},
+    )
+
+    assert html.count('<span class="chip">') == 1
+    assert "ai_technology" in html

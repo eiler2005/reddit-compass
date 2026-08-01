@@ -91,3 +91,33 @@ def test_build_info_falls_back_when_file_absent() -> None:
     assert "git_sha" in info
     assert info["git_sha"], "пустой SHA хуже явного unknown"
     assert "version" in info
+
+
+def test_build_info_is_found_where_deploy_mounts_it(tmp_path, monkeypatch) -> None:
+    """В контейнере пакет лежит в site-packages, а BUILD_INFO — в /app.
+
+    Путь считался от ``versioning.py`` вверх на два уровня, что в проде
+    указывало мимо: /version отвечал ``git_sha: unknown`` при живом файле.
+    """
+    from reddit_compass import versioning
+
+    build_info = tmp_path / "BUILD_INFO"
+    build_info.write_text("git_sha=abc1234\nbuilt_at=2026-08-01T00:00:00Z\nversion=0.1.0\n")
+    monkeypatch.setenv("RC_BUILD_INFO", str(build_info))
+
+    info = versioning.build_info()
+
+    assert info["git_sha"] == "abc1234"
+    assert info["built_at"] == "2026-08-01T00:00:00Z"
+
+
+def test_build_info_falls_back_to_git_when_file_is_absent(tmp_path, monkeypatch) -> None:
+    from reddit_compass import versioning
+
+    monkeypatch.setenv("RC_BUILD_INFO", str(tmp_path / "нет-такого"))
+    monkeypatch.setattr(versioning, "PROJECT_ROOT", tmp_path)
+
+    info = versioning.build_info()
+
+    assert "git_sha" in info
+    assert "version" in info

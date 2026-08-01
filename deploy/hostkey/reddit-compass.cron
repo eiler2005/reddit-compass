@@ -13,4 +13,12 @@
 
 # Frozen Engine workflow.  A partial run may be inspected, but cannot publish broad.
 0 16 */2 * * cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --review-limit 80 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1
+
+# Диск 38GB, и каждая пересборка образа оставляет предыдущий висячим плюс
+# несколько гигабайт кэша сборки: двух деплоёв хватает, чтобы упереться в 100%
+# и уронить сборку на середине. Чистится только заведомо ненужное — висячие
+# образы и кэш сверх 2GB. Ни `system prune`, ни `-a`, ни volumes: на этом
+# хосте работают и другие сервисы, их остановленные контейнеры и образы
+# трогать нельзя.
+30 3 * * * docker image prune -f >> /tmp/rc-docker-prune.log 2>&1 && docker builder prune -f --keep-storage 2GB >> /tmp/rc-docker-prune.log 2>&1
 # END reddit-compass managed pipeline
