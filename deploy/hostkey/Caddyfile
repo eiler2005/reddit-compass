@@ -1,5 +1,7 @@
 # Caddyfile для reddit-compass API на HostKey «Hermes».
-# Loopback-only: HTTP на :80 (без TLS — сервис за firewall, доступен только локально).
+# HTTP на :80 без TLS. Loopback обеспечивается не этим файлом, а привязкой
+# порта в docker-compose.yml: без явного 127.0.0.1 Docker публикует порт
+# наружу мимо UFW. Авторизации перед UI нет, поэтому это критично.
 #
 # Доступ: curl http://127.0.0.1:8900/health (host port 8900 → container :80)
 

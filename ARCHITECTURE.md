@@ -303,7 +303,8 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 │  └── data/                       ← snapshots + обе SQLite DB       │
 │                                                                     │
 │  Security: read_only, no-new-privileges, cap_drop ALL, pids_limit   │
-│  Network: loopback only (127.0.0.1:8900), без публичных портов      │
+│  Network: loopback only — все ports: с явным 127.0.0.1, иначе       │
+│  Docker публикует наружу мимо UFW (см. docs/HOSTING.md)             │
 │                                                                     │
 │  Роль: API + RSS + HN + Ladder + хранение данных                    │
 └─────────────────────────────────────────────────────────────────────┘

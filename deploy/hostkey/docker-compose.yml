@@ -78,8 +78,14 @@ services:
     container_name: rc-caddy
     restart: always
     ports:
-      - "8900:80"
-      - "8943:443"
+      # Только loopback. Без явного 127.0.0.1 Docker публикует порт на всех
+      # интерфейсах и пишет правило DNAT напрямую в iptables — мимо UFW,
+      # у которого «default deny incoming» и нет разрешения на 8900. Проверка
+      # показала `0.0.0.0/0 → dpt:8900`: интерфейс без авторизации был доступен
+      # из интернета, хотя и Caddyfile, и ARCHITECTURE.md заявляли обратное.
+      # Доступ снаружи — через SSH-туннель (см. docs/HOSTING.md).
+      - "127.0.0.1:8900:80"
+      - "127.0.0.1:8943:443"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

@@ -366,3 +366,20 @@ def test_search_reaches_trends_and_pulse() -> None:
     nothing = client.get("/pulse?q=zzzнетничего").text
     assert everything != nothing
     assert "0 сигналов" in nothing
+
+
+def test_published_ports_stay_on_loopback() -> None:
+    """Docker публикует порты мимо UFW.
+
+    Без явного ``127.0.0.1`` в ``ports:`` он пишет DNAT ``0.0.0.0/0`` прямо
+    в цепочку DOCKER таблицы nat, и ``default deny (incoming)`` в UFW на это
+    не влияет. Так интерфейс без авторизации отвечал из интернета, пока
+    и Caddyfile, и ARCHITECTURE.md заявляли «loopback only».
+    """
+    compose = (Path(__file__).resolve().parents[1] / "deploy/hostkey/docker-compose.yml").read_text(
+        encoding="utf-8"
+    )
+
+    published = re.findall(r'^\s*-\s*"([^"]+:\d+)"', compose, re.MULTILINE)
+    exposed = [p for p in published if not p.startswith("127.0.0.1:")]
+    assert exposed == [], f"порты опубликованы наружу: {exposed}"
