@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Дайджест · {{ digest.date }} — reddit-compass{% endblock %}
+
+{% block content %}
+{# Дайджест — выжимка за день: что подтвердилось разными источниками, о чём
+   молчат СМИ, что прочитать. Собирается из того же опубликованного выпуска,
+   что и /today, поэтому страница и будущая рассылка не могут разойтись. #}
+<div class="container digest-page">
+    {% with page_title="Дайджест", page_note="Выжимка за день: что подтвердилось разными источниками, о чём молчат СМИ и что стоит прочитать.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
+
+    {% with preview=digest.preview, release_type="Digest" %}{% include "components/preview_banner.html" %}{% endwith %}
+
+    <p class="digest-headline">{{ digest.headline }}</p>
+
+    <p class="digest-facts">
+        Собрано <strong>{{ digest.item_count }}</strong> материалов
+        из <strong>{{ digest.source_count }}</strong> источников ·
+        <strong>{{ digest.story_count }}</strong> кластеров ·
+        <strong>{{ digest.trend_count }}</strong> трендов
+        {% if digest.publication_id %}
+        · <a href="/today">полная версия</a>
+        {% endif %}
+    </p>
+
+    {% if digest.is_empty %}
+    {% with empty_message="За эту дату выпуск пуст: собирать дайджест не из чего." %}{% include "components/empty_state.html" %}{% endwith %}
+    {% else %}
+
+    {% if digest.gaps %}
+    <section class="section">
+        <h2>О чём молчат СМИ</h2>
+        <p class="section-note">
+            Заметное обсуждение на Reddit при почти полном отсутствии мейнстрим-публикаций.
+            Самый ценный тип сигнала: его больше нигде не видно.
+        </p>
+        {% with digest_items=digest.gaps, digest_external=true %}{% include "components/digest_list.html" %}{% endwith %}
+    </section>
+    {% endif %}
+
+    {% if digest.trends %}
+    <section class="section">
+        <h2>Что повторяется</h2>
+        <p class="section-note">
+            Паттерны поверх нескольких независимых событий — только прошедшие проверку.
+        </p>
+        {% with digest_items=digest.trends %}{% include "components/digest_list.html" %}{% endwith %}
+    </section>
+    {% endif %}
+
+    {% if digest.reading %}
+    <section class="section">
+        <h2>Что прочитать</h2>
+        {% with digest_items=digest.reading, digest_external=true %}{% include "components/digest_list.html" %}{% endwith %}
+    </section>
+    {% endif %}
+
+    {% if digest.reddit %}
+    <section class="section">
+        <h2>Свежее на Reddit</h2>
+        <p class="section-note">Посты выпуска, которых нет в списке чтения выше.</p>
+        {% with digest_items=digest.reddit, digest_external=true %}{% include "components/digest_list.html" %}{% endwith %}
+    </section>
+    {% endif %}
+
+    {% endif %}
+
+    <p class="section-note digest-foot">
+        Дайджест за {{ digest.date }}. Все разделы выпуска — на
+        <a href="/today">Сегодня</a>, слои анализа — в
+        <a href="/news?{{ analysis_query }}">Ленте</a>,
+        <a href="/stories?{{ analysis_query }}">Сюжетах</a> и
+        <a href="/trends?{{ analysis_query }}">Трендах</a>.
+    </p>
+</div>
+{% endblock %}

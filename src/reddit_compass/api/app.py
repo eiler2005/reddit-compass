@@ -69,6 +69,7 @@ def create_app() -> FastAPI:
         if request.url.path.startswith(
             (
                 "/about",
+                "/digest",
                 "/today",
                 "/news",
                 "/stories",

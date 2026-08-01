@@ -1,0 +1,16 @@
+{# Список строк дайджеста. Expects: digest_items (list[DigestItem]),
+   digest_external (bool — ссылки ведут наружу, а не внутрь сайта)
+
+   Своя разметка, а не item_row: в дайджесте у строки нет ни веса события,
+   ни полосы источников — только заголовок, одна поясняющая фраза и ссылка.
+   Это выжимка для чтения подряд, а не рабочий список с фильтрами. #}
+<ol class="digest-list">
+    {% for item in digest_items %}
+    <li class="digest-item">
+        <a class="digest-item-title" href="{{ item.url }}"
+           {% if digest_external %}target="_blank" rel="noopener noreferrer"{% endif %}>{{ item.title }}</a>
+        {% if item.note %}<p class="digest-item-note">{{ item.note }}</p>{% endif %}
+        {% if item.meta %}<p class="digest-item-meta">{{ item.meta }}</p>{% endif %}
+    </li>
+    {% endfor %}
+</ol>

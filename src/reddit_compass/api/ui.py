@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from ..config import DEFAULT_PROFILE
+from ..intelligence.digest import build_digest
 from ..intelligence.engine import (
     DEFAULT_ENGINE_DB_PATH,
     engine_db,
@@ -99,6 +100,50 @@ def _analysis_query(channel: str = "broad", publication_id: str | None = None) -
     if publication_id:
         params["publication_id"] = publication_id
     return urlencode(params)
+
+
+def _mainstream_gap_signals(
+    engine_conn: sqlite3.Connection, signal_release_id: str, limit: int = 5
+) -> list[dict[str, object]]:
+    """Сигналы, которые обсуждают на Reddit, но почти не освещают СМИ.
+
+    Порог: заметное обсуждение (pulse ≥ 60) при менее чем двух мейнстрим-
+    публикациях. Это главный тип сигнала в продукте, и он нужен и на /pulse,
+    и в дайджесте — поэтому запрос один, а не два расходящихся.
+    """
+    rows = engine_conn.execute(
+        "SELECT cs.signal_id, cs.item_id, cs.subreddit, "
+        "cs.signal_type, cs.title, cs.discussion_url, "
+        "cs.pulse_score, "
+        "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) as reddit_score, "
+        "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) as reddit_comments, "
+        "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) as upvote_ratio "
+        "FROM community_signals cs "
+        "LEFT JOIN release_items ri "
+        "ON ri.item_id = cs.item_id "
+        "AND ri.release_id = (SELECT data_release_id "
+        "FROM signal_releases WHERE signal_release_id = ?) "
+        "WHERE cs.signal_release_id = ? "
+        "AND cs.pulse_score >= 60 "
+        "AND cs.mainstream_coverage_count < 2 "
+        "ORDER BY cs.pulse_score DESC LIMIT ?",
+        (signal_release_id, signal_release_id, max(1, limit)),
+    ).fetchall()
+    return [
+        {
+            "signal_id": row["signal_id"],
+            "item_id": row["item_id"],
+            "subreddit": row["subreddit"],
+            "signal_type": row["signal_type"],
+            "title": row["title"],
+            "discussion_url": _safe_url(row["discussion_url"]),
+            "pulse_score": row["pulse_score"],
+            "reddit_score": row["reddit_score"],
+            "reddit_comments": row["reddit_comments"],
+            "upvote_ratio": row["upvote_ratio"],
+        }
+        for row in rows
+    ]
 
 
 def _page_url(path: str, **filters: str | None) -> str:
@@ -1397,7 +1442,6 @@ async def pulse_page(
     from .v2 import (
         _engine_pulse_signals,
         _latest_signal_release,
-        _safe_url,
     )
 
     engine_conn = open_engine_readonly(engine_path)
@@ -1435,42 +1479,7 @@ async def pulse_page(
             top_ai, _ = _engine_pulse_signals(
                 engine_conn, sig_id, signal_type="ai_capability", limit=5
             )
-            gap_rows = engine_conn.execute(
-                "SELECT cs.signal_id, cs.item_id, cs.subreddit, "
-                "cs.signal_type, cs.title, cs.discussion_url, "
-                "cs.pulse_score, "
-                "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) "
-                "as reddit_score, "
-                "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) "
-                "as reddit_comments, "
-                "COALESCE(json_extract(ri.raw_engagement, "
-                "'$.upvote_ratio'), 0) as upvote_ratio "
-                "FROM community_signals cs "
-                "LEFT JOIN release_items ri "
-                "ON ri.item_id = cs.item_id "
-                "AND ri.release_id = (SELECT data_release_id "
-                "FROM signal_releases WHERE signal_release_id = ?) "
-                "WHERE cs.signal_release_id = ? "
-                "AND cs.pulse_score >= 60 "
-                "AND cs.mainstream_coverage_count < 2 "
-                "ORDER BY cs.pulse_score DESC LIMIT 5",
-                (sig_id, sig_id),
-            ).fetchall()
-            mainstream_gap = [
-                {
-                    "signal_id": r["signal_id"],
-                    "item_id": r["item_id"],
-                    "subreddit": r["subreddit"],
-                    "signal_type": r["signal_type"],
-                    "title": r["title"],
-                    "discussion_url": _safe_url(r["discussion_url"]),
-                    "pulse_score": r["pulse_score"],
-                    "reddit_score": r["reddit_score"],
-                    "reddit_comments": r["reddit_comments"],
-                    "upvote_ratio": r["upvote_ratio"],
-                }
-                for r in gap_rows
-            ]
+            mainstream_gap = _mainstream_gap_signals(engine_conn, sig_id)
             # By-type counts
             type_rows = engine_conn.execute(
                 "SELECT signal_type, COUNT(*) as cnt "
@@ -2146,6 +2155,103 @@ async def engine_page(request: Request) -> HTMLResponse:
         request=request,
         name="engine.html",
         context=context,
+    )
+
+
+@router.get("/digest", response_class=HTMLResponse)
+@router.get("/digest/{date}", response_class=HTMLResponse)
+async def digest_page(
+    request: Request,
+    date: str | None = None,
+    profile: str = DEFAULT_PROFILE,
+) -> HTMLResponse:
+    """Дайджест за день: выжимка вместо разглядывания шести разделов.
+
+    Собирается из того же опубликованного выпуска, что и /today, поэтому
+    страница не может разойтись с будущей рассылкой: расходятся рендеры,
+    а источник один.
+    """
+    engine_path = _engine_path()
+    if not engine_path.exists():
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Trend Engine publication не найдена."},
+            status_code=404,
+        )
+
+    engine_conn = open_engine_readonly(engine_path)
+    try:
+        radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
+        if radar is None:
+            return templates.TemplateResponse(
+                request=request,
+                name="empty.html",
+                context={"message": "Опубликованного выпуска за эту дату нет."},
+                status_code=404,
+            )
+        payload = radar.model_dump()
+        analysis_query = _analysis_query("broad", None)
+        trends = _today_change_candidates(radar, analysis_query)
+        dashboard = _build_today_dashboard(payload, trends, analysis_query)
+
+        reading = list(
+            _cached_today_reading_list(
+                str(engine_path),
+                publication_id=str(payload.get("publication_id") or "preview"),
+                data_release_id=str(payload.get("data_release_id") or ""),
+                story_release_id=str(payload.get("story_release_id") or ""),
+                date=str(payload["date"]),
+                profile=profile,
+            )
+        )
+
+        reddit_new: list[dict[str, object]] = []
+        gap_signals: list[dict[str, object]] = []
+        from .v2 import _latest_signal_release
+
+        sig_id = _latest_signal_release(
+            engine_conn,
+            data_release_id=str(payload.get("data_release_id") or "") or None,
+        ) or _latest_signal_release(engine_conn)
+        if sig_id:
+            gap_signals = _mainstream_gap_signals(engine_conn, sig_id)
+            reddit_new = _build_today_reddit_new(
+                engine_conn,
+                sig_id,
+                exclude_item_ids={
+                    str(item.get("item_id")) for item in reading[:10] if item.get("item_id")
+                },
+            )
+    except (HTTPException, OSError, sqlite3.Error):
+        return templates.TemplateResponse(
+            request=request,
+            name="empty.html",
+            context={"message": "Дайджест собрать не удалось."},
+            status_code=503,
+        )
+    finally:
+        engine_conn.close()
+
+    digest = build_digest(
+        date=str(payload["date"]),
+        dashboard=dashboard,
+        trends=[dict(trend) for trend in trends],
+        reading=[dict(item) for item in reading],
+        reddit_new=[dict(post) for post in reddit_new],
+        gap_signals=gap_signals,
+        preview=bool(payload.get("preview")),
+        publication_id=str(payload.get("publication_id") or ""),
+    )
+
+    return templates.TemplateResponse(
+        request=request,
+        name="digest.html",
+        context={
+            "digest": digest,
+            "radar": payload,
+            "analysis_query": analysis_query,
+        },
     )
 
 

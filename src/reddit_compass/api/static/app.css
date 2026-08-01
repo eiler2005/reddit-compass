@@ -1113,6 +1113,86 @@ a.story-card {
     font-weight: 500;
 }
 
+/* ─── Дайджест ──────────────────────────────────────────────────────────── */
+/* Выжимка за день, которую читают сверху вниз за минуту. Поэтому здесь шире
+   интервалы и крупнее текст, чем в рабочих списках: это чтение, а не разбор. */
+
+.digest-headline {
+    font-size: var(--text-xl);
+    font-family: var(--font-display);
+    font-weight: 600;
+    line-height: 1.35;
+    letter-spacing: -0.02em;
+    max-width: 46ch;
+    margin-bottom: var(--space-3);
+}
+
+.digest-facts {
+    color: var(--text-secondary);
+    font-size: var(--text-sm);
+    margin-bottom: var(--space-6);
+}
+
+.digest-facts strong {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.digest-list {
+    list-style: none;
+    counter-reset: digest;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    margin: 0;
+    padding: 0;
+}
+
+.digest-item {
+    counter-increment: digest;
+    position: relative;
+    padding-left: var(--space-6);
+    max-width: 68ch;
+}
+
+.digest-item::before {
+    content: counter(digest, decimal-leading-zero);
+    position: absolute;
+    left: 0;
+    top: 0.15em;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-muted);
+}
+
+.digest-item-title {
+    font-size: var(--text-lg);
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--text);
+}
+
+.digest-item-title:hover { color: var(--accent-bright); }
+
+.digest-item-note {
+    margin: var(--space-1) 0 0;
+    color: var(--text-secondary);
+    line-height: 1.55;
+}
+
+.digest-item-meta {
+    margin: var(--space-1) 0 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+    color: var(--text-muted);
+}
+
+.digest-foot {
+    margin-top: var(--space-7);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--border);
+}
+
 /* ─── Страница «О сервисе» ──────────────────────────────────────────────── */
 
 .about-page .prose {
