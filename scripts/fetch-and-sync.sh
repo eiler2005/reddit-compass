@@ -96,7 +96,38 @@ do_sync() {
 
     # Never copy a local compass.db: the VPS owns its raw corpus and combines
     # this Reddit artifact with the VPS adapters through `collect --from-snapshots`.
-    echo "✅ Reddit artifact synced. VPS finalizer will create the unified raw run."
+    echo "✅ Reddit artifact synced."
+
+    # ── Trigger finalization + engine cycle on VPS ──────────────────────────
+    echo ""
+    echo "🔄 [$(date +%H:%M:%S)] Триггерю финализацию + Engine cycle на VPS..."
+    ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+        docker compose run --rm reddit-compass collect --from-snapshots --date ${TODAY} --profile broad 2>&1 | tail -5"
+    echo "   Finalization done. Running engine cycle..."
+    ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+        docker compose run --rm reddit-compass engine cycle 2>&1 | tail -5"
+    echo "   Engine cycle done. Publishing..."
+
+    # Read latest story/trend release IDs and publish
+    local release_ids
+    release_ids=$(ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+        docker compose run --rm --entrypoint python3 reddit-compass -c \"
+import sqlite3, json
+conn = sqlite3.connect('/data/trend_engine.db')
+c = conn.cursor()
+sr = c.execute('SELECT story_release_id FROM story_releases ORDER BY created_at DESC LIMIT 1').fetchone()
+tr = c.execute('SELECT trend_release_id FROM trend_releases ORDER BY created_at DESC LIMIT 1').fetchone()
+print(json.dumps({'story': sr[0], 'trend': tr[0]}))
+\" 2>/dev/null" 2>/dev/null)
+    local story_id trend_id
+    story_id=$(echo "${release_ids}" | python3 -c "import sys,json; print(json.load(sys.stdin)['story'])")
+    trend_id=$(echo "${release_ids}" | python3 -c "import sys,json; print(json.load(sys.stdin)['trend'])")
+    echo "   Publishing: story=${story_id} trend=${trend_id}"
+    ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+        docker compose run --rm reddit-compass engine publish \
+            --story-release ${story_id} --trend-release ${trend_id} \
+            --channel broad --allow-partial --force 2>&1 | tail -3"
+    echo "✅ [$(date +%H:%M:%S)] VPS pipeline complete: collect → engine → publish."
 }
 
 # ── Main ───────────────────────────────────────────────────────────────────
