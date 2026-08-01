@@ -1,14 +1,19 @@
 # BEGIN reddit-compass managed pipeline
-# All timestamps are UTC.  Collection and Engine are independent processes.
-# Mac supplies only /data/snapshots/YYYY-MM-DD/posts.jsonl (Reddit) before 14:45.
+# All timestamps are UTC.  VPS is fully autonomous (scheme D).
+# Reddit collected via Playwright + residential proxy (REDDIT_COMPASS_ENGINE=playwright,
+# REDDIT_COMPASS_PROXIES from .env).  Mac fetch-and-sync.sh is fallback only.
 # Pipeline runs every 2 nights (odd days) — Engine cycle on 1-CPU VPS takes 30-60 min,
 # daily runs are redundant with a 7-day analysis window.
+
+# Reddit first: Playwright + proxy takes ~50 min for 84 subreddits.
+0 13 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --sources reddit --stealth --profile broad >> /tmp/rc-reddit.log 2>&1
+
 0 14 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1
 10 14 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1
 20 14 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1
 30 14 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1
 
-# No network and no LLM: make exactly one truthful raw run from completed artifacts.
+# Finalize: all JSONL artifacts should exist by now (Reddit from VPS, rest from VPS adapters).
 45 14 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1
 
 # Frozen Engine workflow.  A partial run may be inspected, but cannot publish broad.
