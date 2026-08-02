@@ -240,6 +240,32 @@ generation/near-dedupe, но не решением decision layer: в текущ
 сначала на новом, не использованном для выбора подхода human holdout (пары и группы). Лишь после
 этого допустим свежий scratch StoryRelease и полный pair/group gate.
 
+### Hybrid CrossEncoder + hard guards POC — pair precision passes, release no-go (2026-08-02)
+
+Следующий изолированный POC зафиксировал консервативную hybrid-политику: `reject`, отсутствие
+кандидата и явные number/location/person conflicts никогда не могут стать merge; только
+bounded-components `auto_merge` и `review` передаются в готовый
+`cross-encoder/ms-marco-MiniLM-L6-v2`. Этот конкретный Candidate v2 не содержал обычных
+provenance `auto_merge`: все 42 auto-пары были bounded-кандидатами, поэтому scorer проверил
+113 из 120 Golden-пар. Запуск снова был read-only и временный: не менялись Engine DB, код,
+lockfile, StoryRelease, deploy и production pointer. Артефакт:
+`scratchpad/golden/hybrid-cross-encoder-guard-poc.md`.
+
+Порог `0.8739` был выбран на той же заранее стратифицированной `dev` половине при precision ≥
+0.95 (P **0.9643**, R **0.7500**) и применён к `test` без изменения. На `test` hybrid достиг
+precision **0.9545** (21 TP, 1 FP), но recall только **0.6000** (14 FN). Диагностически на всех
+120 известных парах — P **0.9600**, R **0.6761**. Значит hard guards сняли один опасный false
+merge от чистого CrossEncoder, но не устранили главный дефицит полноты; порог recall ≥ 0.75 не
+пройден. Кроме того, существующие 30 group labels относятся к старому разбиению: после изменения
+пары группы нужно заново показать человеку, поэтому old group result нельзя выдавать за проверку
+hybrid-графа.
+
+Решение: **не создавать StoryRelease и не переходить к production release**. Для следующей
+попытки нужны одновременно свежие, не использованные для выбора подхода human pair- и
+group-labels, зафиксированная до их просмотра hybrid-политика и новый scratch StoryRelease.
+Только полный gate (pair P ≥ 0.95, R ≥ 0.75, group overmerge ≤ 0.03) позволит рассматривать
+ручную публикацию; assistant-разметка не будет обозначена как human ground truth.
+
 ## Исторический статус: 8 полов из 11 (2026-07-31)
 
 Замер на 7-дневном broad `2026-07-23_2026-07-29-broad-r1` с тогдашними порогами эмбеддингов,

@@ -58,6 +58,10 @@
   отдельном dev, дал на неизменённом test precision 0.9167 и recall 0.6286. Это ниже
   production-floor precision 0.95; зависимости, Engine и prod не изменены. Следующий допустимый
   шаг — новый human holdout и только затем изолированный POC вместе с hard-conflict guards.
+- **Hybrid CrossEncoder + hard-guard POC.** Консервативный слой не может переопределять
+  deterministic rejects/conflicts и дал на test precision 0.9545, но recall только 0.6000
+  (цель ≥ 0.75); на всех 120 диагностических pair-labels — P 0.9600, R 0.6761. Новые группы
+  человеком не проверены, поэтому StoryRelease, зависимости и production-pointer не изменены.
 - **Ручной режим production.** Ночные jobs collection/finalize/Engine на VPS отключены;
   публикация и каждый запуск остаются ручными до согласования нового интервала. Аудит Plan v4
   на изолированном релизе задокументирован в `docs/QUALITY_GATES.md`: текущий retrieval не
