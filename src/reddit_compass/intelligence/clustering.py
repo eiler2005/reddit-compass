@@ -384,6 +384,10 @@ _LOW_SIGNAL_PATTERNS = [
     # соседством не ловили, и восемь выпусков одного треда слипались в один
     # сюжет — на 2026-08-01 это давало overmerge_ge8 = 1.
     r"\b(?:daily|weekly|monthly)\s+(?:[\w'-]+\s+){0,3}(?:questions?|thread|discussion)\b",
+    # Датированный выпуск регулярного треда: «Resume Advice Thread - July 28, 2026».
+    # Маркера daily/weekly в нём нет, но дата в заголовке выдаёт серию выпусков —
+    # восемь таких выпусков слиплись в один «сюжет» на релизе 2026-08-01.
+    r"\bthread\s*[-–—]\s*[A-Za-z]+\s+\d{1,2},\s*\d{4}\b",
     r"^moronic\s+monday\b",
     r"^who's\s+hiring\b",
     r"^who\s+is\s+hiring\b",

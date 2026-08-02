@@ -121,6 +121,11 @@ class TestGenericAndLowSignal:
         # соседством слов его не ловил — восемь выпусков треда слиплись в один сюжет.
         assert is_low_signal_title("Daily General Discussion and Advice Thread - July 30, 2026")
         assert is_low_signal_title("Weekly Career Advice Discussion")
+        # Датированный выпуск регулярного треда без маркера daily/weekly: восемь
+        # выпусков слиплись в один сюжет на релизе 2026-08-01.
+        assert is_low_signal_title("Resume Advice Thread - July 28, 2026")
+        assert is_low_signal_title("Hiring Thread — March 3, 2026")
+        assert is_low_signal_title("OpenAI escapes sandbox after July 28, 2026 review") is False
         assert is_low_signal_title("AI agents escape sandbox") is False
         assert is_low_signal_title("Daily active users hit a record at Reddit") is False
 
