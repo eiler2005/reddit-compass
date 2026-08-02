@@ -52,11 +52,34 @@ _PAIN_PATTERNS = re.compile(
     r"worst|frustrat|annoying|useless|scam|rip.?off|terrible|horrible)\b",
     re.IGNORECASE,
 )
-_AI_CAPABILITY_PATTERNS = re.compile(
-    r"\b(gpt-?[45]|claude|gemini|llama|mistral|benchmark|sota|state.of.the.art|"
-    r"outperform|surpass|beats?|achieves?|reasoning|coding|math)\b",
+# Названия моделей — самодостаточный признак: они не встречаются вне разговора об AI.
+_AI_CAPABILITY_NAMES = re.compile(
+    r"\b(gpt-?[45]|claude|gemini|llama|mistral)\b",
     re.IGNORECASE,
 )
+# А это обычные английские слова. Без привязки к AI они срабатывали на чём угодно:
+# «I defy you to figure out a way to beat him» из цитаты про Луку Дончича и
+# «Djokovic defeated Federer … beats» уходили в «возможности AI» и попадали в секцию
+# «AI / tooling pulse». Требуем, чтобы рядом стоял якорь AI.
+_AI_CAPABILITY_VERBS = re.compile(
+    r"\b(benchmark|sota|state.of.the.art|outperform|surpass|beats?|achieves?|"
+    r"reasoning|coding|math)\b",
+    re.IGNORECASE,
+)
+_AI_ANCHOR_PATTERNS = re.compile(
+    r"\b(ai|a\.i\.|llm|llms|model|models|agent|agents|neural|openai|anthropic|"
+    r"deepseek|huggingface|hugging face|transformer|inference|fine.?tun\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _matches_ai_capability(text: str) -> bool:
+    """Возможности AI: имя модели само по себе либо capability-глагол при якоре AI."""
+    if _AI_CAPABILITY_NAMES.search(text):
+        return True
+    return bool(_AI_CAPABILITY_VERBS.search(text) and _AI_ANCHOR_PATTERNS.search(text))
+
+
 _AI_RISK_PATTERNS = re.compile(
     r"\b(hallucin|bias|discriminat|deepfake|misinformation|jailbreak|"
     r"prompt injection|safety|alignment|existential|rogue|escape)",
@@ -181,7 +204,7 @@ def classify_signal_type(item: ContentItem) -> SignalType:
         return "open_source_ai"
     if _AI_RISK_PATTERNS.search(text):
         return "ai_risk"
-    if _AI_CAPABILITY_PATTERNS.search(text):
+    if _matches_ai_capability(text):
         return "ai_capability"
     if _AI_TOOLS_PATTERNS.search(text):
         return "ai_tools"

@@ -60,6 +60,37 @@ class TestClassifySignalType:
         item = _make_reddit_item(title="I hate this broken feature")
         assert classify_signal_type(item) == "pain_point"
 
+    def test_sports_quotes_are_not_ai_capability(self):
+        """Реальные посты из «AI / tooling pulse» на 2026-08-02.
+
+        Классификатор смешивал имена моделей с обычными словами (`beat`, `math`,
+        `reasoning`), поэтому цитата про Луку Дончича и теннисный результат уходили
+        в «возможности AI».
+        """
+        doncic = _make_reddit_item(
+            title="[Rick Carlisle] On Luka Doncic: he is a killer competitor",
+            excerpt="I defy you to figure out a way to beat him. He is smart as hell.",
+            subreddit="nba",
+        )
+        djokovic = _make_reddit_item(
+            title="19 years since Novak Djokovic defeated Roger Federer",
+            excerpt="Later in the press conference Federer beats around the bush.",
+            subreddit="tennis",
+        )
+
+        assert classify_signal_type(doncic) != "ai_capability"
+        assert classify_signal_type(djokovic) != "ai_capability"
+
+    def test_capability_verbs_still_fire_with_an_ai_anchor(self):
+        anchored = _make_reddit_item(
+            title="New open model surpasses SOTA on reasoning benchmarks",
+            subreddit="LocalLLaMA",
+        )
+        named = _make_reddit_item(title="Claude beats Gemini on the new benchmark")
+
+        assert classify_signal_type(anchored) == "ai_capability"
+        assert classify_signal_type(named) == "ai_capability"
+
     def test_ai_risk_pattern(self):
         item = _make_reddit_item(title="AI hallucination causes major problem")
         assert classify_signal_type(item) == "ai_risk"
