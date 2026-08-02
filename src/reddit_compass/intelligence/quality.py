@@ -124,6 +124,16 @@ QUALITY_FLOORS: dict[str, dict[str, Any]] = {
         "desc": "trends with single-token/bare-verb/generic name",
     },
     "trends_duplicate_name_count": {"op": "max", "value": 0, "desc": "duplicate trend names"},
+    # На слой Trends смотрели только две проверки имён, поэтому кластер размером
+    # в четверть корпуса проходил гейт незамеченным: на 2026-07-26_2026-08-01-broad-r2
+    # крупнейший «тренд» держал 2077 сюжетов из 8409 (24.7%) под именем
+    # «job agent actually work». Тренд — повторяющийся паттерн, а не корзина.
+    # Порог 10% при измеренных 2.6% на рабочем пороге кластеризации 0.75.
+    "trends_max_story_share": {
+        "op": "max",
+        "value": 10.0,
+        "desc": "largest trend share of stories, %",
+    },
     "pulse_other_share": {
         "op": "max",
         "value": 35.0,
@@ -216,10 +226,14 @@ def compute_quality(
     max_rubric = max((rub.get(rid, 0) for rid in rubric_ids), default=0)
     empty_rubrics = sum(1 for rid in rubric_ids if rub.get(rid, 0) == 0)
 
-    trends = q("SELECT name_ru FROM engine_trends WHERE trend_release_id = ?", trend_release_id)
+    trends = q(
+        "SELECT name_ru, story_count FROM engine_trends WHERE trend_release_id = ?",
+        trend_release_id,
+    )
     names = [r["name_ru"] for r in trends]
     bad_names = sum(1 for nm in names if is_bad_trend_name(nm))
     dup_names = sum(cnt - 1 for cnt in Counter(names).values() if cnt > 1)
+    max_trend_stories = max((int(r["story_count"] or 0) for r in trends), default=0)
 
     metrics: dict[str, Any] = {
         "data_release_id": data_release_id,
@@ -245,6 +259,7 @@ def compute_quality(
         "trends_count": len(names),
         "trends_bad_name_count": bad_names,
         "trends_duplicate_name_count": dup_names,
+        "trends_max_story_share": round(100 * max_trend_stories / total, 2) if total else 0.0,
     }
 
     if signal_release_id:

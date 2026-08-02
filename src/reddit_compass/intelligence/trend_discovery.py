@@ -472,6 +472,10 @@ def discover_trends(
     vectors_by_item: Mapping[str, Sequence[float]] | None = None,
     min_stories: int = 3,
     min_dates: int = 2,
+    # Порог — свойство пространства векторов, а не глобальная константа: у lexical-hash
+    # фолбэка и у model2vec разные распределения косинуса (см. DENSE_THRESHOLD_PROFILES).
+    # Здесь остаётся значение для фолбэка; для плотных векторов порог задаёт вызывающая
+    # сторона — см. ``_discover_trends_embedding_v2``.
     cluster_threshold: float = 0.55,
     max_cluster_ratio: float = 0.25,
     max_cluster_abs: int = 100,

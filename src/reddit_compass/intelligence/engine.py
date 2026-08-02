@@ -4317,6 +4317,15 @@ def _discover_trends_embedding_v2(
         model_revision=model_revision,
         item_ids=iter(frozen_items.keys()),
     )
+    # Жадная агломерация присоединяет сюжет к ПЕРВОМУ кластеру выше порога и усредняет
+    # центроид. При мягком пороге это даёт runaway: кластер растёт, центроид дрейфует к
+    # среднему по корпусу и притягивает ещё больше. Замер на 2026-07-26_2026-08-01-broad-r2
+    # (8409 сюжетов, potion-base-8M), доля крупнейшего кластера: 0.55 → 24.7%
+    # («job agent actually work», 2077 сюжетов), 0.65 → 7.3%, 0.75 → 2.6%, 0.82 → 0.5%.
+    #
+    # Порог применим только к тому пространству, в котором измерен: у lexical-hash
+    # фолбэка шкала косинуса другая, поэтому без плотных векторов остаётся его дефолт.
+    default_cluster_threshold = 0.75 if vectors_by_item else 0.55
     raw_trends = discover_trends(
         stories,
         story_items,
@@ -4324,7 +4333,7 @@ def _discover_trends_embedding_v2(
         vectors_by_item=vectors_by_item or None,
         min_stories=int(params.get("min_stories", 3)),
         min_dates=int(params.get("min_dates", 2)),
-        cluster_threshold=float(params.get("trend_cluster_threshold", 0.55)),
+        cluster_threshold=float(params.get("trend_cluster_threshold", default_cluster_threshold)),
     )
     adapted: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
     for trend in raw_trends:
