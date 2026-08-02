@@ -53,6 +53,11 @@
   Golden Set подтвердил качественные named-entity spans, но не улучшил decision signal:
   phrase-aware anchor coverage same-story 74.65% против 90.14% у текущих facets, precision
   80.30% против 81.01%. Зависимость не добавлена, Engine и production не изменены.
+- **CrossEncoder pair-adjudication POC.** Готовый `ms-marco-MiniLM-L6-v2` заметно улучшил
+  ранжирование 120 frozen Golden pairs (AUC 0.9138 против 0.7617), но при пороге, выбранном на
+  отдельном dev, дал на неизменённом test precision 0.9167 и recall 0.6286. Это ниже
+  production-floor precision 0.95; зависимости, Engine и prod не изменены. Следующий допустимый
+  шаг — новый human holdout и только затем изолированный POC вместе с hard-conflict guards.
 - **Ручной режим production.** Ночные jobs collection/finalize/Engine на VPS отключены;
   публикация и каждый запуск остаются ручными до согласования нового интервала. Аудит Plan v4
   на изолированном релизе задокументирован в `docs/QUALITY_GATES.md`: текущий retrieval не

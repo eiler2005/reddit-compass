@@ -213,6 +213,33 @@ event-frame признаков с тем же frozen input и этим Golden Se
 структурной cross-document event-coreference/adjudication модели или внешнего event graph, а не
 для ещё одного NER-слоя.
 
+### CrossEncoder pair-adjudication POC — promising signal, no integration (2026-08-02)
+
+Отдельно проверен лёгкий готовый ранжировщик
+`cross-encoder/ms-marco-MiniLM-L6-v2`. Это не event-coreference модель, а MS MARCO
+passage-ranker, поэтому он получал заголовок и до 1 600 символов frozen excerpt в обоих
+направлениях пары, а два sigmoid-нормализованных score усреднялись. Как и GLiNER, это был
+read-only запуск во временном окружении: нет обучения на собранном контенте, записи в Engine DB,
+изменения lockfile, нового StoryRelease, deploy или публикации. Артефакт:
+`scratchpad/golden/cross-encoder-story-poc.md`.
+
+Чтобы не подобрать порог по результату, 120 пар (71 `same_story`, 49 `different_story`) заранее
+стратифицированы стабильным SHA-256 pair-id на две половины. На `dev` выбран максимальный recall
+при precision ≥ 0.95; на `test` этот порог не менялся. Ранжирование заметно лучше текущего score:
+ROC-AUC **0.9138** против **0.7617**, average precision **0.9396** против **0.8665**. Но главный
+результат — не AUC, а неизменённый test: CrossEncoder дал precision **0.9167** и recall **0.6286**
+(22 TP, 2 FP). Он улучшает recall относительно текущего fixed Engine policy (**0.4857**) и немного
+его precision (**0.8947**), но не проходит production-floor precision ≥ 0.95. Два верхних FP —
+разные тарифные решения Трампа и разные визиты Си/Нетаньяху — наглядно подтверждают, что general
+relevance не тождественна identity одного события.
+
+Решение: **не интегрировать и не деплоить**. SemHash остаётся возможным ускорителем candidate
+generation/near-dedupe, но не решением decision layer: в текущем Golden уже есть candidate у
+70 из 71 same-story пар. GLiNER отклонён как NER-signal, CrossEncoder — единственный перспективный
+сигнал для будущего изолированного POC, но только вместе с существующими hard-conflict guards и
+сначала на новом, не использованном для выбора подхода human holdout (пары и группы). Лишь после
+этого допустим свежий scratch StoryRelease и полный pair/group gate.
+
 ## Исторический статус: 8 полов из 11 (2026-07-31)
 
 Замер на 7-дневном broad `2026-07-23_2026-07-29-broad-r1` с тогдашними порогами эмбеддингов,
