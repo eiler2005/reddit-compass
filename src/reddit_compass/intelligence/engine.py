@@ -5679,7 +5679,13 @@ def auto_label_story_pairs(
 # обученная только на нём, воспроизводит своего учителя, а precision/recall, посчитанные
 # против него, измеряют согласие правил с самими собой. Поэтому ведущий источник всегда
 # виден в метриках: см. ``labels_are_circular``.
-LABEL_SOURCES: tuple[str, ...] = ("human", "claude_review", "qwen_review", "auto_label")
+LABEL_SOURCES: tuple[str, ...] = (
+    "human",
+    "claude_review",
+    "qwen_review",
+    "assistant_review",
+    "auto_label",
+)
 _MACHINE_LABEL_NOTES = frozenset(LABEL_SOURCES[1:])
 
 
@@ -5799,8 +5805,8 @@ def train_story_merge_model(
 ) -> dict[str, Any]:
     """Обучает логистическую модель слияния на размеченных парах (Фаза 3).
 
-    Приоритет источников меток: ``human > claude_review > qwen_review > auto_label``
-    (см. :data:`LABEL_SOURCES`).
+    Приоритет источников меток: ``human > claude_review > qwen_review > assistant_review >
+    auto_label`` (см. :data:`LABEL_SOURCES`).
 
     Из обучения исключаются авто-метки на парах, которые лестница правил уже решила
     детерминированно: такая метка — пересказ правила, и модель, обученная на них,
@@ -6632,7 +6638,8 @@ def import_golden_labels(
 ) -> dict[str, int]:
     """Импортировать размеченные пары и группы.
 
-    ``source`` помечает происхождение всей партии (``claude_review``, ``qwen_review``);
+    ``source`` помечает происхождение всей партии (``claude_review``, ``qwen_review``,
+    ``assistant_review``);
     пустая строка означает человеческую разметку. Источник определяет приоритет метки
     при конфликтах — см. :data:`LABEL_SOURCES`.
     """

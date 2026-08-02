@@ -2103,10 +2103,11 @@ def build_parser() -> argparse.ArgumentParser:
     engine_golden_import.add_argument(
         "--note",
         default="",
-        choices=["", "claude_review", "qwen_review", "auto_label"],
+        choices=["", "claude_review", "qwen_review", "assistant_review", "auto_label"],
         help=(
             "Label source for the whole batch; empty means human review. "
-            "Priority when sources disagree: human > claude_review > qwen_review > auto_label."
+            "Priority when sources disagree: human > claude_review > qwen_review > "
+            "assistant_review > auto_label."
         ),
     )
     engine_golden_import.add_argument(

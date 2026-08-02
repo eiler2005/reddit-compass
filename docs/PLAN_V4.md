@@ -375,7 +375,7 @@ label-гейт — цель, достижимая после Фазы 3. Мол�
 **Файл:** `engine.py:5157-5170` `train_story_merge_model`.
 
 Сейчас порядок `auto → qwen → human`. Ввести четыре уровня:
-`human > claude_review > qwen_review > auto_label`. Зафиксировать `label_source`
+`human > claude_review > qwen_review > assistant_review > auto_label`. Зафиксировать `label_source`
 в метриках релиза. Импорт: `engine golden import --input labels.jsonl --note claude_review`.
 
 **Готово:** модель, обученная при наличии claude-меток, имеет `label_source = "claude_review"`;
@@ -592,7 +592,7 @@ A/B на прод-модели и полном 7-дневном broad (4 957 ite
 ### Фаза 3.3 сделана: приоритет источников меток
 
 `resolve_pair_labels` — единая точка разрешения конфликтов, приоритет
-`human > claude_review > qwen_review > auto_label` (:data:`LABEL_SOURCES`).
+`human > claude_review > qwen_review > assistant_review > auto_label` (:data:`LABEL_SOURCES`).
 Источник читается как префикс `note` до двоеточия, поэтому обоснование метки
 (`"claude_review: один и тот же отчёт"`) не теряется.
 `import_golden_labels(..., source="claude_review")` помечает всю партию.

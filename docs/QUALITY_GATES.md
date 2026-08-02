@@ -54,7 +54,7 @@ v3 (122 multi/1k, 45 cross/1k) с запасом ~25% вниз. Схлопнут
 120 пар, 30 групп. Этот гейт **не используется** для продакшн-публикации: прод публикуется
 по полам качества (`_release_passes_publication_gate` → `compute_quality` + `evaluate_floors`).
 Label-гейт требует нециркулярных меток (хотя бы один независимый источник: human /
-claude_review / qwen_review), которых пока недостаточно. Он станет действующим после
+claude_review / qwen_review / assistant_review), которых пока недостаточно. Он станет действующим после
 Фазы 3 (трёхуровневая разметка).
 
 ## Регрессионные метрики и допуски
@@ -118,7 +118,7 @@ scratch-каталоге, не импортируется через `engine gol
 не независимый human ground truth: не изменяет показанные выше release-метрики и не может
 разблокировать production publication.
 
-### Candidate v1: bounded components — отклонён human Golden Set
+### Candidate v1: bounded components — отклонён смешанным аудитом
 
 Для следующей итерации добавлен **выключенный по умолчанию** параметр
 `bounded_component_enabled`. Он переводит только review-пары с минимальными lexical/entity/time
@@ -134,11 +134,14 @@ overmerge ≥5 / ≥8 **0 / 0**. Это ещё не production-ready: макси
 Для честной проверки экспортирован human Golden Set: 120 пар — 60 `auto_merge`, 48 `review`,
 12 `reject` — и 30 четырёхэлементных групп. Такой состав измеряет precision новой ветки,
 recall неслитых пар и реальный overmerge групп; прежняя выборка могла почти не содержать
-`auto_merge`. Human-разметка завершена: 75 `same_story`, 45 `different_story`; 18 групп
-`valid_group`, 12 — `overmerge`. На том же `StoryRelease` `stories eval` дал precision
-**0.70** (цель ≥ **0.95**), recall **0.56** (цель ≥ **0.75**), cross-source recall **0.6296**
-и overmerge rate **0.40**. `publication_gate=false`: Candidate v1 не включается, не
-деплоится и не публикуется; production-pointer и отключённое расписание остаются без изменений.
+`auto_merge`. Смешанная разметка завершена: автор вручную разметил 119 пар и 10 групп,
+а ассистент по запросу автора завершил пару 010 и группы 011–030. Всего: 75 `same_story`,
+45 `different_story`; 18 групп `valid_group`, 12 — `overmerge`. Это полезный независимый
+от правил аудит, но не полностью human Golden Set. На том же `StoryRelease` `stories eval`
+дал precision **0.70** (цель ≥ **0.95**), recall **0.56** (цель ≥ **0.75**), cross-source
+recall **0.6296** и overmerge rate **0.40**. `publication_gate=false`: Candidate v1 не
+включается, не деплоится и не публикуется; production-pointer и отключённое расписание
+остаются без изменений.
 
 Для группы ревьюер выбирает `valid_group`, когда все показанные материалы относятся к одному
 сюжету; `overmerge`, если хотя бы один относится к другому; `undermerge`, только если видно,

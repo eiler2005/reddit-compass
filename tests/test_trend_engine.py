@@ -1401,8 +1401,8 @@ def test_manual_labels_are_version_scoped(tmp_path: Path) -> None:
 def test_label_sources_resolve_by_trust(tmp_path: Path) -> None:
     """Метка более доверенного источника перекрывает менее доверенную для той же пары.
 
-    Порядок: human > claude_review > qwen_review > auto_label. Источник читается как
-    префикс ``note`` до двоеточия, поэтому обоснование метки не теряется.
+    Порядок: human > claude_review > qwen_review > assistant_review > auto_label.
+    Источник читается как префикс ``note`` до двоеточия, поэтому обоснование метки не теряется.
     """
     engine = engine_db(tmp_path / "trend_engine.db")
 
@@ -1426,6 +1426,7 @@ def test_label_sources_resolve_by_trust(tmp_path: Path) -> None:
     add("c|d", "different_story", "auto_label")
     add("e|f", "different_story", "qwen_review")
     add("g|h", "same_story", "auto_label")
+    add("g|h", "different_story", "assistant_review: другой сюжет")
 
     resolved = resolve_pair_labels(engine, "stories_v1")
     labels, composition, leading = resolved.labels, resolved.composition, resolved.leading
@@ -1433,12 +1434,13 @@ def test_label_sources_resolve_by_trust(tmp_path: Path) -> None:
     assert labels["a|b"] == "same_story", "человеческая метка обязана победить"
     assert labels["c|d"] == "same_story", "claude_review сильнее auto_label"
     assert labels["e|f"] == "different_story"
-    assert labels["g|h"] == "same_story"
+    assert labels["g|h"] == "different_story", "assistant_review сильнее auto_label"
     assert leading == "human"
     assert composition == {
         "human": 1,
         "claude_review": 2,
         "qwen_review": 2,
+        "assistant_review": 1,
         "auto_label": 3,
     }
 

@@ -436,7 +436,7 @@ least half the batch inside the 0.45–0.65 window and reserves a quota for `voi
 pairs — the cross-source cases the product exists for and the rarest in a random draw.
 
 Import a labelled batch with its source. Priority when sources disagree is
-`human > claude_review > qwen_review > auto_label`; the source is the prefix of `note`, so a
+`human > claude_review > qwen_review > assistant_review > auto_label`; the source is the prefix of `note`, so a
 rationale survives alongside it:
 
 ```bash
