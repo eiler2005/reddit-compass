@@ -76,6 +76,7 @@ LabelValue = Literal[
     "different_story",
     "overmerge",
     "undermerge",
+    "valid_group",
     "low_signal",
     "useful_trend",
     "useless_trend",
@@ -6421,6 +6422,7 @@ def export_golden_candidates(
     by_decision_domain: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
         lambda: defaultdict(list)
     )
+    experimental_auto_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
     review_records: list[dict[str, Any]] = []
     for row in rows:
         item_id_a = str(row["item_id_a"])
@@ -6486,6 +6488,8 @@ def export_golden_candidates(
             "title_b": item_b.title,
             "provider_a": item_a.provider,
             "provider_b": item_b.provider,
+            "url_a": item_a.target_url or item_a.canonical_url or item_a.discussion_url,
+            "url_b": item_b.target_url or item_b.canonical_url or item_b.discussion_url,
             "domains": domains,
             "score": float(row["score"]),
             "engine_decision": decision,
@@ -6495,6 +6499,8 @@ def export_golden_candidates(
         }
         by_domain[primary_domain].append(record)
         by_decision_domain[decision][primary_domain].append(record)
+        if decision == "auto_merge" and bool(features.get("bounded_component_candidate")):
+            experimental_auto_by_domain[primary_domain].append(record)
 
     if output_format == "review":
         sample_size = pair_limit if sample is None else sample
@@ -6521,7 +6527,24 @@ def export_golden_candidates(
     pairs: list[dict[str, Any]] = []
     selected_pair_ids: set[str] = set()
     for decision, limit in decision_limits:
-        selected = _round_robin_strata(by_decision_domain.get(decision, {}), limit)
+        if decision == "auto_merge":
+            # An opt-in bounded-component attempt needs its own precision sample.
+            # Otherwise exact URL duplicates absorb the auto-merge quota and make a
+            # Golden Set look green without exercising the changed branch.
+            selected = _round_robin_strata(experimental_auto_by_domain, limit)
+            if len(selected) < limit:
+                experimental_ids = {str(record["pair_id"]) for record in selected}
+                fallback_auto_by_domain = {
+                    domain: [
+                        record
+                        for record in records
+                        if str(record["pair_id"]) not in experimental_ids
+                    ]
+                    for domain, records in by_decision_domain.get(decision, {}).items()
+                }
+                selected.extend(_round_robin_strata(fallback_auto_by_domain, limit - len(selected)))
+        else:
+            selected = _round_robin_strata(by_decision_domain.get(decision, {}), limit)
         pairs.extend(selected)
         selected_pair_ids.update(str(pair["pair_id"]) for pair in selected)
     if len(pairs) < pair_limit:
@@ -6585,7 +6608,7 @@ def export_golden_candidates(
         "data_release_id": facet_release.data_release_id,
         "instructions": {
             "pair_labels": ["same_story", "different_story", "low_signal"],
-            "group_labels": ["overmerge", "undermerge", "low_signal"],
+            "group_labels": ["valid_group", "overmerge", "undermerge", "low_signal"],
             "blank_label": "not reviewed",
         },
         "pairs": pairs,
@@ -6619,7 +6642,7 @@ def import_golden_labels(
     if get_story_release(conn, story_release_id) is None:
         raise ValueError(f"Story release not found: {story_release_id}")
     pair_labels = {"same_story", "different_story", "low_signal"}
-    group_labels = {"overmerge", "undermerge", "low_signal"}
+    group_labels = {"valid_group", "overmerge", "undermerge", "low_signal"}
     imported_pairs = 0
     imported_groups = 0
     for pair in payload.get("pairs", []):

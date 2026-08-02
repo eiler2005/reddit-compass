@@ -401,7 +401,8 @@ reddit-compass engine golden export \
 Fill `label` fields:
 
 - pair: `same_story`, `different_story`, `low_signal`;
-- group: `overmerge`, `undermerge`, `low_signal`.
+- group: `valid_group` (все материалы об одном сюжете), `overmerge`, `undermerge`,
+  `low_signal`.
 
 Then import and evaluate:
 

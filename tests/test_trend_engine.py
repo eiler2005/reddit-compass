@@ -838,6 +838,29 @@ def test_golden_set_export_and_import_are_release_scoped(tmp_path: Path) -> None
     assert metrics["publication_gate"] is False
 
 
+def test_golden_import_accepts_valid_group_label(tmp_path: Path) -> None:
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    data_release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+    facets = create_facet_release(engine, data_release_id=data_release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    golden = export_golden_candidates(engine, stories.story_release_id, group_limit=1)
+    golden["groups"][0]["label"] = "valid_group"
+
+    imported = import_golden_labels(engine, golden)
+    metrics = evaluate_story_release(engine, stories.story_release_id)
+
+    assert imported["group_labels"] == 1
+    assert metrics["labeled_groups"] == 1
+    assert metrics["overmerge_rate"] == 0.0
+
+
 # --- `engine golden export --format review` (Фаза 3.1) --------------------------------
 #
 # The matching heuristics can't be steered precisely enough to produce a hand-checkable
@@ -1025,6 +1048,49 @@ def test_golden_set_export_reserves_pairs_for_each_engine_decision(tmp_path: Pat
     decisions = {pair["engine_decision"] for pair in golden["pairs"]}
     assert len(golden["pairs"]) == 20
     assert {"auto_merge", "review", "reject"} <= decisions
+
+
+def test_golden_set_export_prioritizes_opt_in_auto_merge_branch(tmp_path: Path) -> None:
+    engine, story_release_id = _seed_review_sample_release(tmp_path)
+    candidates = engine.execute(
+        """
+        SELECT item_id_a, item_id_b
+        FROM story_candidate_pairs
+        WHERE story_release_id = ? AND decision = 'review'
+        ORDER BY score DESC, item_id_a, item_id_b
+        LIMIT 12
+        """,
+        (story_release_id,),
+    ).fetchall()
+    engine.executemany(
+        """
+        UPDATE story_candidate_pairs
+        SET decision = 'auto_merge',
+            features_json = ?
+        WHERE story_release_id = ? AND item_id_a = ? AND item_id_b = ?
+        """,
+        [
+            (
+                json.dumps({"bounded_component_candidate": True}),
+                story_release_id,
+                row["item_id_a"],
+                row["item_id_b"],
+            )
+            for row in candidates
+        ],
+    )
+    engine.commit()
+
+    golden = export_golden_candidates(
+        engine,
+        story_release_id,
+        pair_limit=20,
+        group_limit=0,
+    )
+
+    automatic = [pair for pair in golden["pairs"] if pair["engine_decision"] == "auto_merge"]
+    assert len(automatic) == 10
+    assert all(pair["features"]["bounded_component_candidate"] is True for pair in automatic)
 
 
 def test_golden_review_export_favors_the_decision_boundary_window(tmp_path: Path) -> None:
