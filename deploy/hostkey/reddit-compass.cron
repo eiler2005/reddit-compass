@@ -20,7 +20,10 @@
 # 45 14 */2 * * cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1
 
 # Frozen Engine workflow.  A partial run may be inspected, but cannot publish broad.
-# 0 16 */2 * * cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --review-limit 80 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1
+# --cross-encoder разбирает серую зону Stories (~6000 пар за минуту на CPU). Без него
+# три пола полноты не берутся: 51.9 multi/1k при поле 65. --review-limit снижен с 80 до 20:
+# построчное LLM-ревью больше не несёт основную нагрузку, оно лишь копит метки.
+# 0 16 */2 * * cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --cross-encoder --review-limit 20 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1
 
 # Диск 38GB, и каждая пересборка образа оставляет предыдущий висячим плюс
 # несколько гигабайт кэша сборки: двух деплоёв хватает, чтобы упереться в 100%
