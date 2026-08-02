@@ -143,3 +143,81 @@ def test_trend_names_use_the_source_language() -> None:
 
     assert name == "layoffs in the labour market"
     assert not any("а" <= char <= "я" for char in name.lower())
+
+
+def test_schema_v2_adapter_satisfies_the_release_contract() -> None:
+    """Адаптер обязан отдавать все поля, которые пишет ``create_trend_release``."""
+    from reddit_compass.intelligence.engine import _discover_trends_schema_v2
+
+    stories = [
+        {
+            **_story("s1", "Amazon lays off 14000 managers", "2026-07-28", "labor_career"),
+            "source_count": 2,
+        },
+        {
+            **_story("s2", "Salesforce cuts 4000 jobs", "2026-07-29", "labor_career"),
+            "source_count": 1,
+        },
+        {
+            **_story("s3", "Intel announces fresh layoffs", "2026-07-30", "labor_career"),
+            "source_count": 3,
+        },
+    ]
+
+    adapted = _discover_trends_schema_v2(stories, params={})
+
+    assert len(adapted) == 1
+    trend, memberships = adapted[0]
+    required = {
+        "trend_id",
+        "name_ru",
+        "pattern",
+        "domain_ids",
+        "confidence",
+        "lifecycle",
+        "source_scope",
+        "first_seen",
+        "last_seen",
+        "story_count",
+        "source_count",
+        "project_scores",
+        "evidence_story_ids",
+        "counterpoints",
+        "review_status",
+        "review_id",
+    }
+    assert required <= set(trend)
+    assert trend["story_count"] == 3
+    assert trend["source_count"] == len(trend["distinct_actors"])
+    assert len(memberships) == 3
+    assert all(len(entry) == 3 for entry in memberships)
+
+
+def test_schema_v2_trend_id_is_stable_across_runs() -> None:
+    """Одинаковый вход обязан давать тот же trend_id — релизы воспроизводимы."""
+    from reddit_compass.intelligence.engine import _discover_trends_schema_v2
+
+    stories = [
+        _story("s1", "Amazon lays off 14000 managers", "2026-07-28", "labor_career"),
+        _story("s2", "Salesforce cuts 4000 jobs", "2026-07-29", "labor_career"),
+        _story("s3", "Intel announces fresh layoffs", "2026-07-30", "labor_career"),
+    ]
+
+    first = _discover_trends_schema_v2(stories, params={})[0][0]["trend_id"]
+    second = _discover_trends_schema_v2(list(reversed(stories)), params={})[0][0]["trend_id"]
+
+    assert first == second
+
+
+def test_min_distinct_actors_is_configurable() -> None:
+    """Порог различных акторов — параметр релиза, а не константа."""
+    from reddit_compass.intelligence.engine import _discover_trends_schema_v2
+
+    stories = [
+        _story("s1", "OpenAI launches a new model", "2026-07-28"),
+        _story("s2", "OpenAI releases another model", "2026-07-29"),
+        _story("s3", "OpenAI unveils a new tool", "2026-07-30"),
+    ]
+
+    assert _discover_trends_schema_v2(stories, params={}) == []
+    assert len(_discover_trends_schema_v2(stories, params={"trend_min_distinct_actors": 1})) == 1

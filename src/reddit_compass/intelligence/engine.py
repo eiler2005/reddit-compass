@@ -4315,6 +4315,74 @@ def _story_release_metrics(
     }
 
 
+def _discover_trends_schema_v2(
+    stories: list[dict[str, Any]],
+    *,
+    params: dict[str, Any],
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Адаптер слоя Trends v2 (event schema induction) к контракту create_trend_release.
+
+    В отличие от ``embedding_v2`` группирует не по векторной близости, а по схеме события
+    ``(действие, домен)`` и требует ≥2 различных акторов. Подробности и замеры —
+    ``intelligence/trend_schema.py`` и ``docs/ENGINE_GENERATIONS.md``.
+    """
+    from .trend_schema import discover_schema_trends
+
+    by_id = {str(story["story_id"]): story for story in stories}
+    raw_trends = discover_schema_trends(
+        stories,
+        min_stories=int(params.get("min_stories", 3)),
+        min_dates=int(params.get("min_dates", 2)),
+        min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
+    )
+    adapted: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
+    for trend in raw_trends:
+        story_ids = [str(story_id) for story_id in trend["story_ids"]]
+        members = [by_id[story_id] for story_id in story_ids if story_id in by_id]
+        providers = {
+            str(story.get("source_count") or 0) for story in members
+        }  # source_count уже посчитан на слое Stories
+        domains = sorted(
+            {
+                domain
+                for story in members
+                for domain in _json_list(story.get("domain_ids"), [])
+                if domain != "other"
+            }
+        ) or ["other"]
+        # Уверенность растёт от числа различных акторов: именно повторение у разных
+        # участников делает паттерн трендом, а не объём публикаций.
+        actors = len(trend["distinct_actors"])
+        confidence = round(
+            min(1.0, 0.4 * min(1.0, len(members) / 10) + 0.6 * min(1.0, actors / 5)), 4
+        )
+        adapted.append(
+            (
+                {
+                    "trend_id": _stable_id("trend", str(trend["schema_key"]), *sorted(story_ids)),
+                    "name_ru": str(trend["name_ru"]),
+                    "pattern": str(trend["pattern"]),
+                    "domain_ids": domains,
+                    "confidence": confidence,
+                    "lifecycle": "stable",
+                    "source_scope": "cross_source" if len(providers) > 1 else "single_source",
+                    "first_seen": str(trend["first_seen"]),
+                    "last_seen": str(trend["last_seen"]),
+                    "story_count": len(story_ids),
+                    "source_count": actors,
+                    "project_scores": {},
+                    "evidence_story_ids": story_ids[:8],
+                    "counterpoints": [],
+                    "review_status": "pending",
+                    "review_id": "",
+                    "distinct_actors": trend["distinct_actors"],
+                },
+                [(story_id, confidence, "event schema") for story_id in story_ids],
+            )
+        )
+    return adapted
+
+
 def _discover_trends_embedding_v2(
     conn: sqlite3.Connection,
     stories: list[dict[str, Any]],
@@ -4410,7 +4478,9 @@ def create_trend_release(
     frozen_items = {
         item.item_id: item for item in load_frozen_items(conn, facet_release.data_release_id)
     }
-    if method == "embedding_v2":
+    if method == "schema_v2":
+        trends = _discover_trends_schema_v2(stories, params=params)
+    elif method == "embedding_v2":
         trends = _discover_trends_embedding_v2(
             conn,
             stories,

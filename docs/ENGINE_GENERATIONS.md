@@ -89,7 +89,7 @@ provenance-слияния сохраняются. Скор симметричн�
 Имена остались тематическими: `job work career interview`, `money credit house mortgage`.
 Это **ограничение мусора, а не решение задачи**.
 
-### Поколение 3 — event schema induction (`trend_schema.py`, не включено)
+### Поколение 3 — event schema induction (`schema_v2`)
 
 Тренд = одна схема `(действие, домен)`, встреченная в ≥3 сюжетах, на ≥2 датах, **с ≥2
 различными акторами**. Последнее условие отличает тренд от сюжетной линии одного актора и
@@ -123,6 +123,32 @@ have launched» атаку), `strikes` (удары по Ирану). Тот же
 
 Низкое покрытие — свойство, а не дефект: большинство сюжетов не входят ни в какой
 повторяющийся паттерн, и прежние поколения загоняли их в тренды искусственно.
+
+### Как выбрать поколение и откатиться
+
+Выбор идёт штатным механизмом движка — параметром `trend_method`, а не отдельным
+переключателем. Каждый `TrendRelease` записывает свой метод в `trend_releases.method`,
+релизы immutable, поэтому откат — это публикация прежнего релиза, а не правка кода.
+
+```bash
+# v2 (схемы) в ночном цикле
+reddit-compass engine cycle --profile broad --trend-method schema_v2 --publish-channel shadow
+
+# v1 (векторная агломерация) — дефолт, ничего указывать не нужно
+reddit-compass engine cycle --profile broad
+
+# сравнить два метода на одном StoryRelease
+reddit-compass engine trends propose --story-release stories_… --method schema_v2
+reddit-compass engine trends propose --story-release stories_… --method embedding_v2
+
+# откат публикации на прежний релиз
+reddit-compass engine rollback --channel broad --to PUBLICATION_ID
+```
+
+Дефолт остаётся `embedding_v2`: v2 не включается сама по себе, пока владелец не решит.
+
+Параметры v2: `min_stories` (3), `min_dates` (2), `trend_min_distinct_actors` (2).
+Последний — то самое условие, отличающее тренд от сюжетной линии одного актора.
 
 **Что не сделано:** акторы конкретные, а не типизированные. Контракт «across different
 companies» полностью заработает, когда актор абстрагируется до типа (tech-компания,

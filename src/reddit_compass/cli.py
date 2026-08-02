@@ -2305,7 +2305,7 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose.add_argument(
         "--method",
         default=DEFAULT_TREND_METHOD,
-        choices=["story_graph_v1", "embedding_v2"],
+        choices=["story_graph_v1", "embedding_v2", "schema_v2"],
         help="Trend discovery method; embedding_v2 clusters story vectors + c-TF-IDF names.",
     )
     engine_trends_propose.add_argument("--top-k", type=int, default=12)
@@ -2409,7 +2409,9 @@ def build_parser() -> argparse.ArgumentParser:
     engine_cycle.add_argument("--profile", default="broad")
     engine_cycle.add_argument("--window", type=int, default=7)
     engine_cycle.add_argument(
-        "--trend-method", default="embedding_v2", choices=["story_graph_v1", "embedding_v2"]
+        "--trend-method",
+        default="embedding_v2",
+        choices=["story_graph_v1", "embedding_v2", "schema_v2"],
     )
     engine_cycle.add_argument(
         "--embed-model",
