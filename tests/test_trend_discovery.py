@@ -133,6 +133,41 @@ def test_ctfidf_name_prefers_distinctive_terms() -> None:
     assert len(name.split()) >= 1
 
 
+def test_ctfidf_name_never_repeats_a_token() -> None:
+    """Униграммы и биграммы соревнуются в одном топе и раньше склеивались.
+
+    На релизе 2026-08-01 это дало два тренда с именем «york time york time athletic
+    york» и, как следствие, ``trends_duplicate_name_count = 1``.
+    """
+    cluster = [
+        "OpenAI hit by copyright lawsuit - The New York Times",
+        "OpenAI sued over training data - The Athletic",
+        "New York Times sues OpenAI again over training data",
+    ]
+    corpus = [["apple", "ships", "chip"], ["tesla", "recalls", "cars"]]
+
+    tokens = _ctfidf_name(cluster, corpus).split()
+
+    assert tokens, "имя не должно быть пустым"
+    assert len(tokens) == len(set(tokens)), f"повторяющийся токен в имени: {tokens}"
+
+
+def test_ctfidf_name_drops_publisher_names() -> None:
+    """Название издания — подпись источника, а не паттерн тренда."""
+    cluster = [
+        "Regulator opens probe - The New York Times",
+        "Regulator probe widens - The Athletic",
+        "New York Times reports regulator probe expands",
+    ]
+    corpus = [["apple", "ships", "chip"], ["tesla", "recalls", "cars"]]
+
+    name = _ctfidf_name(cluster, corpus)
+
+    assert "york" not in name
+    assert "athletic" not in name
+    assert "probe" in name
+
+
 def test_domains_survive_raw_sqlite_rows() -> None:
     """Истории приходят сырыми строками БД, где ``domain_ids`` — JSON-текст.
 

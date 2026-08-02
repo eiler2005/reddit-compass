@@ -188,8 +188,25 @@ def top_k_cosine_pairs(
     top_k: int = 12,
     min_similarity: float = 0.68,
     chunk_size: int = 256,
+    score_floor: float | None = None,
 ) -> dict[tuple[str, str], float]:
-    """Return only deterministic top-K cosine pairs, using chunked NumPy when available."""
+    """Return deterministic top-K cosine pairs, using chunked NumPy when available.
+
+    ``score_floor`` добавляет к рангу второй, независимый критерий отбора: пара
+    попадает в выдачу, если она в top-K хотя бы для одного из items **или** её
+    сходство не ниже порога. Инвариант — *пара, которую скоринг признал бы
+    auto-merge, не может быть отброшена по рангу*.
+
+    Зачем: у откалиброванных статических моделей ``min_similarity`` равен 0.0
+    (см. ``DENSE_THRESHOLD_PROFILES``), поэтому единственным фильтром остаётся ранг —
+    ровно K соседей на item независимо от score. Замер на 7-дневном broad
+    (4957 items, ``potion-base-8M``): пар с косинусом ≥ 0.59 (собственный
+    ``dense_auto_threshold`` модели) — 49 772, из них при ``top_k=12`` retrieval
+    доставал 13 686, то есть 27.5%. У 21.6% items больше 12 соседей выше этого порога,
+    и пара с косинусом 0.95, оказавшаяся 13-й для обоих items, отбрасывалась молча.
+
+    ``None`` полностью сохраняет прежнее поведение.
+    """
     if len(vectors) < 2:
         return {}
     item_ids = sorted(vectors)
@@ -205,6 +222,7 @@ def top_k_cosine_pairs(
             item_ids=item_ids,
             top_k=top_k,
             min_similarity=min_similarity,
+            score_floor=score_floor,
         )
 
     matrix: Any = numpy.asarray([vectors[item_id] for item_id in item_ids], dtype="float32")
@@ -225,7 +243,14 @@ def top_k_cosine_pairs(
                 (int(index) for index in candidate_indexes if int(index) != source_index),
                 key=lambda index: (-float(row[index]), item_ids[index]),
             )[:top_k]
-            for target_index in ranked:
+            selected = list(ranked)
+            if score_floor is not None:
+                selected.extend(
+                    int(index)
+                    for index in numpy.nonzero(row >= score_floor)[0]
+                    if int(index) != source_index
+                )
+            for target_index in selected:
                 similarity = float(row[target_index])
                 if similarity < min_similarity:
                     continue
@@ -240,6 +265,7 @@ def _python_top_k_pairs(
     item_ids: list[str],
     top_k: int,
     min_similarity: float,
+    score_floor: float | None = None,
 ) -> dict[tuple[str, str], float]:
     normalized = {item_id: _normalize(vectors[item_id]) for item_id in item_ids}
     result: dict[tuple[str, str], float] = {}
@@ -254,10 +280,11 @@ def _python_top_k_pairs(
             )
             if similarity >= min_similarity:
                 ranked.append((similarity, target_id))
-        for similarity, target_id in sorted(
-            ranked,
-            key=lambda item: (-item[0], item[1]),
-        )[:top_k]:
+        ordered = sorted(ranked, key=lambda item: (-item[0], item[1]))
+        selected = ordered[:top_k]
+        if score_floor is not None:
+            selected = selected + [pair for pair in ordered[top_k:] if pair[0] >= score_floor]
+        for similarity, target_id in selected:
             key = _pair_key(source_id, target_id)
             result[key] = max(result.get(key, -1.0), round(similarity, 6))
     return dict(sorted(result.items()))

@@ -90,14 +90,14 @@ def test_partial_collection_updates_one_source_without_erasing_other_health(
 def test_finalize_snapshot_collection_creates_one_complete_raw_run(tmp_path: Path) -> None:
     date = "2026-07-30"
     snapshot_dir = tmp_path / "snapshots" / date
-    write_posts_jsonl([_legacy_card("reddit-post", date)], snapshot_dir / "posts.jsonl")
-    write_posts_jsonl([_legacy_card("rss-post", date)], snapshot_dir / "rss.jsonl")
+    for filename in ("posts.jsonl", "hackernews.jsonl", "rss.jsonl", "ladder.jsonl"):
+        write_posts_jsonl([_legacy_card(f"{filename}-post", date)], snapshot_dir / filename)
+    write_posts_jsonl([_legacy_card("ph-post", date)], snapshot_dir / "producthunt.jsonl")
 
     result = finalize_snapshot_collection(
         config=MonitorConfig(),
         snapshots_dir=tmp_path / "snapshots",
         db_path=tmp_path / "compass.db",
-        sources=["reddit", "rss"],
         profile="broad",
         snapshot_date=date,
     )
@@ -106,11 +106,53 @@ def test_finalize_snapshot_collection_creates_one_complete_raw_run(tmp_path: Pat
     assert result.status == "complete"
     assert result.run_id == f"{date}:broad"
     assert conn.execute("SELECT status FROM runs").fetchone()[0] == "complete"
-    assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 2
+    assert conn.execute("SELECT COUNT(*) FROM observations").fetchone()[0] == 5
     assert {row[0] for row in conn.execute("SELECT source_id FROM source_health").fetchall()} >= {
         "reddit",
         "rss",
     }
+
+
+def test_finalize_snapshot_collection_narrowed_sources_cannot_be_complete(tmp_path: Path) -> None:
+    """Сужение ``--sources`` не даёт прод-профилю объявить себя полным.
+
+    Ровно так 2026-08-01 получил ``complete`` с одним reddit из одиннадцати провайдеров:
+    полнота считалась по списку, который попросили финализировать.
+    """
+    date = "2026-07-30"
+    snapshot_dir = tmp_path / "snapshots" / date
+    write_posts_jsonl([_legacy_card("reddit-post", date)], snapshot_dir / "posts.jsonl")
+
+    result = finalize_snapshot_collection(
+        config=MonitorConfig(),
+        snapshots_dir=tmp_path / "snapshots",
+        db_path=tmp_path / "compass.db",
+        sources=["reddit"],
+        profile="broad",
+        snapshot_date=date,
+    )
+
+    assert result.status == "pending"
+    missing = {source.source_id for source in result.source_results if source.status == "pending"}
+    assert missing == {"hackernews", "rss", "ladder", "producthunt"}
+
+
+def test_finalize_snapshot_collection_narrowed_sources_ok_off_production(tmp_path: Path) -> None:
+    """Экспериментальный профиль полноты не обязан — прежнее поведение сохраняется."""
+    date = "2026-07-30"
+    snapshot_dir = tmp_path / "snapshots" / date
+    write_posts_jsonl([_legacy_card("reddit-post", date)], snapshot_dir / "posts.jsonl")
+
+    result = finalize_snapshot_collection(
+        config=MonitorConfig(),
+        snapshots_dir=tmp_path / "snapshots",
+        db_path=tmp_path / "compass.db",
+        sources=["reddit"],
+        profile="starter",
+        snapshot_date=date,
+    )
+
+    assert result.status == "complete"
 
 
 def test_finalize_snapshot_collection_marks_missing_artifact_pending(tmp_path: Path) -> None:
@@ -127,8 +169,10 @@ def test_finalize_snapshot_collection_marks_missing_artifact_pending(tmp_path: P
         snapshot_date=date,
     )
 
+    by_source = {source.source_id: source for source in result.source_results}
     assert result.status == "pending"
-    assert [source.error_code for source in result.source_results] == [None, "snapshot_missing"]
+    assert by_source["reddit"].error_code is None
+    assert by_source["hackernews"].error_code == "snapshot_missing"
 
 
 def _legacy_card(post_id: str, date: str) -> PostCard:

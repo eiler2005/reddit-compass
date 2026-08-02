@@ -119,3 +119,20 @@ def test_routine_beat_detection() -> None:
     assert is_routine_beat("49ers injury report and depth chart update") is True
     assert is_routine_beat("Final score: Lakers win", source_section="scoreboard") is True
     assert is_routine_beat("OpenAI releases new GPT model") is False
+
+
+def test_routine_beat_catches_set_scores() -> None:
+    """Заголовок из релиза 2026-08-01, давший ``stories_overmerge_ge5``.
+
+    Пять теннисных результатов одного провайдера слились в сюжет: под счёт по сетам
+    не было ни одного шаблона.
+    """
+    assert is_routine_beat("WTA 500 Washington QF: A. Eala def (2) E. Svitolina — 6-3, 6-4")
+    assert is_routine_beat("ATP 250 Kitzbuhel R1: Ruud def Nadal 7-6, 6-2")
+
+
+def test_routine_beat_keeps_ordinary_numeric_headlines() -> None:
+    """Счёт ограничен диапазоном сета, иначе фильтр съедал бы обычные новости."""
+    assert is_routine_beat("OpenAI launches GPT-6 after 18-3, 12-4 internal evals fail") is False
+    assert is_routine_beat("Section 230-4, 15-3 vote clears the Senate") is False
+    assert is_routine_beat("Reddit daily active users hit 100M") is False

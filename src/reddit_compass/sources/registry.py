@@ -238,3 +238,36 @@ def get_provider_label(provider: str) -> str:
         if source.provider == provider:
             return source.label
     return provider.title()
+
+
+# Профили, у которых полнота корпуса — часть контракта публикации. Для них релиз
+# обязан покрывать все кластеры, а не только тот, что успел собраться.
+PRODUCTION_PROFILES = frozenset({"broad", "ai-native"})
+
+
+def expected_clusters_for_profile(profile: str) -> frozenset[SourceCluster]:
+    """Кластеры, обязанные дать хотя бы один item в релизе прод-профиля.
+
+    Обязательность не изобретается здесь заново, а читается из реестра: кластер
+    обязателен, если в нём есть включённый источник с ``expected_min_items > 0``.
+    Сегодня это ``voices`` (reddit) и ``developers`` (hackernews) — то есть ровно те
+    источники, для которых владелец уже объявил минимальный ожидаемый объём.
+    Ужесточение — правка одного поля в реестре, а не этой функции.
+
+    Требовать *все* кластеры нельзя: тогда упавший на одну ночь ProductHunt блокировал
+    бы публикацию целиком, и гейт начали бы обходить.
+
+    Зачем вообще: 2026-07-31 и 2026-08-01 дали три прод-run'а со статусом ``complete``,
+    в которых выжил только ``reddit`` (1 provider против 11 у здорового прогона).
+    Пропавший источник не оставляет health-строки, поэтому проверка «нет ли плохих
+    строк» его не видит. Одно-провайдерный корпус делает ``stories_cross_source_per_1k``
+    структурно нулевым — метрика считает истории с ``source_count > 1``, которых там
+    быть не может, — и релиз падал на полах качества, на два слоя ниже причины.
+    """
+    if profile not in PRODUCTION_PROFILES:
+        return frozenset()
+    return frozenset(
+        source.cluster
+        for source in SOURCES.values()
+        if source.enabled_by_default and source.expected_min_items > 0
+    )

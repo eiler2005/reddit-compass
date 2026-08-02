@@ -29,6 +29,15 @@
 
 ### Changed
 
+- **Production collection completeness.** A narrowed `collect --from-snapshots
+  --sources ...` can no longer mark `broad` or `ai-native` complete while it
+  silently omits configured snapshots. Missing required source clusters now make
+  the immutable Engine input `partial` before it reaches quality floors.
+- **Story and trend quality.** Routine discussion threads and tennis scorelines
+  are excluded from story merges; trend names drop publisher tokens and repeated
+  unigrams. Dense candidate retrieval can be configured to retain pairs above
+  its calibrated auto-merge floor instead of losing them solely to top-K rank.
+
 - **`DEFAULT_TREND_METHOD` выровнен на `embedding_v2`** — тот же метод, что считает
   ночной прогон. Библиотека умалчивала `story_graph_v1`, и расхождение было не
   косметическим: на одном story-релизе (4 957 items) граф-метод давал 6 трендов

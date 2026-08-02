@@ -27,6 +27,8 @@ from typing import Any
 
 import numpy as np
 
+from .clustering import _PUBLISHER_ENTITIES
+
 _VECTOR_DIM = 256
 
 _TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9'_-]*", re.IGNORECASE)
@@ -371,6 +373,11 @@ def _ctfidf_name(cluster_titles: list[str], corpus_titles: list[list[str]]) -> s
         "say",
         "said",
     }
+    # Названия изданий — не паттерн, а подпись источника: «The New York Times» и
+    # «The Athletic» в заголовках давали тренду имя «york time … athletic york».
+    # Список общий с кросс-источниковым слиянием, чтобы он был один на репозиторий.
+    stop |= _PUBLISHER_ENTITIES
+    stop |= {"york", "times", "athletic", "post", "journal", "news", "daily", "weekly"}
     cluster_tokens: Counter[str] = Counter()
     cluster_bigrams: Counter[str] = Counter()
     for title in cluster_titles:
@@ -407,7 +414,20 @@ def _ctfidf_name(cluster_titles: list[str], corpus_titles: list[list[str]]) -> s
         idf = math.log((1 + n_clusters) / (1 + doc_freq_bi.get(term, 0))) + 1.0
         scored.append((tf * idf * 1.3, term))  # bigram bonus
     scored.sort(key=lambda pair: (-pair[0], pair[1]))
-    terms = [term for _, term in scored[:4]]
+    # Униграммы и биграммы соревнуются в одном списке, поэтому «york time», «york» и
+    # «time» попадали в топ одновременно и склеивались в «york time york time athletic
+    # york» — на 2026-08-01 два таких имени дали ``trends_duplicate_name_count``.
+    # Берём терм только если он приносит хотя бы один новый токен.
+    terms: list[str] = []
+    used: set[str] = set()
+    for _, term in scored:
+        tokens = term.split()
+        if any(token in used for token in tokens):
+            continue
+        terms.append(term)
+        used.update(tokens)
+        if len(terms) >= 4:
+            break
     return " ".join(terms)
 
 

@@ -58,6 +58,51 @@ def test_top_k_cosine_pairs_keeps_only_nearest_neighbours() -> None:
     assert all(score >= 0.9 for score in pairs.values())
 
 
+def _crowded_cluster_vectors() -> dict[str, list[float]]:
+    """Плотный кластер вокруг ``a`` плюс одна дальняя пара.
+
+    У ``a`` соседей больше, чем top_k, поэтому часть близких пар отсекается по рангу —
+    ровно та ситуация, в которой 72.5% пар выше auto-порога не доходили до скоринга.
+    """
+    vectors: dict[str, list[float]] = {"a": [1.0, 0.0, 0.0]}
+    for index in range(1, 6):
+        vectors[f"near{index}"] = [1.0, 0.001 * index, 0.0]
+    # Заметно дальше кластера, но без точных совпадений косинуса: на равных значениях
+    # numpy- и python-ветки расходятся в tie-break, и тест мерил бы не то.
+    vectors["far"] = [0.3, 0.7, 0.2]
+    return vectors
+
+
+def test_score_floor_keeps_pairs_that_rank_below_top_k() -> None:
+    vectors = _crowded_cluster_vectors()
+
+    ranked_only = top_k_cosine_pairs(vectors, top_k=2, min_similarity=0.0)
+    with_floor = top_k_cosine_pairs(vectors, top_k=2, min_similarity=0.0, score_floor=0.99)
+
+    dropped = {pair for pair in with_floor if pair not in ranked_only}
+    assert dropped, "score_floor обязан вернуть пары, отсечённые рангом"
+    assert all(with_floor[pair] >= 0.99 for pair in dropped)
+    assert set(ranked_only) <= set(with_floor)
+
+
+def test_score_floor_none_preserves_previous_behaviour() -> None:
+    vectors = _crowded_cluster_vectors()
+
+    assert top_k_cosine_pairs(vectors, top_k=2, min_similarity=0.0) == top_k_cosine_pairs(
+        vectors, top_k=2, min_similarity=0.0, score_floor=None
+    )
+
+
+def test_score_floor_respects_min_similarity() -> None:
+    """Порог расширяет отбор, но не отменяет нижнюю границу сходства."""
+    vectors = _crowded_cluster_vectors()
+
+    pairs = top_k_cosine_pairs(vectors, top_k=2, min_similarity=0.5, score_floor=0.0)
+
+    assert pairs, "ожидались хоть какие-то пары выше min_similarity"
+    assert all(score >= 0.5 for score in pairs.values())
+
+
 def test_top_k_cosine_pairs_is_order_independent() -> None:
     vectors = {
         "c": [0.0, 1.0],

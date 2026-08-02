@@ -116,7 +116,13 @@ class TestGenericAndLowSignal:
         assert is_low_signal_title("Morning Briefing") is True
         assert is_low_signal_title("Moronic Monday - June 15, 2026 - Your Weekly Questions Thread")
         assert is_low_signal_title("Who's Hiring? July 2026")
+        # Заголовок из релиза 2026-08-01, давший ``stories_overmerge_ge8``: между
+        # «Daily» и «Thread» стоит название рубрики, и прежний шаблон с жёстким
+        # соседством слов его не ловил — восемь выпусков треда слиплись в один сюжет.
+        assert is_low_signal_title("Daily General Discussion and Advice Thread - July 30, 2026")
+        assert is_low_signal_title("Weekly Career Advice Discussion")
         assert is_low_signal_title("AI agents escape sandbox") is False
+        assert is_low_signal_title("Daily active users hit a record at Reddit") is False
 
     def test_generic_title_blocks_merge(self):
         """Generic titles не должны склеиваться по title-only."""

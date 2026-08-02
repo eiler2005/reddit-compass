@@ -50,7 +50,12 @@ from reddit_compass.intelligence.engine import (
     verify_data_release,
 )
 from reddit_compass.intelligence.migrations import migrate
-from reddit_compass.intelligence.models import ContentItem, Observation, SourceHealth
+from reddit_compass.intelligence.models import (
+    ContentItem,
+    Observation,
+    SourceCluster,
+    SourceHealth,
+)
 from reddit_compass.intelligence.quality import FloorResult
 from reddit_compass.intelligence.repository import (
     save_source_health,
@@ -174,12 +179,40 @@ def test_data_release_marks_expected_empty_voice_source_partial(tmp_path: Path) 
     assert "dominant_cluster_empty:voices" in report["warnings"]
 
 
+def test_data_release_marks_single_cluster_production_corpus_partial(tmp_path: Path) -> None:
+    """Форма релиза 2026-08-01: run ``complete``, но выжил один кластер из шести.
+
+    Пропавшие адаптеры не оставляют health-строк вообще, поэтому проверка «нет ли
+    плохих строк» их не видела, и релиз доходил до полов качества, где
+    ``stories_cross_source_per_1k`` структурно нулевой на одном провайдере.
+    """
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    corpus.execute("DELETE FROM observations")
+    corpus.execute("DELETE FROM items")
+    corpus.commit()
+    _add_required_cluster_coverage(corpus)
+    corpus.execute("DELETE FROM observations WHERE item_id LIKE 'hackernews_%'")
+    corpus.execute("DELETE FROM items WHERE provider = 'hackernews'")
+    corpus.commit()
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=_run_ids(),
+    )
+
+    assert release.input_status == "partial"
+
+
 def test_data_release_accepts_granular_voice_coverage_over_empty_aggregate(
     tmp_path: Path,
 ) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
-    _add_voice_coverage(corpus)
+    _add_required_cluster_coverage(corpus)
     save_source_health(
         corpus,
         "2026-07-27:broad",
@@ -1071,7 +1104,7 @@ def test_partial_release_requires_explicit_publish_override(tmp_path: Path) -> N
 def test_production_channel_requires_quality_gates(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
-    _add_voice_coverage(corpus)
+    _add_required_cluster_coverage(corpus)
     engine = engine_db(tmp_path / "trend_engine.db")
     release = create_data_release(
         corpus,
@@ -1097,7 +1130,7 @@ def test_production_channel_accepts_quality_floors(
 ) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
-    _add_voice_coverage(corpus)
+    _add_required_cluster_coverage(corpus)
     engine = engine_db(tmp_path / "trend_engine.db")
     release = create_data_release(
         corpus,
@@ -1705,26 +1738,37 @@ def _item(item_id: str, provider: str, title: str, date: str) -> ContentItem:
     )
 
 
-def _add_voice_coverage(conn: sqlite3.Connection) -> None:
-    """Make a synthetic broad release complete without weakening its gates."""
+def _add_required_cluster_coverage(conn: sqlite3.Connection) -> None:
+    """Make a synthetic broad release complete without weakening its gates.
+
+    Прод-профиль обязан покрыть кластеры, у источников которых в реестре объявлен
+    ``expected_min_items > 0`` — сегодня это ``voices`` (reddit) и ``developers``
+    (hackernews). Синтетический корпус состоит из reuters/nytimes, поэтому оба
+    обязательных кластера досыпаются здесь.
+    """
     items: list[ContentItem] = []
     observations: list[Observation] = []
+    coverage: tuple[tuple[str, SourceCluster, str], ...] = (
+        ("reddit", "voices", "Reddit discussion for"),
+        ("hackernews", "developers", "Hacker News thread for"),
+    )
     for run_id, date in zip(_run_ids(), ("2026-07-27", "2026-07-28", "2026-07-29"), strict=True):
-        item = ContentItem(
-            item_id=f"reddit_{date}",
-            provider="reddit",
-            source_cluster="voices",
-            external_id=f"reddit_{date}",
-            canonical_url=f"https://reddit.example/{date}",
-            title=f"Reddit discussion for {date}",
-            observed_at=f"{date}T07:00:00Z",
-            snapshot_date=date,
-            content_scope="excerpt",
-        )
-        items.append(item)
-        observations.append(
-            Observation(run_id=run_id, item_id=item.item_id, observed_at=item.observed_at)
-        )
+        for provider, cluster, title_prefix in coverage:
+            item = ContentItem(
+                item_id=f"{provider}_{date}",
+                provider=provider,
+                source_cluster=cluster,
+                external_id=f"{provider}_{date}",
+                canonical_url=f"https://{provider}.example/{date}",
+                title=f"{title_prefix} {date}",
+                observed_at=f"{date}T07:00:00Z",
+                snapshot_date=date,
+                content_scope="excerpt",
+            )
+            items.append(item)
+            observations.append(
+                Observation(run_id=run_id, item_id=item.item_id, observed_at=item.observed_at)
+            )
     upsert_items(conn, items)
     upsert_observations(conn, observations)
     conn.commit()

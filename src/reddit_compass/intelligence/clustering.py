@@ -379,9 +379,11 @@ _LOW_SIGNAL_PATTERNS = [
     r"^tech\s+life$",
     r"^tech\s+now$",
     r"^morning\s+briefing",
-    r"\bweekly\s+(?:questions?|thread|discussion)\b",
-    r"\bdaily\s+(?:questions?|thread|discussion)\b",
-    r"\bmonthly\s+(?:questions?|thread|discussion)\b",
+    # Между «daily» и «thread» помещается произвольное название рубрики:
+    # «Daily General Discussion and Advice Thread» прежние шаблоны с жёстким
+    # соседством не ловили, и восемь выпусков одного треда слипались в один
+    # сюжет — на 2026-08-01 это давало overmerge_ge8 = 1.
+    r"\b(?:daily|weekly|monthly)\s+(?:[\w'-]+\s+){0,3}(?:questions?|thread|discussion)\b",
     r"^moronic\s+monday\b",
     r"^who's\s+hiring\b",
     r"^who\s+is\s+hiring\b",

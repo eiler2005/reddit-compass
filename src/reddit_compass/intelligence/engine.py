@@ -25,7 +25,7 @@ from urllib.parse import urlsplit
 from rapidfuzz import fuzz
 
 from ..config import DEFAULT_DATA_DIR, PROJECT_ROOT
-from ..sources.registry import SOURCES
+from ..sources.registry import SOURCES, expected_clusters_for_profile
 from .clustering import (
     extract_entities,
     extract_ordered_tokens,
@@ -1973,6 +1973,16 @@ def _release_input_status(
         and cluster_counts.get("voices", 0) == 0
     ):
         return "partial"
+    # Полнота корпуса, а не только наличие voices. Пропавший источник не оставляет
+    # health-строки вообще, поэтому проверка «нет ли плохих строк» его не видит:
+    # 2026-07-31 и 2026-08-01 дали три прод-run'а со статусом ``complete``, где выжил
+    # один reddit из одиннадцати провайдеров. Одно-провайдерный корпус делает
+    # ``stories_cross_source_per_1k`` структурно нулевым, и релиз падал уже на полах
+    # качества — на два слоя ниже настоящей причины.
+    if any(
+        cluster_counts.get(cluster, 0) == 0 for cluster in expected_clusters_for_profile(profile)
+    ):
+        return "partial"
     # Some adapters record both an aggregate provider row (``reddit``) and
     # granular section rows (``reddit:LocalLLaMA``).  An aggregate zero is a
     # reporting artifact, not missing voice coverage, once at least one real
@@ -2326,6 +2336,21 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "embedding_model": DEFAULT_EMBEDDING_MODEL,
     "embedding_revision": "default",
     "dense_top_k": 12,
+    # Ранг как единственный критерий отбора: у откалиброванных статических моделей
+    # ``dense_candidate_threshold`` равен 0.0, поэтому retrieval сводится к «ровно K
+    # соседей на item независимо от score». Флаг снимает это ограничение, добавляя пары
+    # с косинусом не ниже ``dense_auto_threshold``.
+    #
+    # Дефолт False по результату замера, а не по осторожности. На 7-дневном broad
+    # (4949 items, potion-base-8M) флаг расширяет плотный слой с 49 153 до 86 022 пар,
+    # но до ``story_candidate_pairs`` доходит +408, все в ``review``, и полы не двигаются:
+    # 42.2 / 12.1 / 0.9496 с флагом и без него. Причина — ``dense_auto_threshold`` не
+    # является самостоятельным триггером слияния: он питает ``dense_event_match``, а тот
+    # ведёт только в ``review`` (см. лестницу решений ниже). Ограничитель качества лежит
+    # не в retrieval, а в том, что серую зону некому разбирать.
+    #
+    # Флаг входит в ``params_hash``, поэтому включение — воспроизводимый эксперимент.
+    "dense_retrieval_use_auto_floor": False,
     "dense_candidate_threshold": 0.68,
     "dense_auto_threshold": 0.88,
     "dense_review_threshold": 0.72,
@@ -3248,11 +3273,21 @@ def generate_story_candidates(
                 break
         if len(pair_reasons) >= max_candidate_pairs:
             break
+    # Порог берётся из auto-порога самой модели, а не из отдельной константы: тогда он
+    # следует за калибровкой эмбеддингов автоматически. Смысл — пара, которую скоринг
+    # признал бы auto-merge, не должна отсекаться по рангу top-K.
+    auto_threshold = params.get("dense_auto_threshold")
+    dense_score_floor = (
+        float(auto_threshold)
+        if params.get("dense_retrieval_use_auto_floor", False) and auto_threshold is not None
+        else None
+    )
     dense_scores = top_k_cosine_pairs(
         embeddings or {},
         top_k=int(params.get("dense_top_k", 12)),
         min_similarity=float(params.get("dense_candidate_threshold", 0.68)),
         chunk_size=int(params.get("dense_chunk_size", 256)),
+        score_floor=dense_score_floor,
     )
     for pair in sorted(dense_scores, key=lambda value: (-dense_scores[value], value)):
         if pair not in pair_reasons and len(pair_reasons) >= max_candidate_pairs:

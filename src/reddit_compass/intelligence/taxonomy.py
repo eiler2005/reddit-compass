@@ -564,7 +564,13 @@ _ROUTINE_PATTERNS = re.compile(
     r"\b(injury report|injury update|waiver|waivers|depth chart|roster|lineup|"
     r"starting lineup|box score|final score|game recap|match recap|press release|"
     r"earnings calendar|schedule announced|transactions?|trade rumor|trade rumors|"
-    r"dept chart|projection|projections)\b",
+    r"dept chart|projection|projections)\b"
+    # Результат матча счётом по сетам: «… def (2) E. Svitolina — 6-3, 6-4».
+    # Ни один шаблон выше такой заголовок не ловил, и пять теннисных результатов
+    # одного провайдера сливались в сюжет — на 2026-08-01 это давало overmerge_ge5.
+    # Форма достаточно специфична, чтобы не задевать обычные заголовки с числами.
+    r"|\b[0-7]-[0-7],\s*[0-7]-[0-7]\b"
+    r"|\b(?:WTA|ATP)\s+\d{2,4}\b",
     re.IGNORECASE,
 )
 _ROUTINE_SECTIONS = frozenset(

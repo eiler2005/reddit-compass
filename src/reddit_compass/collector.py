@@ -26,6 +26,7 @@ from .intelligence.models import (
 )
 from .intelligence.repository import upsert_items, upsert_observations, upsert_run
 from .models import PostCard
+from .sources.registry import PRODUCTION_PROFILES
 
 logger = logging.getLogger("reddit_compass")
 
@@ -172,6 +173,17 @@ def finalize_snapshot_collection(
     selected = [
         _ALIASES.get(source.strip(), source.strip()) for source in (sources or DEFAULT_SOURCES)
     ]
+    # Полнота считалась по набору, который *попросили* финализировать, а не по тому,
+    # что обязан покрыть профиль: сужение ``--sources`` давало run со статусом
+    # ``complete`` и одним источником. Недостающие источники дописываются как
+    # ``pending`` — тем же статусом, что и отсутствующий артефакт, — поэтому run
+    # остаётся pending до появления остальных. Экспериментальные профили ничего
+    # не обязаны: требование полноты касается только прод-каналов.
+    unrequested = (
+        [source_id for source_id in DEFAULT_SOURCES if source_id not in selected]
+        if profile in PRODUCTION_PROFILES
+        else []
+    )
 
     source_results: list[SourceResult] = []
     all_items: list[ContentItem] = []
@@ -209,6 +221,16 @@ def finalize_snapshot_collection(
                 message=f"Finalized existing snapshot artifact: {filename}",
             )
         )
+
+    source_results.extend(
+        SourceResult(
+            source_id=source_id,
+            status="pending",
+            error_code="snapshot_missing",
+            message=f"Source not requested for finalization: {source_id}",
+        )
+        for source_id in unrequested
+    )
 
     finished_at = now_iso()
     _statuses = {r.status for r in source_results}

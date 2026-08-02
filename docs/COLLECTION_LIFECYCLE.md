@@ -98,8 +98,8 @@ reddit-compass collect \
 | Состояние | Значение |
 |---|---|
 | `running` | адаптеры или finalizer ещё не завершены; Engine такой run не берёт |
-| `complete` | у всех выбранных артефактов есть валидный JSONL; zero items отображается отдельно как `empty` |
-| `partial` | хотя бы один выбранный файл отсутствует или не читается; input пригоден только для inspect/preview/shadow |
+| `complete` | у всех артефактов, обязательных для production-профиля, есть валидный JSONL; сужение `--sources` не отменяет это требование; zero items отображается отдельно как `empty` |
+| `partial` | хотя бы один обязательный или выбранный файл отсутствует/не читается, либо у immutable input нет обязательного source cluster; input пригоден только для inspect/preview/shadow |
 | source `ok` / `empty` | адаптер выполнился; `empty` не равен падению, но может стать `degraded` в Data Release при expected-min |
 | source `error` / `not_configured` / `skipped` | факт отсутствия или ошибки, не маскируется зелёным статусом |
 
