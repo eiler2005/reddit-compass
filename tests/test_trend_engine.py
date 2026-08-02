@@ -17,6 +17,8 @@ from reddit_compass.intelligence.engine import (
     _add_index_pairs,
     _constrained_story_groups,
     _discover_trends_graph,
+    _event_number_conflict,
+    _event_numbers,
     _story_topic_keys,
     active_label_story_pairs,
     auto_label_story_pairs,
@@ -543,6 +545,57 @@ def test_bounded_component_experiment_promotes_only_explicit_review_candidates()
     assert experiment_candidates[0].decision == "auto_merge"
     assert experiment_candidates[0].reason == "bounded component evidence candidate"
     assert experiment_candidates[0].features["bounded_component_candidate"] is True
+
+
+def test_bounded_component_experiment_blocks_generic_reddit_prompts() -> None:
+    items = [
+        _frozen_item(
+            "reddit:question-one",
+            "https://reddit.example/question-one",
+            "What should OpenAI do after a model safety incident?",
+            "2026-07-29T08:00:00Z",
+        ),
+        _frozen_item(
+            "reddit:question-two",
+            "https://reddit.example/question-two",
+            "What should OpenAI do after an AI safety incident?",
+            "2026-07-30T08:00:00Z",
+        ),
+    ]
+    facets = {item.item_id: {"entities": json.dumps(["openai", "safety"])} for item in items}
+
+    candidates = generate_story_candidates(
+        items,
+        facets,
+        params={"near_duplicate_enabled": False, "bounded_component_enabled": True},
+    )
+
+    assert candidates[0].decision == "review"
+    assert candidates[0].features.get("bounded_component_candidate") is None
+
+
+def test_event_number_conflict_normalizes_currency_unit_from_title() -> None:
+    left = _event_numbers(
+        {"event_frame_json": json.dumps({"numbers": ["$5.5"]})},
+        title="Johnson & Johnson agrees to pay $5.5B to settle talc claims",
+    )
+    right = _event_numbers(
+        {"event_frame_json": json.dumps({"numbers": ["$5.5bn"]})},
+        title="Johnson & Johnson to pay $5.5bn to settle US talcum powder lawsuit",
+    )
+
+    assert _event_number_conflict(set(left), set(right)) is False
+    assert _event_number_conflict(
+        set(left),
+        set(_event_numbers({"event_frame_json": json.dumps({"numbers": ["$5.4bn"]})})),
+    )
+    assert (
+        _event_number_conflict(
+            set(_event_numbers({"event_frame_json": json.dumps({"numbers": ["12.5%"]})})),
+            set(_event_numbers({"event_frame_json": json.dumps({"numbers": ["80"]})})),
+        )
+        is False
+    )
 
 
 def test_bounded_component_experiment_caps_chain_at_four_items() -> None:

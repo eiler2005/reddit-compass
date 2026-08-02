@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import random
+import re
 import sqlite3
 import subprocess
 from collections import Counter, defaultdict
@@ -2372,6 +2373,9 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "bounded_component_min_token_jaccard": 0.08,
     "bounded_component_min_entity_score": 0.50,
     "bounded_component_max_days": 7,
+    # Question-shaped Reddit posts often share generic wording but do not report
+    # the same event.  This affects only the opt-in bounded-components experiment.
+    "bounded_component_block_reddit_prompts": True,
 }
 
 
@@ -3604,9 +3608,9 @@ def _score_story_pair(
 
     shared_entities = {e for e in shared_entities if e.lower() not in GENERIC_ANCHORS}
     entity_score = len(shared_entities) / max(min(len(left_entities), len(right_entities)), 1)
-    left_numbers = set(_event_numbers(left_facets))
-    right_numbers = set(_event_numbers(right_facets))
-    number_conflict = bool(left_numbers and right_numbers and not left_numbers & right_numbers)
+    left_numbers = set(_event_numbers(left_facets, title=left.title))
+    right_numbers = set(_event_numbers(right_facets, title=right.title))
+    number_conflict = _event_number_conflict(left_numbers, right_numbers)
     left_frame = _json_dict(left_facets.get("event_frame_json"))
     right_frame = _json_dict(right_facets.get("event_frame_json"))
     left_locations = set(_json_list(left_frame.get("geography")))
@@ -3822,10 +3826,12 @@ def _score_story_pair(
     if _both_show_hn or _same_provider_hn:
         # Show HN / same-provider HN: semantic-only merge blocked
         dense_event_match = False
+    both_reddit_prompts = _is_reddit_prompt(left) and _is_reddit_prompt(right)
     bounded_component_candidate = bool(
         params.get("bounded_component_enabled", False)
         and not _both_show_hn
         and not _same_provider_hn
+        and not (params.get("bounded_component_block_reddit_prompts", True) and both_reddit_prompts)
         and title_score >= float(params.get("bounded_component_min_title_score", 0.50))
         and token_jaccard >= float(params.get("bounded_component_min_token_jaccard", 0.08))
         and entity_score >= float(params.get("bounded_component_min_entity_score", 0.50))
@@ -7433,9 +7439,109 @@ def _facet_entities(facet: dict[str, Any]) -> set[str]:
     return set(_json_list(facet.get("entities"))) - _GENERIC_ENTITIES
 
 
-def _event_numbers(facet: dict[str, Any]) -> list[str]:
+_EVENT_NUMBER_RE = re.compile(
+    r"^(?P<currency>[$€£])?(?P<value>\d+(?:[,.]\d+)?)\s*"
+    r"(?P<unit>k|m|bn|b|thousand|million|billion)?(?P<percent>%|percent)?$",
+    re.IGNORECASE,
+)
+_CURRENCY_TITLE_UNIT_RE = re.compile(
+    r"(?P<currency>[$€£])(?P<value>\d+(?:[,.]\d+)?)\s*"
+    r"(?P<unit>k|m|bn|b|thousand|million|billion)\b",
+    re.IGNORECASE,
+)
+
+
+def _event_numbers(facet: dict[str, Any], *, title: str = "") -> list[str]:
+    """Return typed, normalized event-number keys from a facet frame.
+
+    Facet extraction may shorten a currency amount (``$5.5``) while the source
+    title retains the magnitude (``$5.5B``).  Treating those spellings as
+    contradictory blocked otherwise near-identical news reports.  In contrast,
+    values of unrelated types (for example a percent and a country count) must
+    not create a conflict just because their strings differ.
+    """
     frame = _json_dict(facet.get("event_frame_json"))
-    return _json_list(frame.get("numbers"))
+    title_units = {
+        (match.group("currency"), _normalize_event_number_value(match.group("value"))): match.group(
+            "unit"
+        ).lower()
+        for match in _CURRENCY_TITLE_UNIT_RE.finditer(title.replace(",", ""))
+    }
+    normalized_numbers: list[str] = []
+    for raw in _json_list(frame.get("numbers")):
+        key = _event_number_key(raw, title_units)
+        if key:
+            normalized_numbers.append(key)
+    return normalized_numbers
+
+
+def _normalize_event_number_value(value: str) -> str:
+    normalized = value.replace(",", "").rstrip("0").rstrip(".")
+    return normalized or "0"
+
+
+def _event_number_key(
+    raw: str,
+    title_units: dict[tuple[str, str], str],
+) -> str | None:
+    value = raw.strip().lower().replace(",", "")
+    match = _EVENT_NUMBER_RE.fullmatch(value)
+    if not match:
+        return None
+    numeric = _normalize_event_number_value(match.group("value"))
+    currency = match.group("currency")
+    unit = match.group("unit")
+    if currency:
+        unit = unit or title_units.get((currency, numeric))
+        normalized_unit = {
+            "b": "bn",
+            "bn": "bn",
+            "billion": "bn",
+            "m": "m",
+            "million": "m",
+            "k": "k",
+            "thousand": "k",
+        }.get(unit or "")
+        return f"currency:{currency}:{numeric}:{normalized_unit or 'base'}"
+    if match.group("percent"):
+        return f"percent:{numeric}"
+    if unit:
+        normalized_unit = {
+            "b": "bn",
+            "bn": "bn",
+            "billion": "bn",
+            "m": "m",
+            "million": "m",
+            "k": "k",
+            "thousand": "k",
+        }[unit]
+        return f"count:{numeric}:{normalized_unit}"
+    return f"count:{numeric}:base"
+
+
+def _event_number_conflict(left_numbers: set[str], right_numbers: set[str]) -> bool:
+    """Return true only when comparable number types disagree."""
+    if not left_numbers or not right_numbers:
+        return False
+    left_by_type = defaultdict(set)
+    right_by_type = defaultdict(set)
+    for value in left_numbers:
+        number_type, normalized_value = value.split(":", 1)
+        left_by_type[number_type].add(normalized_value)
+    for value in right_numbers:
+        number_type, normalized_value = value.split(":", 1)
+        right_by_type[number_type].add(normalized_value)
+    return any(
+        left_by_type[number_type].isdisjoint(right_by_type[number_type])
+        for number_type in left_by_type.keys() & right_by_type.keys()
+    )
+
+
+def _is_reddit_prompt(item: FrozenItem) -> bool:
+    """Identify conversational Reddit prompts, using the original title text."""
+    prefixes = ("what ", "what's ", "whats ", "why ", "how ", "cmv", "people who ", "for anyone ")
+    title = item.title.casefold().replace("’", "'").lstrip()
+    return item.provider == "reddit" and title.startswith(prefixes)
 
 
 def _date_distance_days(left: FrozenItem, right: FrozenItem) -> int:

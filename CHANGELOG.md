@@ -40,6 +40,12 @@
   аудит (119 пар и 10 групп автора, 1 пара и 20 групп ассистента) отклонил Candidate v1:
   precision 0.70, recall 0.56, overmerge rate 0.40. Это не полностью human Golden Set; ветка
   остаётся выключенной, production не менялся.
+- **Guards для bounded-components.** Opt-in ветка теперь не поднимает в auto-merge пару
+  разговорных Reddit-вопросов с одинаковой формой (`What` / `How` / `CMV`), а числовой guard
+  сравнивает только сопоставимые величины и понимает `$5.5B` = `$5.5bn`. Candidate v2 на том
+  же frozen broad проходит structural floors (compression 0.8287; 100.7 multi и 48.6
+  cross-source на 1k), но по смешанным 120 pair-labels даёт precision 0.8571 и recall 0.4800.
+  Он не проходит gate, не включён по умолчанию и не влияет на production.
 - **Ручной режим production.** Ночные jobs collection/finalize/Engine на VPS отключены;
   публикация и каждый запуск остаются ручными до согласования нового интервала. Аудит Plan v4
   на изолированном релизе задокументирован в `docs/QUALITY_GATES.md`: текущий retrieval не
