@@ -31,6 +31,11 @@ embed = [
   "numpy>=2,<3",
   "model2vec>=0.3,<1",
 ]
+# Стадия cross-encoder: разбор серой зоны Stories готовым ранжировщиком.
+# Отдельно от [engine], чтобы не тянуть в прод-образ spacy, который этой стадии не нужен.
+adjudicate = [
+  "sentence-transformers>=4,<6",
+]
 
 [project.scripts]
 reddit-compass = "reddit_compass.cli:main"

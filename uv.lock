@@ -2175,6 +2175,9 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+adjudicate = [
+    { name = "sentence-transformers" },
+]
 embed = [
     { name = "model2vec" },
     { name = "numpy" },
@@ -2208,11 +2211,12 @@ requires-dist = [
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3,<4" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "rapidfuzz", specifier = ">=3,<4" },
+    { name = "sentence-transformers", marker = "extra == 'adjudicate'", specifier = ">=4,<6" },
     { name = "sentence-transformers", marker = "extra == 'engine'", specifier = ">=4,<6" },
     { name = "spacy", marker = "extra == 'engine'", specifier = ">=3.8,<4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
-provides-extras = ["engine", "embed"]
+provides-extras = ["engine", "embed", "adjudicate"]
 
 [package.metadata.requires-dev]
 dev = [

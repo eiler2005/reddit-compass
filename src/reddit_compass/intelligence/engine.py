@@ -35,6 +35,10 @@ from .clustering import (
     is_low_signal_title,
     normalize_title,
 )
+from .cross_encoder import (
+    DEFAULT_CROSS_ENCODER_MODEL,
+    DEFAULT_CROSS_ENCODER_THRESHOLD,
+)
 from .embeddings import (
     DEFAULT_EMBEDDING_MODEL,
     DENSE_THRESHOLD_KEYS,
@@ -2376,6 +2380,15 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     # Question-shaped Reddit posts often share generic wording but do not report
     # the same event.  This affects only the opt-in bounded-components experiment.
     "bounded_component_block_reddit_prompts": True,
+    # Разбор серой зоны готовым cross-encoder'ом. Детерминированная лестница даёт
+    # auto_merge только по provenance и сильным лексическим признакам, остальное уходит
+    # в review — на боевом релизе это ~6000 пар, а Qwen успевал 80 за ночь.
+    # Без этой стадии три пола полноты не берутся: на 2026-07-26_2026-08-01-broad-r2
+    # получается 51.9 multi/1k при поле 65. Фронтир порога и ограничения политики —
+    # в ``intelligence/cross_encoder.py``.
+    "cross_encoder_enabled": False,
+    "cross_encoder_model": DEFAULT_CROSS_ENCODER_MODEL,
+    "cross_encoder_threshold": DEFAULT_CROSS_ENCODER_THRESHOLD,
 }
 
 
@@ -2449,6 +2462,15 @@ def create_story_release(
         prompt_version=str(params["review_prompt_version"]),
         min_merge_confidence=float(params["llm_merge_min_confidence"]),
     )
+    if params.get("cross_encoder_enabled"):
+        from .cross_encoder import adjudicate_story_pairs
+
+        candidates = adjudicate_story_pairs(
+            candidates,
+            items,
+            model_id=str(params["cross_encoder_model"]),
+            threshold=float(params["cross_encoder_threshold"]),
+        )
     groups = _constrained_story_groups(items, candidates, params=params)
     stories = _build_engine_stories(groups, facets)
     stories, redirects = _reconcile_story_identity(
@@ -6157,6 +6179,8 @@ async def run_engine_cycle(
     allow_partial: bool = True,
     pulse: bool = True,
     history_window_days: int = 7,
+    cross_encoder: bool = False,
+    cross_encoder_threshold: float = DEFAULT_CROSS_ENCODER_THRESHOLD,
 ) -> dict[str, Any]:
     """Полный ночной цикл нового Engine (Фаза 7): релиз → stories → разметка → обучение →
     trends → pulse → (опц.) публикация. Один вызов = одна cron-строка."""
@@ -6196,6 +6220,9 @@ async def run_engine_cycle(
                 exc,
             )
     story_params: dict[str, Any] = {"review_model": review_model}
+    if cross_encoder:
+        story_params["cross_encoder_enabled"] = True
+        story_params["cross_encoder_threshold"] = cross_encoder_threshold
     if embed_ok:
         story_params["embedding_model"] = embed_model
     use_trend_method = (

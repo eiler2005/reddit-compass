@@ -1633,6 +1633,8 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     publish_channel=args.publish_channel or None,
                     allow_partial=args.allow_partial,
                     pulse=not args.no_pulse,
+                    cross_encoder=bool(args.cross_encoder),
+                    cross_encoder_threshold=float(args.cross_encoder_threshold),
                 )
             finally:
                 corpus_conn.close()
@@ -2415,6 +2417,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Embedding model for embedding_v2 (model2vec, torch-free). Empty = no embeddings.",
     )
     engine_cycle.add_argument("--review-model", default="qwen3.6-flash")
+    engine_cycle.add_argument(
+        "--cross-encoder",
+        action="store_true",
+        help=(
+            "Разобрать серую зону готовым cross-encoder'ом вместо построчного LLM-ревью. "
+            "Без этой стадии полы полноты не берутся (51.9 multi/1k при поле 65). "
+            "Требует reddit-compass[engine]."
+        ),
+    )
+    engine_cycle.add_argument(
+        "--cross-encoder-threshold",
+        type=float,
+        default=0.95,
+        help="Порог слияния; 0.95 — precision-first точка с запасом по всем полам.",
+    )
     engine_cycle.add_argument(
         "--review-limit",
         type=int,
