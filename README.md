@@ -15,17 +15,20 @@ So you check Reddit. Then Hacker News. Then NYT. Then Wired. Then FT. Then TechC
 
 That's 45 minutes of tab-switching before your first coffee. And you *still* miss the thread that went viral at 2 AM — the one where 400 laid-off engineers described exactly the pain your product solves.
 
-**reddit-compass does this for you. Every night. Broad Radar watches the world; AI-native Lens
-keeps book/RBC research focused on AI, work, institutions and markets.**
+**reddit-compass builds a versioned Radar. Broad Radar watches the world; AI-native Lens keeps
+book/RBC research focused on AI, work, institutions and markets. Автоматическое ночное
+расписание сейчас поставлено на паузу: запуски выполняются оператором вручную.**
 
 ---
 
 ## What reddit-compass does for you
 
-### Every night, on its own
+### Ручной режим (расписание временно отключено)
 
-Runs in the Qwen discount window (**17:00–03:00 Moscow = 14:00–00:00 UTC**) so LLM
-analysis uses the cheaper off-peak rate.
+Периодические collection, finalization и Engine jobs на production-хосте отключены. До
+согласования нового интервала оператор вручную запускает только нужные этапы и вручную решает,
+публиковать ли прошедший quality gate выпуск. Таблица ниже — прежний ориентир последовательности,
+а не действующее расписание.
 
 | Time (UTC / MSK) | What happens | Why you care |
 |---|---|---|

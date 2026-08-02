@@ -29,6 +29,11 @@
 
 ### Changed
 
+- **Ручной режим production.** Ночные jobs collection/finalize/Engine на VPS отключены;
+  публикация и каждый запуск остаются ручными до согласования нового интервала. Аудит Plan v4
+  на изолированном релизе задокументирован в `docs/QUALITY_GATES.md`: текущий retrieval не
+  проходит три пола полноты, а его оптимистичный потолок возвращает overmerge, поэтому новый
+  Engine не развёртывается и production-pointer не передвигается.
 - **Production collection completeness.** A narrowed `collect --from-snapshots
   --sources ...` can no longer mark `broad` or `ai-native` complete while it
   silently omits configured snapshots. Missing required source clusters now make
