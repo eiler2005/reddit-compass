@@ -4061,17 +4061,31 @@ def _single_provider_large_group_without_event_url(
     providers = {item_by_id[item_id].provider for item_id in item_ids if item_id in item_by_id}
     if len(providers) != 1:
         return False
+    # Синдицированные перепечатки одного материала: общий URL или fingerprint заголовка
+    # подтверждает идентичность. Но исключение обязано покрывать группу целиком: раньше
+    # достаточно было ОДНОЙ provenance-пары где угодно внутри группы, и страж отключался
+    # для всех остальных. Так 13 reddit-постов про камеры Flock (тараны, увольнения,
+    # отказ городов, поджоги) слиплись в один «сюжет» из-за единственного дубля заголовка.
+    # Считаем связность только по provenance-рёбрам: исключение действует, если они
+    # соединяют всю группу.
+    parent = {item_id: item_id for item_id in item_ids}
+
+    def find(item_id: str) -> str:
+        while parent[item_id] != item_id:
+            parent[item_id] = parent[parent[item_id]]
+            item_id = parent[item_id]
+        return item_id
+
+    provenance_reasons = {"shared canonical/target URL", "near-duplicate title fingerprint"}
     for index, left_id in enumerate(item_ids):
         for right_id in item_ids[index + 1 :]:
             pair = pair_by_ids.get(_pair_key(left_id, right_id))
-            if pair and pair.reason == "shared canonical/target URL":
-                return False
-            # Синдицированные перепечатки одного материала: fingerprint
-            # заголовка подтверждает идентичность независимо от провайдера.
-            # Show HN / 49ers не попадают сюда — у них fingerprint не срабатывал.
-            if pair and pair.reason == "near-duplicate title fingerprint":
-                return False
-    return True
+            if pair is None or pair.reason not in provenance_reasons:
+                continue
+            left_root, right_root = find(left_id), find(right_id)
+            if left_root != right_root:
+                parent[left_root] = right_root
+    return len({find(item_id) for item_id in item_ids}) != 1
 
 
 def _candidate_centrality(
