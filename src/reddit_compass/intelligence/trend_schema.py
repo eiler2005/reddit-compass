@@ -41,66 +41,66 @@ _ACTION_LEXICON: tuple[tuple[str, str, str], ...] = (
         "layoffs",
         r"\b(lay(s|ing)? off|laid off|layoffs?|job cuts?|cuts? \d*\s*jobs?|"
         r"slash(es|ed)? (its )?(staff|workforce|headcount)|downsiz\w*)\b",
-        "сокращения штата",
+        "layoffs",
     ),
     (
         "hiring_freeze",
         r"\b(hiring freeze|freezes? hiring|pauses? hiring|halts? hiring)\b",
-        "заморозка найма",
+        "hiring freezes",
     ),
     (
         "lawsuit",
         r"\b(sues?|sued|lawsuit|files? suit|legal action|takes? .* to court)\b",
-        "судебные иски",
+        "lawsuits",
     ),
-    ("regulator_fine", r"\b(fines?|fined|penalt(y|ies)|sanctions?)\b", "штрафы регуляторов"),
+    ("regulator_fine", r"\b(fines?|fined|penalt(y|ies)|sanctions?)\b", "regulatory fines"),
     (
         "investigation",
         r"\b(investigat\w+|probe[sd]?|inquiry|scrutin\w+|antitrust)\b",
-        "расследования",
+        "investigations",
     ),
     (
         "ban",
         r"\b(bans?|banned|prohibit\w*|outlaw\w*|blocks? (the )?(use|sale|export))\b",
-        "запреты",
+        "bans and restrictions",
     ),
     (
         "acquisition",
         r"\b(acquires?|acquisition|buys? out|takeover|merger|merges? with)\b",
-        "поглощения",
+        "acquisitions",
     ),
     (
         "funding",
         r"\b(raises? \$?[\d.]+|funding round|series [a-e]\b|valuation|ipo)\b",
-        "привлечение капитала",
+        "funding rounds",
     ),
     (
         "launch",
         r"\b(launch\w*|releases?|unveil\w*|announces? (a |the )?(new )?"
         r"(model|product|tool|service)|ships?|rolls? out)\b",
-        "запуски продуктов",
+        "product launches",
     ),
     (
         "outage",
         r"\b(outage|goes? down|downtime|service disruption|breach|hacked|leak\w*)\b",
-        "сбои и утечки",
+        "outages and breaches",
     ),
     (
         "protest",
-        r"\b(protest\w*|backlash|petition|boycott|walkout|strikes?|sabotag\w*|"
-        r"vandal\w*)\b",
-        "протесты и сопротивление",
+        r"\b(protest\w*|backlash|petition|boycott|walkout|sabotag\w*|"
+        r"vandal\w*)\b|\b(workers?|staff|union|labou?r) strikes?\b|\bon strike\b",
+        "protests and backlash",
     ),
     (
         "price_change",
         r"\b(raises? prices?|price (hike|increase|cut)|cheaper|more expensive|"
         r"cuts? prices?)\b",
-        "изменение цен",
+        "price changes",
     ),
     (
         "datacenter",
         r"\b(data ?cent(er|re)|power grid|electricity demand|water us\w+)\b",
-        "инфраструктура дата-центров",
+        "data centre buildout",
     ),
 )
 _COMPILED_ACTIONS = tuple(
@@ -144,8 +144,41 @@ _LEADING_NOISE = re.compile(
 )
 
 
+# Глаголы лексикона многозначны, и вне своего домена они дают ложную схему. Проверка
+# по первому замеру 58 трендов:
+#   «penalties» — и санкции регулятора, и пенальти Хэмилтона в Формуле-1;
+#   «ban»       — и запрет экспорта, и допинговая дисквалификация Мудрика;
+#   «launch»    — и запуск продукта, и «Islamists have launched» атаку в Сеуте;
+#   «strikes»   — и забастовка, и удары по Ирану.
+# Это тот же класс ошибки, что был в Pulse со словом «beat»: поверхностный глагол без
+# привязки к смыслу. Дешевле и надёжнее не чинить каждый глагол, а увести из слоя целые
+# домены, где эти слова значат другое.
+_SPORTS_MARKERS = re.compile(
+    r"\b(nba|nfl|mlb|nhl|uefa|fifa|premier league|la liga|serie a|bundesliga|"
+    r"f1|formula ?1|grand prix|tennis|atp|wta|golf|cricket|rugby|"
+    r"playoffs?|world cup|super bowl|striker|midfielder|goalkeeper|quarterback|"
+    r"touchdown|doping|coach|dugout|transfer window|tournament|championship|"
+    r"season \d|matchday|fixtures?|football|soccer|basketball|baseball|hockey|"
+    r"athletes?|youth academy|substitutes?|penalty kick)\b",
+    re.IGNORECASE,
+)
+_MILITARY_MARKERS = re.compile(
+    r"\b(missile|air ?strikes?|troops|militar\w+|offensive|warplane|drone strike|"
+    r"shelling|ceasefire|militants?|insurgents?|attack(s|ed|ing)?|assault|invasion|"
+    r"bombing|warhead|artillery)\b",
+    re.IGNORECASE,
+)
+
+
+def is_out_of_scope(title: str) -> bool:
+    """Домены, где глаголы лексикона значат не то: спорт и военные действия."""
+    return bool(_SPORTS_MARKERS.search(title) or _MILITARY_MARKERS.search(title))
+
+
 def extract_action(title: str) -> tuple[str, str] | None:
     """Нормализованное действие заголовка: ``(ключ, человекочитаемая метка)``."""
+    if is_out_of_scope(title):
+        return None
     for key, pattern, label in _COMPILED_ACTIONS:
         if pattern.search(title):
             return key, label
@@ -167,14 +200,14 @@ def extract_actor(title: str) -> str:
 
 
 _DOMAIN_LABELS = {
-    "ai_technology": "в AI",
-    "business_markets": "в бизнесе",
-    "labor_career": "на рынке труда",
-    "society_politics": "в политике",
-    "surveillance_privacy": "в слежке и приватности",
-    "science_climate": "в науке и климате",
-    "culture_media": "в культуре и медиа",
-    "world": "в мире",
+    "ai_technology": "in AI",
+    "business_markets": "in business",
+    "labor_career": "in the labour market",
+    "society_politics": "in politics",
+    "surveillance_privacy": "in surveillance",
+    "science_climate": "in science",
+    "culture_media": "in media",
+    "world": "worldwide",
 }
 
 

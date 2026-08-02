@@ -66,7 +66,7 @@ def test_recurring_pattern_across_actors_becomes_a_trend() -> None:
     assert len(trends) == 1
     assert trends[0]["story_count"] == 3
     assert len(trends[0]["distinct_actors"]) >= 2
-    assert "сокращения штата" in trends[0]["name_ru"]
+    assert "layoffs" in trends[0]["name_ru"]
 
 
 def test_one_actor_is_a_storyline_not_a_trend() -> None:
@@ -98,3 +98,48 @@ def test_stories_without_a_recognised_action_are_skipped() -> None:
     ]
 
     assert discover_schema_trends(stories) == []
+
+
+def test_sports_and_military_senses_are_vetoed() -> None:
+    """Глаголы лексикона многозначны; вне своего домена они дают ложную схему.
+
+    Все примеры — из первого замера 58 трендов, где они попали в тренды ошибочно.
+    """
+    out_of_scope = [
+        "Why is Hamilton getting so many penalties? - F1 Q&A",
+        "Como becomes the first club to ban headers in their youth academy",
+        "Chelsea's Mudryk free to play as agreement cuts doping ban",
+        "Israel raises defense alert over possible US strikes on Iran",
+        "the Islamists have Launched an attack in Ceuta",
+        "Pirlo out of Italy coach race after scrutiny over betting",
+    ]
+
+    assert [extract_action(title) for title in out_of_scope] == [None] * len(out_of_scope)
+
+
+def test_in_scope_actions_survive_the_veto() -> None:
+    in_scope = {
+        "US bans Chinese open source AI models": "ban",
+        "Pixar lays off over 100 Bay Area workers": "layoffs",
+        "EU fines Google 890mn over ad tech": "regulator_fine",
+        "Amazon workers strike over pay": "protest",
+        "Anthropic raises $3.5B in a new funding round": "funding",
+    }
+
+    for title, expected in in_scope.items():
+        action = extract_action(title)
+        assert action is not None and action[0] == expected, title
+
+
+def test_trend_names_use_the_source_language() -> None:
+    """Имена — на английском, как в оригинальных материалах, без перевода."""
+    stories = [
+        _story("s1", "Amazon lays off 14000 managers", "2026-07-28", "labor_career"),
+        _story("s2", "Salesforce cuts 4000 jobs", "2026-07-29", "labor_career"),
+        _story("s3", "Intel announces fresh layoffs", "2026-07-30", "labor_career"),
+    ]
+
+    name = discover_schema_trends(stories)[0]["name_ru"]
+
+    assert name == "layoffs in the labour market"
+    assert not any("а" <= char <= "я" for char in name.lower())
