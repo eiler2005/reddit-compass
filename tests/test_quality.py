@@ -34,6 +34,44 @@ def test_evaluate_floors_pass_and_fail() -> None:
     assert by_metric["trends_bad_name_count"].passed is False
 
 
+def test_completeness_floors_separate_collapsed_from_working_releases() -> None:
+    """Полы полноты обязаны лежать в зазоре между схлопыванием и рабочей полосой.
+
+    Числа — фактические замеры на 2026-07-26_2026-08-01-broad-r2 и на замороженном
+    2026-07-23_2026-07-29-broad-r1. Прежние значения (90 / 35 / 0.85) стояли на потолке
+    достижимого: их брала ровно одна точка порога CrossEncoder, и +0.03 к нему давало
+    провал. Тест фиксирует, что полы снова не съедут на край фронтира.
+    """
+    stable = {
+        "stories_overmerge_ge5": 0,
+        "stories_overmerge_ge8": 0,
+        "trends_bad_name_count": 0,
+        "trends_duplicate_name_count": 0,
+    }
+
+    def failed(multi: float, cross: float, compression: float) -> set[str]:
+        metrics = {
+            **stable,
+            "stories_multi_per_1k": multi,
+            "stories_cross_source_per_1k": cross,
+            "stories_compression": compression,
+        }
+        return {r.metric for r in evaluate_floors(metrics) if not r.passed}
+
+    completeness = {
+        "stories_multi_per_1k",
+        "stories_cross_source_per_1k",
+        "stories_compression",
+    }
+    # Схлопнутый слой Stories — то, ради чего полы и вводились.
+    assert failed(51.9, 19.8, 0.9306) == completeness
+    assert failed(42.2, 12.1, 0.9496) == completeness
+    # Вся измеренная рабочая полоса, от самого консервативного порога до самого мягкого.
+    assert failed(77.1, 35.1, 0.8681) == set()
+    assert failed(80.8, 36.8, 0.8567) == set()
+    assert failed(90.1, 41.2, 0.8353) == set()
+
+
 def test_evaluate_regressions_detects_worsening() -> None:
     baseline = {
         "stories_overmerge_ge5": 0,
