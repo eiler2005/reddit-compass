@@ -56,6 +56,11 @@
 
 ## Host-cron (скидка Qwen 17:00–03:00 МСК = 14:00–00:00 UTC)
 
+> **Paused 2026-08-02:** owner runs collection and Engine manually until a new
+> 2–3 day cadence is agreed. The Docker cache-maintenance job remains enabled;
+> it neither collects data nor calls Qwen. The commands below are the restoration
+> template, not active collection jobs.
+
 Collector и Engine запускаются раздельно. LLM не влияет на статус raw collection;
 он оценивает лишь ограниченную серую зону Story/Trend Engine. Broad не обновляется от
 partial Data Release или failed quality gate.
