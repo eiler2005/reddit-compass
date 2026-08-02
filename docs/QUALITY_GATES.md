@@ -187,6 +187,32 @@ human ground truth. Получилось 18 `valid_group` и 12 `overmerge`, т�
 Подготовительный этап закрыт; следующий допустимый шаг — изолированный zero-shot POC новых
 event-frame признаков с тем же frozen input и этим Golden Set только для оценки.
 
+### Zero-shot GLiNER event-frame POC — no integration (2026-08-02)
+
+Проверен локальный `gliner-community/gliner_small-v2.5` на 177 уникальных материалах из
+120 размеченных пар `stories_d7e2ffe73c6dd7cdd991`. Это был read-only запуск во временном
+окружении: ни обучение, ни запись в `trend_engine.db`, ни новая зависимость проекта, ни deploy
+не выполнялись. На CPU вместе с загрузкой модели обработка заняла **7.9 s**.
+
+Модель действительно извлекает более полные сущности — например `Johnson & Johnson`, а не
+отдельный токен `johnson`; сравнение учитывало и exact spans, и phrase-aware совпадение
+совместимых типов (person/organization, location, money, percentage, date). Но на Golden Set
+это не улучшило нужный decision signal:
+
+| proxy-метрика | текущие facets | GLiNER phrase-aware |
+| --- | ---: | ---: |
+| same-story pairs с общим anchor | 90.14% | 74.65% |
+| different-story pairs с коллизией anchor | 30.61% | 26.53% |
+| precision правила «есть общий anchor» | 81.01% | 80.30% |
+| false auto-merges с общим anchor | 6 / 6 | 5 / 6 |
+
+Понижение коллизий слишком мало, а потеря coverage существенна; GLiNER NER не различает
+ключевые ложные слияния текущего кандидата — связанные, но разные развития одной темы. Решение:
+не интегрировать GLiNER в Engine и не добавлять его в lockfile. Артефакт POC остаётся в scratch
+и служит отрицательным, воспроизводимым результатом. Следующий POC имеет смысл только для
+структурной cross-document event-coreference/adjudication модели или внешнего event graph, а не
+для ещё одного NER-слоя.
+
 ## Исторический статус: 8 полов из 11 (2026-07-31)
 
 Замер на 7-дневном broad `2026-07-23_2026-07-29-broad-r1` с тогдашними порогами эмбеддингов,

@@ -49,6 +49,10 @@
   но оставила precision 0.8571. Все 30 групп проверены (10 human, 20 `assistant_review`):
   12 из 30 — overmerge, rate 0.40. Ветка не проходит gate, не включена по умолчанию и не
   влияет на production.
+- **GLiNER zero-shot POC.** Локальный read-only запуск `gliner_small-v2.5` на 177 материалах
+  Golden Set подтвердил качественные named-entity spans, но не улучшил decision signal:
+  phrase-aware anchor coverage same-story 74.65% против 90.14% у текущих facets, precision
+  80.30% против 81.01%. Зависимость не добавлена, Engine и production не изменены.
 - **Ручной режим production.** Ночные jobs collection/finalize/Engine на VPS отключены;
   публикация и каждый запуск остаются ручными до согласования нового интервала. Аудит Plan v4
   на изолированном релизе задокументирован в `docs/QUALITY_GATES.md`: текущий retrieval не
