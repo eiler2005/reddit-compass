@@ -46,8 +46,9 @@
   же frozen broad проходит structural floors (compression 0.8287; 100.7 multi и 48.6
   cross-source на 1k), но по смешанным 120 pair-labels даёт precision 0.8571 и recall 0.4800.
   Независимая human QA девяти спорных пар исправила четыре метки и подняла recall до 0.5070,
-  но оставила precision 0.8571 и human overmerge rate 0.40 по десяти группам. Ветка не
-  проходит gate, не включена по умолчанию и не влияет на production.
+  но оставила precision 0.8571. Все 30 групп проверены (10 human, 20 `assistant_review`):
+  12 из 30 — overmerge, rate 0.40. Ветка не проходит gate, не включена по умолчанию и не
+  влияет на production.
 - **Ручной режим production.** Ночные jobs collection/finalize/Engine на VPS отключены;
   публикация и каждый запуск остаются ручными до согласования нового интервала. Аудит Plan v4
   на изолированном релизе задокументирован в `docs/QUALITY_GATES.md`: текущий retrieval не
