@@ -2361,6 +2361,16 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "llm_merge_min_confidence": 0.85,
     "exclude_routine": True,
     "medoid_min_score": DEFAULT_MEDOID_MIN_SCORE,
+    # An experimental recovery path for a release that is proven to under-merge.
+    # It promotes only review pairs with minimum lexical/entity/time evidence and
+    # joins them into bounded components.  It is off by default: a human Golden
+    # Set must validate a concrete attempt before this can ever become a default.
+    "bounded_component_enabled": False,
+    "bounded_component_max_items": 4,
+    "bounded_component_min_title_score": 0.50,
+    "bounded_component_min_token_jaccard": 0.08,
+    "bounded_component_min_entity_score": 0.50,
+    "bounded_component_max_days": 7,
 }
 
 
@@ -3811,6 +3821,16 @@ def _score_story_pair(
     if _both_show_hn or _same_provider_hn:
         # Show HN / same-provider HN: semantic-only merge blocked
         dense_event_match = False
+    bounded_component_candidate = bool(
+        params.get("bounded_component_enabled", False)
+        and not _both_show_hn
+        and not _same_provider_hn
+        and title_score >= float(params.get("bounded_component_min_title_score", 0.50))
+        and token_jaccard >= float(params.get("bounded_component_min_token_jaccard", 0.08))
+        and entity_score >= float(params.get("bounded_component_min_entity_score", 0.50))
+        and date_distance <= int(params.get("bounded_component_max_days", 7))
+        and not hard_conflict
+    )
     if hard_conflict:
         decision = "reject"
         reason = "number/date event conflict"
@@ -3864,6 +3884,10 @@ def _score_story_pair(
         "stable_landing_url_match": bool(shared_urls),
     }
     candidate_features.update(near_duplicate_features)
+    if decision == "review" and bounded_component_candidate:
+        decision = "auto_merge"
+        reason = "bounded component evidence candidate"
+        candidate_features["bounded_component_candidate"] = True
     # Фаза 3: обученная модель решает исход серой зоны. Жёсткие правила (auto_merge по
     # provenance-якорям и reject по hard conflicts) остаются детерминированными — модель
     # применяется только к парам, которые лестница отправила в review.
@@ -3897,7 +3921,7 @@ def _constrained_story_groups(
     *,
     params: dict[str, Any],
 ) -> list[list[tuple[FrozenItem, float, str]]]:
-    """Merge only auto edges while validating every new member against a medoid."""
+    """Merge auto edges under the default medoid guard or an explicit bounded experiment."""
     item_by_id = {item.item_id: item for item in items}
     groups: dict[str, list[str]] = {item.item_id: [item.item_id] for item in items}
     owner = {item.item_id: item.item_id for item in items}
@@ -3915,6 +3939,11 @@ def _constrained_story_groups(
         left_group = groups[left_owner]
         right_group = groups[right_owner]
         merged_ids = sorted(set(left_group + right_group))
+        bounded_components = bool(params.get("bounded_component_enabled", False))
+        if bounded_components and len(merged_ids) > int(
+            params.get("bounded_component_max_items", 4)
+        ):
+            continue
         if _single_provider_large_group_without_event_url(
             merged_ids,
             item_by_id,
@@ -3922,14 +3951,15 @@ def _constrained_story_groups(
             max_size=int(params.get("single_provider_without_event_url_max_items", 3)),
         ):
             continue
-        medoid_id = _choose_medoid(merged_ids, pair_by_ids)
-        if not _valid_group_against_medoid(
-            merged_ids,
-            medoid_id,
-            pair_by_ids,
-            min_score=float(params.get("medoid_min_score", DEFAULT_MEDOID_MIN_SCORE)),
-        ):
-            continue
+        if not bounded_components:
+            medoid_id = _choose_medoid(merged_ids, pair_by_ids)
+            if not _valid_group_against_medoid(
+                merged_ids,
+                medoid_id,
+                pair_by_ids,
+                min_score=float(params.get("medoid_min_score", DEFAULT_MEDOID_MIN_SCORE)),
+            ):
+                continue
         groups[left_owner] = merged_ids
         del groups[right_owner]
         for item_id in merged_ids:
@@ -3950,7 +3980,11 @@ def _constrained_story_groups(
                     membership_candidate.score if membership_candidate else 0.0,
                     membership_candidate.reason
                     if membership_candidate
-                    else "constrained membership",
+                    else (
+                        "bounded component membership without direct medoid edge"
+                        if params.get("bounded_component_enabled", False)
+                        else "constrained membership"
+                    ),
                 )
             )
         result.append(group)
@@ -6384,6 +6418,9 @@ def export_golden_candidates(
         (story_release_id,),
     ).fetchall()
     by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    by_decision_domain: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     review_records: list[dict[str, Any]] = []
     for row in rows:
         item_id_a = str(row["item_id_a"])
@@ -6441,23 +6478,23 @@ def export_golden_candidates(
             | set(_json_list(facets.get(item_id_b, {}).get("domain_ids"), ["other"]))
         )
         primary_domain = domains[0] if domains else "other"
-        by_domain[primary_domain].append(
-            {
-                "pair_id": pair_id,
-                "item_id_a": item_id_a,
-                "item_id_b": item_id_b,
-                "title_a": item_a.title,
-                "title_b": item_b.title,
-                "provider_a": item_a.provider,
-                "provider_b": item_b.provider,
-                "domains": domains,
-                "score": float(row["score"]),
-                "engine_decision": decision,
-                "features": features,
-                "label": "",
-                "note": "",
-            }
-        )
+        record = {
+            "pair_id": pair_id,
+            "item_id_a": item_id_a,
+            "item_id_b": item_id_b,
+            "title_a": item_a.title,
+            "title_b": item_b.title,
+            "provider_a": item_a.provider,
+            "provider_b": item_b.provider,
+            "domains": domains,
+            "score": float(row["score"]),
+            "engine_decision": decision,
+            "features": features,
+            "label": "",
+            "note": "",
+        }
+        by_domain[primary_domain].append(record)
+        by_decision_domain[decision][primary_domain].append(record)
 
     if output_format == "review":
         sample_size = pair_limit if sample is None else sample
@@ -6470,7 +6507,32 @@ def export_golden_candidates(
             "pairs": selected,
         }
 
-    pairs = _round_robin_strata(by_domain, pair_limit)
+    # Pair precision must be checked on actual automatic merges, while recall needs
+    # unresolved/rejected candidates.  A domain-only round robin was biased by the
+    # SQL ordering above and could export almost no ``auto_merge`` rows, leaving a
+    # new merge path effectively unreviewed.
+    auto_limit = math.ceil(pair_limit * 0.50)
+    review_limit = math.ceil(pair_limit * 0.40)
+    decision_limits = (
+        ("auto_merge", auto_limit),
+        ("review", review_limit),
+        ("reject", max(0, pair_limit - auto_limit - review_limit)),
+    )
+    pairs: list[dict[str, Any]] = []
+    selected_pair_ids: set[str] = set()
+    for decision, limit in decision_limits:
+        selected = _round_robin_strata(by_decision_domain.get(decision, {}), limit)
+        pairs.extend(selected)
+        selected_pair_ids.update(str(pair["pair_id"]) for pair in selected)
+    if len(pairs) < pair_limit:
+        remaining_by_domain = {
+            domain: [
+                record for record in records if str(record["pair_id"]) not in selected_pair_ids
+            ]
+            for domain, records in by_domain.items()
+        }
+        pairs.extend(_round_robin_strata(remaining_by_domain, pair_limit - len(pairs)))
+    pairs.sort(key=lambda record: (-float(record["score"]), str(record["pair_id"])))
 
     story_rows = conn.execute(
         """

@@ -13,7 +13,9 @@ import pytest
 
 from reddit_compass.intelligence.engine import (
     FrozenItem,
+    PairCandidate,
     _add_index_pairs,
+    _constrained_story_groups,
     _discover_trends_graph,
     _story_topic_keys,
     active_label_story_pairs,
@@ -506,6 +508,79 @@ def test_cross_source_event_title_match_merges_news_but_not_topic_posts() -> Non
     assert all(candidate.decision != "auto_merge" for candidate in topic_candidates)
 
 
+def test_bounded_component_experiment_promotes_only_explicit_review_candidates() -> None:
+    items = [
+        _frozen_item(
+            "reuters:atlas-one",
+            "https://reuters.example/atlas-one",
+            "OpenAI unveils Atlas after security review",
+            "2026-07-29T08:00:00Z",
+        ),
+        _frozen_item(
+            "reuters:atlas-two",
+            "https://reuters.example/atlas-two",
+            "OpenAI Atlas launch follows security review",
+            "2026-07-30T08:00:00Z",
+        ),
+    ]
+    facets = {item.item_id: {"entities": json.dumps(["openai", "atlas"])} for item in items}
+
+    default_candidates = generate_story_candidates(
+        items,
+        facets,
+        params={"near_duplicate_enabled": False},
+    )
+    experiment_candidates = generate_story_candidates(
+        items,
+        facets,
+        params={
+            "near_duplicate_enabled": False,
+            "bounded_component_enabled": True,
+        },
+    )
+
+    assert default_candidates[0].decision == "review"
+    assert experiment_candidates[0].decision == "auto_merge"
+    assert experiment_candidates[0].reason == "bounded component evidence candidate"
+    assert experiment_candidates[0].features["bounded_component_candidate"] is True
+
+
+def test_bounded_component_experiment_caps_chain_at_four_items() -> None:
+    items = [
+        _frozen_item(
+            f"provider{index}:item",
+            f"https://example.test/{index}",
+            f"Atlas launch evidence {index}",
+            "2026-07-29T08:00:00Z",
+        )
+        for index in range(5)
+    ]
+    candidates = [
+        PairCandidate(
+            item_id_a=items[index].item_id,
+            item_id_b=items[index + 1].item_id,
+            score=0.8,
+            decision="auto_merge",
+            reason="bounded component evidence candidate",
+            features={},
+        )
+        for index in range(4)
+    ]
+
+    groups = _constrained_story_groups(
+        items,
+        candidates,
+        params={"bounded_component_enabled": True, "bounded_component_max_items": 4},
+    )
+
+    assert sorted(len(group) for group in groups) == [1, 4]
+    assert any(
+        membership_reason == "bounded component membership without direct medoid edge"
+        for group in groups
+        for _item, _score, membership_reason in group
+    )
+
+
 def test_story_engine_ab_compare_runs_all_variants(tmp_path: Path) -> None:
     corpus_path = tmp_path / "compass.db"
     corpus = _seed_corpus(corpus_path)
@@ -935,6 +1010,21 @@ def test_golden_review_export_includes_only_review_decision_pairs(tmp_path: Path
     exported_ids = {pair["pair_id"] for pair in golden["pairs"]}
     assert "mainstream_19|voices_19" not in exported_ids
     assert "business_19|developers_19" not in exported_ids
+
+
+def test_golden_set_export_reserves_pairs_for_each_engine_decision(tmp_path: Path) -> None:
+    engine, story_release_id = _seed_review_sample_release(tmp_path)
+
+    golden = export_golden_candidates(
+        engine,
+        story_release_id,
+        pair_limit=20,
+        group_limit=0,
+    )
+
+    decisions = {pair["engine_decision"] for pair in golden["pairs"]}
+    assert len(golden["pairs"]) == 20
+    assert {"auto_merge", "review", "reject"} <= decisions
 
 
 def test_golden_review_export_favors_the_decision_boundary_window(tmp_path: Path) -> None:
