@@ -239,3 +239,19 @@ def test_low_signal_stories_never_reach_the_trend_layer() -> None:
 
     for title in published_as_trends:
         assert is_low_signal_title(title) or is_routine_beat(title), title
+
+
+def test_unmapped_domains_still_get_distinct_names() -> None:
+    """Разные схемы обязаны давать разные имена, иначе релиз падает на поле дублей.
+
+    `_DOMAIN_LABELS` покрывает только частые домены. Для остальных метка была пустой,
+    поэтому layoffs|finance_consumer и layoffs|climate_energy назывались одинаково —
+    боевой прогон schema_v2 упал на `trends_duplicate_name_count`.
+    """
+    domains = ("labor_career", "finance_consumer", "climate_energy", "ai_technology")
+    names = [
+        story_schema(_story("s", "Amazon lays off 14000 managers", "2026-08-01", d))[1]  # type: ignore[index]
+        for d in domains
+    ]
+
+    assert len(set(names)) == len(domains), names

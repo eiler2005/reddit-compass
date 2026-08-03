@@ -237,7 +237,11 @@ def story_schema(story: dict[str, Any]) -> tuple[str, str, str] | None:
         return None
     action_key, label = action
     domain = _story_domain(story)
-    domain_label = _DOMAIN_LABELS.get(domain, "")
+    # Незнакомый домен обязан давать своё имя, а не пустое: иначе ключи
+    # layoffs|finance_consumer и layoffs|climate_energy дают одинаковое имя «layoffs»
+    # и релиз падает на поле trends_duplicate_name_count. Словарь покрывает только
+    # частые домены, поэтому для остальных берём сам идентификатор.
+    domain_label = _DOMAIN_LABELS.get(domain, f"in {domain.replace('_', ' ')}" if domain else "")
     key = f"{action_key}|{domain}" if domain else action_key
     name = f"{label} {domain_label}".strip() if domain_label else label
     return key, name, extract_actor(title)
