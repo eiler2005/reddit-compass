@@ -4465,6 +4465,17 @@ def create_trend_release(
         "trends", story_release_id, window, method, params_hash, created_at
     )
     stories = _load_engine_stories(conn, story_release_id)
+    # Низкосигнальные заголовки отсеивались только при слиянии пар (`_score_story_pair`),
+    # а слой Trends строится поверх уже готовых сюжетов и этой проверки не имел. В
+    # опубликованном shadow-релизе из-за этого висели «тренды» вида
+    # «discussion advice thread july general» и «moronic monday question thread june july»
+    # — регулярные треды, а не паттерны. Фильтр общий для всех методов открытия трендов.
+    stories = [
+        story
+        for story in stories
+        if not is_low_signal_title(str(story.get("title") or ""))
+        and not is_routine_beat(str(story.get("title") or ""))
+    ]
     # Verified-only: filter stories to provenance-verified set
     if verified_only:
         from .verified_stories import get_verified_story_ids

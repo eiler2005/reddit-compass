@@ -221,3 +221,21 @@ def test_min_distinct_actors_is_configurable() -> None:
 
     assert _discover_trends_schema_v2(stories, params={}) == []
     assert len(_discover_trends_schema_v2(stories, params={"trend_min_distinct_actors": 1})) == 1
+
+
+def test_low_signal_stories_never_reach_the_trend_layer() -> None:
+    """Регулярные треды отсеивались только при слиянии пар, но не на слое Trends.
+
+    В опубликованном shadow-релизе из-за этого висели «тренды»
+    «discussion advice thread july general» и «moronic monday question thread june july».
+    """
+    from reddit_compass.intelligence.clustering import is_low_signal_title
+    from reddit_compass.intelligence.taxonomy import is_routine_beat
+
+    published_as_trends = [
+        "Daily General Discussion and Advice Thread - July 30, 2026",
+        "Moronic Monday - June 15, 2026 - Your Weekly Questions Thread",
+    ]
+
+    for title in published_as_trends:
+        assert is_low_signal_title(title) or is_routine_beat(title), title
