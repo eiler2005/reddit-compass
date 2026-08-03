@@ -150,9 +150,98 @@ reddit-compass engine rollback --channel broad --to PUBLICATION_ID
 Параметры v2: `min_stories` (3), `min_dates` (2), `trend_min_distinct_actors` (2).
 Последний — то самое условие, отличающее тренд от сюжетной линии одного актора.
 
-**Что не сделано:** акторы конкретные, а не типизированные. Контракт «across different
-companies» полностью заработает, когда актор абстрагируется до типа (tech-компания,
-регулятор, профсоюз). Это отдельный zero-shot POC по тому же протоколу: замер → фронтир → пол.
+### Поколение 4 — типизация акторов и глубина ключа (`trend_schema_depth`)
+
+Гранулярность задаётся числом компонентов схемного ключа, и это теперь параметр релиза:
+
+```
+2  (действие, домен)               `product launches in AI`        уровень theme
+3  (действие, домен, тип актора)   `… by companies` / `by countries`  уровень key event
+```
+
+Третьим компонентом идёт **тип** актора, а не сам актор. По самому актору каждая группа
+окажется одноакторной по построению, `min_distinct_actors >= 2` не выполнится никогда и
+трендов не останется вообще. Типы даёт GLiNER (`gliner_small-v2.5`, zero-shot, метки
+`company / government agency / person / country`, порог 0.5).
+
+Глубина 3 **только дробит и никогда не удаляет**: строки родителей байт-в-байт равны выводу
+глубины 2, состав родителя — надмножество объединения составов детей. Поэтому shadow-прогон
+меняет ровно одну переменную, а откат на глубину 2 — честное надмножество, а не другой релиз.
+
+Замер на `stories_7d7671de5341a2c91faf` (4 746 сюжетов, таблица типов на 3 194 заголовка):
+
+| метрика | глубина 2 | глубина 3 |
+|---|---:|---:|
+| трендов | 31 | **35** |
+| родителей / детей | 0 / 0 | **2 / 4** |
+| потеряно родителей | — | **0** |
+| доля крупнейшего | 0.63 % | 0.63 % |
+| медиана размера | 8 | 6 |
+| одноакторных | 0 | 0 |
+| дублей имён | 0 | 0 |
+| заголовков с типом | — | 88.9 % |
+
+Полы гейта у обеих глубин одинаковы: `trends_bad_name_count` 0, `trends_duplicate_name_count`
+0, `trends_max_story_share` 0.63 при поле 10.
+
+**Главное ограничение, ради которого стоит читать этот раздел.** Тип актора различает только
+регуляторные действия. Для `launch`, `outage`, `acquisition`, `price_change` таблица
+уместности допускает единственный тип `company` — и это верно по содержанию (человек не
+запускает продукт), но означает, что делить нечем:
+
+| тренд | сюжетов | допустимые типы | фактические типы в группе |
+|---|---:|---|---|
+| `product launches in AI` | 30 | `company` | company 23, person 3, country 1, нет 3 |
+| `outages and breaches in AI` | 30 | `company` | company 21, person 4, country 2 |
+| `bans and restrictions in AI` | 12 | company, country, gov | country 3, company 5, gov 2 ✅ |
+
+То есть исходная претензия — `product launches in AI` читается рубрикой — этим поколением
+**не снята**. Следующий шаг: объект действия четвёртым компонентом ключа
+(`model release` / `product launch` / `feature rollout`), потому что именно объект различает
+запуски.
+
+**Ревизия по содержанию поймала два дефекта, которые метрики не видели** (все структурные
+показатели были зелёными):
+
+* издания протекали в типизированных акторов — `regulatory fines in business by companies`
+  собрал «Financial Times» и «Fox Business». Проверка `_PUBLISHER_TOKENS` жила внутри
+  регулярочного `extract_actor`, а типизированный путь её обходил; вынесена в `is_publisher`
+  и применена к обоим. Заголовки приходят с суффиксом источника «— Fox Business», который
+  GLiNER читает как сущность, поэтому в список добавлен токен `fox`;
+* категории вместо участников — «Artist» в `lawsuits in AI by individuals`, «Open Source» в
+  `regulatory fines in AI by companies`. Ушли в `_NON_ACTOR_STRINGS`.
+
+Таблица уместности типа действию (`_ACTION_ACTOR_TYPES`) снимает случай
+`product launches in business → person: I, Mamdani, Rep. Russell Fry`. Сюжет с недопустимым
+типом **не выбрасывается**, а остаётся в родителе: недопустимый тип — свидетельство, что
+ошиблась типизация, а не сюжет, и покрытие слоя ~5 % такого налога не выдержит.
+
+Заодно починены три из восьми ключей `_DOMAIN_LABELS`: `world` и `science_climate` были
+идентификаторами **рубрик**, а `surveillance_privacy` — опечаткой вместо `security_privacy`,
+из-за чего пять доменов из одиннадцати уходили в фолбэк и назывались
+«layoffs in climate energy infrastructure».
+
+```bash
+# сравнить глубины бок о бок на копии БД, до всякого релиза
+python scripts/measure_trend_variants.py --db copy.db --story-release stories_… \
+    --depth 2 3 --actor-types /tmp/actor_types.json
+
+# таблица типов: VPS отдаёт заголовки, Mac считает (нужен extra [actors])
+reddit-compass engine actors export-titles --story-release stories_… > titles.json
+uv run --extra actors reddit-compass engine actors type --titles titles.json --out actor_types.json
+
+# релиз на глубине 3
+reddit-compass engine trends propose --story-release stories_… --method schema_v2 --trend-depth 3
+```
+
+Зависимость вынесена в extra `[actors]` и **в прод-образ не входит**: лимиты контейнера
+(4g / 4 cpu) выстраданы под cross-encoder, вторую torch-модель туда добавлять нельзя.
+Типизация считается на Mac после цикла и едет в релиз готовой таблицей
+(`scripts/fetch-and-sync.sh`, включается `RC_TREND_DEPTH=3`). Отсутствие таблицы — штатное
+состояние: глубина падает до 2 с предупреждением `ACTOR TYPING FALLBACK` в логе и записью
+`trend_schema_depth_effective` в метриках релиза. Молчаливая деградация запрещена по той же
+причине, по которой написан `EMBEDDING FALLBACK`: прогон не имеет права публиковать один
+алгоритм под именем другого.
 
 ---
 

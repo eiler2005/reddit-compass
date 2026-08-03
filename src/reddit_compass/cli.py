@@ -28,6 +28,7 @@ from .config import DEFAULT_HARVESTS_DIR, DEFAULT_PROFILE, DEFAULT_SNAPSHOTS_DIR
 from .detect_virality import detect_virality
 from .export import render_trends_report, write_snapshot, write_trends_report
 from .fetch_subreddits import fetch_all_subreddits
+from .intelligence.actor_types import DEFAULT_ACTOR_MODEL, DEFAULT_ACTOR_THRESHOLD
 from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
 from .intelligence.engine import DEFAULT_TREND_METHOD
 from .models import PostCard, TrackedThreadState, ViralitySignal
@@ -691,6 +692,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
     """Versioned Story/Trend Engine; never mutates compass.db."""
     from dataclasses import asdict
 
+    from .intelligence.actor_types import dump_actor_types, type_titles
     from .intelligence.engine import (
         DEFAULT_ENGINE_DB_PATH,
         _git_sha,
@@ -719,6 +721,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         label_engine_target,
         list_data_releases,
         list_publications,
+        now_iso,
         open_corpus_readonly,
         prepare_story_review_jobs,
         prepare_trend_review_jobs,
@@ -1084,6 +1087,34 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     )
                 )
                 return
+        if args.engine_group == "actors":
+            if args.engine_action == "export-titles":
+                rows = engine_conn.execute(
+                    "SELECT title FROM engine_stories WHERE story_release_id = ? ORDER BY story_id",
+                    (args.story_release,),
+                ).fetchall()
+                print(json.dumps([str(row["title"] or "") for row in rows], ensure_ascii=False))
+                return
+            if args.engine_action == "type":
+                raw = sys.stdin.read() if args.titles == "-" else Path(args.titles).read_text()
+                titles = [str(title) for title in json.loads(raw)]
+                table = type_titles(titles, model_id=args.model, threshold=float(args.threshold))
+                Path(args.out).write_text(
+                    dump_actor_types(
+                        table,
+                        model_id=args.model,
+                        threshold=float(args.threshold),
+                        built_at=now_iso(),
+                    ),
+                    encoding="utf-8",
+                )
+                print(
+                    json.dumps(
+                        {"titles": len(titles), "typed": len(table), "out": args.out},
+                        ensure_ascii=False,
+                    )
+                )
+                return
         if args.engine_group == "trends":
             if args.engine_action == "propose":
                 trend_release_output = create_trend_release(
@@ -1097,6 +1128,8 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         "trend_medoid_threshold": args.medoid_threshold,
                         "trend_max_feature_df": args.max_feature_df,
                         "trend_max_candidate_pairs": args.max_candidate_pairs,
+                        "trend_schema_depth": args.trend_depth,
+                        **({"actor_types_path": args.actor_types} if args.actor_types else {}),
                     },
                     verified_only=args.verified_only,
                     signal_release_id=args.signal_release,
@@ -1624,6 +1657,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     theme_catalog=theme_catalog,
                     pack_by_subreddit=pack_by_subreddit,
                     trend_method=args.trend_method,
+                    trend_depth=int(args.trend_depth),
                     embed_model=args.embed_model,
                     review_model=args.review_model,
                     review_limit=int(args.review_limit),
@@ -2294,6 +2328,30 @@ def build_parser() -> argparse.ArgumentParser:
     engine_stories_review.add_argument("--limit", type=int, default=100)
     engine_stories_review.add_argument("--model", default="qwen3.6-flash")
 
+    # Типизация акторов разнесена на два шага, потому что цикл идёт на VPS, а
+    # опциональная зависимость [actors] в прод-образ намеренно не входит: VPS отдаёт
+    # заголовки (`export-titles`, чистая операция), Mac считает типы (`type`, нужен
+    # GLiNER) и кладёт таблицу обратно в /data. См. scripts/fetch-and-sync.sh.
+    engine_actors = engine_sub.add_parser("actors", help="Actor typing for schema_v2 depth 3")
+    engine_actors_sub = engine_actors.add_subparsers(dest="engine_action", required=True)
+    engine_actors_export = engine_actors_sub.add_parser(
+        "export-titles",
+        help="Заголовки story-релиза одним JSON-массивом; зависимостей не требует",
+    )
+    engine_actors_export.add_argument("--story-release", required=True)
+    engine_actors_type = engine_actors_sub.add_parser(
+        "type",
+        help="Посчитать типы акторов по заголовкам (требует reddit-compass[actors])",
+    )
+    engine_actors_type.add_argument(
+        "--titles",
+        required=True,
+        help="Файл с JSON-массивом заголовков; «-» — читать stdin",
+    )
+    engine_actors_type.add_argument("--out", required=True, help="Куда записать actor_types.json")
+    engine_actors_type.add_argument("--model", default=DEFAULT_ACTOR_MODEL)
+    engine_actors_type.add_argument("--threshold", type=float, default=DEFAULT_ACTOR_THRESHOLD)
+
     engine_trends = engine_sub.add_parser("trends", help="Trend release operations")
     engine_trends_sub = engine_trends.add_subparsers(
         dest="engine_action",
@@ -2313,6 +2371,21 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose.add_argument("--medoid-threshold", type=float, default=0.4)
     engine_trends_propose.add_argument("--max-feature-df", type=int, default=0)
     engine_trends_propose.add_argument("--max-candidate-pairs", type=int, default=150_000)
+    engine_trends_propose.add_argument(
+        "--trend-depth",
+        type=int,
+        default=2,
+        choices=[2, 3],
+        help=(
+            "Компонентов в схемном ключе (только schema_v2): 2 = (действие, домен), "
+            "3 = + тип актора. На 3 нужна таблица actor_types.json, иначе глубина "
+            "деградирует до 2 с предупреждением."
+        ),
+    )
+    engine_trends_propose.add_argument(
+        "--actor-types",
+        help="Путь к actor_types.json; по умолчанию $DATA_DIR/actor_types.json",
+    )
     engine_trends_propose.add_argument(
         "--verified-only",
         action="store_true",
@@ -2412,6 +2485,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--trend-method",
         default="embedding_v2",
         choices=["story_graph_v1", "embedding_v2", "schema_v2"],
+    )
+    engine_cycle.add_argument(
+        "--trend-depth",
+        type=int,
+        default=2,
+        choices=[2, 3],
+        help="Компонентов в схемном ключе; см. `engine trends propose --trend-depth`.",
     )
     engine_cycle.add_argument(
         "--embed-model",

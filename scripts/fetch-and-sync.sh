@@ -122,6 +122,46 @@ print(json.dumps({'story': sr[0], 'trend': tr[0]}))
     local story_id trend_id
     story_id=$(echo "${release_ids}" | python3 -c "import sys,json; print(json.load(sys.stdin)['story'])")
     trend_id=$(echo "${release_ids}" | python3 -c "import sys,json; print(json.load(sys.stdin)['trend'])")
+
+    # ── Типизация акторов: глубина 3 схемного слоя Trends ───────────────────
+    # Цикл идёт на VPS, а зависимость [actors] (GLiNER → torch) в прод-образ намеренно
+    # не входит: лимиты контейнера 4g/4cpu выстраданы под cross-encoder. Поэтому VPS
+    # отдаёт заголовки готового story-релиза, Mac считает по ним типы и кладёт таблицу
+    # обратно в /data, после чего VPS пересобирает трендовый релиз на глубине 3.
+    #
+    # По умолчанию выключено: ночной прогон публикует на broad с --force, и включать
+    # новую гранулярность без ревизии владельца нельзя. Включение — RC_TREND_DEPTH=3.
+    if [[ "${RC_TREND_DEPTH:-2}" == "3" ]]; then
+        echo "   Типизация акторов для глубины 3 (story=${story_id})..."
+        local titles_tmp types_tmp remote_types
+        titles_tmp="$(mktemp -t rc-titles)"
+        types_tmp="$(mktemp -t rc-actor-types)"
+        remote_types="/tmp/rc-actor-types-${TODAY}.json"
+        if ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+                docker compose run --rm reddit-compass engine actors export-titles \
+                    --story-release ${story_id} 2>/dev/null" > "${titles_tmp}" \
+           && uv run --extra actors reddit-compass engine actors type \
+                    --titles "${titles_tmp}" --out "${types_tmp}"; then
+            scp "${types_tmp}" "${VPS_USER}@${VPS_HOST}:${remote_types}"
+            ssh "${VPS_USER}@${VPS_HOST}" \
+                "docker cp ${remote_types} rc-api:/data/actor_types.json && rm -f ${remote_types}"
+            ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+                docker compose run --rm reddit-compass engine trends propose \
+                    --story-release ${story_id} --method schema_v2 --trend-depth 3 2>&1 | tail -3"
+            trend_id=$(ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+                docker compose run --rm --entrypoint python3 reddit-compass -c \"
+import sqlite3
+conn = sqlite3.connect('/data/trend_engine.db')
+print(conn.execute('SELECT trend_release_id FROM trend_releases ORDER BY created_at DESC LIMIT 1').fetchone()[0])
+\" 2>/dev/null" 2>/dev/null)
+            echo "   Глубина 3 собрана: trend=${trend_id}"
+        else
+            # Деградация — no-op: публикуется депth-2 релиз, собранный самим циклом.
+            echo "⚠️  Типизация не удалась; остаёмся на релизе цикла (глубина 2)." >&2
+        fi
+        rm -f "${titles_tmp}" "${types_tmp}"
+    fi
+
     echo "   Publishing: story=${story_id} trend=${trend_id}"
     ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
         docker compose run --rm reddit-compass engine publish \

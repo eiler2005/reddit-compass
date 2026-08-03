@@ -272,6 +272,14 @@ class TrendOut(BaseModel):
     evidence_story_ids: list[str] = Field(default_factory=list)
     counterpoints: list[str] = Field(default_factory=list)
     review_status: str = "pending"
+    # Иерархия theme → key event: пустой parent_trend_id — корень. Дети приезжают вместе
+    # с корнем, чтобы карточка списка показывала рубрику заголовком над событиями и не
+    # требовала второго запроса.
+    parent_trend_id: str = ""
+    children: list[TrendOut] = Field(default_factory=list)
+    # Сами акторы, а не только их число: выигрыш типизации иначе виден метрике и невиден
+    # человеку. Для schema_v2 `source_count` — это как раз len(distinct_actors).
+    distinct_actors: list[str] = Field(default_factory=list)
     stories: list[PublishedStoryOut] = Field(default_factory=list)
 
 
@@ -870,6 +878,7 @@ def _trend_out(
     *,
     stories: list[PublishedStoryOut] | None = None,
     source_clusters: dict[str, int] | None = None,
+    children: list[TrendOut] | None = None,
 ) -> TrendOut:
     return TrendOut(
         trend_id=str(row["trend_id"]),
@@ -887,6 +896,12 @@ def _trend_out(
         evidence_story_ids=_json_list(row["evidence_story_ids"]),
         counterpoints=_json_list(row["counterpoints"]),
         review_status=str(_row_value(row, "review_status", "pending") or "pending"),
+        # Только через `_row_value`: `open_engine_readonly` не мигрирует, поэтому колонки
+        # может не быть на БД, которой писатель ещё не касался (например, в окно деплоя).
+        # По той же причине эти поля нельзя использовать в SQL WHERE/ORDER BY.
+        parent_trend_id=str(_row_value(row, "parent_trend_id", "") or ""),
+        distinct_actors=_json_list(_row_value(row, "distinct_actors", "[]")),
+        children=list(children or []),
         source_clusters=source_clusters or {},
         stories=stories or [],
     )
@@ -986,8 +1001,17 @@ def _engine_trends(
         """,
         (trend_release.trend_release_id,),
     ).fetchall()
+    # Верхний уровень — рубрики (корни), под каждой её конкретные события. Фильтрация в
+    # Python, а не в SQL: колонки может не быть на немигрированной БД (см. `_trend_out`).
+    children_by_parent: dict[str, list[sqlite3.Row]] = {}
+    for row in rows:
+        parent_id = str(_row_value(row, "parent_trend_id", "") or "")
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(row)
     filtered: list[sqlite3.Row] = []
     for row in rows:
+        if str(_row_value(row, "parent_trend_id", "") or ""):
+            continue
         domain_ids = _json_list(row["domain_ids"])
         project_scores = _json_int_dict(row["project_scores"])
         if domain and domain not in domain_ids:
@@ -1040,6 +1064,9 @@ def _engine_trends(
                 row,
                 stories=stories,
                 source_clusters=clusters_by_trend.get(str(row["trend_id"]), {}),
+                children=[
+                    _trend_out(child) for child in children_by_parent.get(str(row["trend_id"]), [])
+                ],
             )
         )
     return PaginatedTrends(
@@ -1134,10 +1161,21 @@ def _engine_story_detail(
         """,
         (trend_release.trend_release_id, trend_release.trend_release_id, story_id),
     ).fetchall()
+    # Сюжет лежит и в рубрике, и в её конкретном событии. Показывать обе строки — значит
+    # дважды сказать одно и то же, поэтому оставляем самую точную: если среди трендов
+    # сюжета есть ребёнок, его родитель из списка уходит.
+    parents_covered = {
+        str(_row_value(trend_row, "parent_trend_id", "") or "") for trend_row in trend_rows
+    }
+    leaf_rows = [
+        trend_row
+        for trend_row in trend_rows
+        if str(trend_row["trend_id"]) not in parents_covered - {""}
+    ]
     base = _published_story_out(row, evidence_items=evidence)
     return PublishedStoryDetailOut(
         **base.model_dump(),
-        trends=[_trend_out(trend_row) for trend_row in trend_rows],
+        trends=[_trend_out(trend_row) for trend_row in leaf_rows],
         publication_id=publication.publication_id,
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
@@ -1197,7 +1235,16 @@ def _engine_trend_detail(
         )
         for story_row in story_rows
     ]
-    base = _trend_out(row, stories=stories)
+    # Дети рубрики — её конкретные события; на странице тренда это drill-down.
+    child_rows = [
+        child
+        for child in conn.execute(
+            "SELECT * FROM engine_trends WHERE trend_release_id = ? ORDER BY story_count DESC",
+            (trend_release.trend_release_id,),
+        ).fetchall()
+        if str(_row_value(child, "parent_trend_id", "") or "") == trend_id
+    ]
+    base = _trend_out(row, stories=stories, children=[_trend_out(child) for child in child_rows])
     return TrendDetailOut(
         **base.model_dump(),
         publication_id=publication.publication_id,
@@ -1275,6 +1322,12 @@ def _engine_radar(
         # Older engine databases do not have the review table yet.  The
         # candidate view remains usable without the optional Qwen metadata.
         pass
+
+    # На полки идут только рубрики верхнего уровня. Иначе родитель и его собственный
+    # ребёнок занимают две карточки из пяти на Today и говорят одно и то же.
+    trend_rows = [
+        row for row in trend_rows if not str(_row_value(row, "parent_trend_id", "") or "")
+    ]
 
     shelves: dict[str, list[dict[str, Any]]] = {}
     for row in trend_rows:

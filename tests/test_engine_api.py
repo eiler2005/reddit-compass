@@ -1020,3 +1020,116 @@ def test_signal_type_labels_cover_every_canonical_type() -> None:
 
     missing = set(get_args(SignalType)) - set(_SIGNAL_TYPE_LABELS)
     assert not missing, f"нет названий для типов: {sorted(missing)}"
+
+
+def _seed_trend_children(engine_path: Path) -> None:
+    """Рубрика `trend_1` с двумя конкретными событиями под ней.
+
+    Сюжет `story_1` намеренно лежит и в рубрике, и в одном из событий — так его и
+    раскладывает слой: состав родителя надмножество составов детей.
+    """
+    conn = engine_db(engine_path)
+    for trend_id, name, actors in (
+        ("trend_child_a", "Проверяемый тренд by companies", '["Anthropic", "TikTok"]'),
+        ("trend_child_b", "Проверяемый тренд by countries", '["China", "US"]'),
+    ):
+        conn.execute(
+            """
+            INSERT INTO engine_trends (
+                trend_release_id, trend_id, name_ru, pattern, domain_ids,
+                confidence, lifecycle, source_scope, first_seen, last_seen,
+                story_count, source_count, project_scores, evidence_story_ids,
+                review_status, parent_trend_id, distinct_actors
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "trend_test",
+                trend_id,
+                name,
+                "Три независимых события",
+                '["world_geopolitics"]',
+                0.80,
+                "growing",
+                "cross_source",
+                "2026-07-20",
+                "2026-07-29",
+                3,
+                2,
+                "{}",
+                '["story_1"]',
+                "confirmed",
+                "trend_1",
+                actors,
+            ),
+        )
+    conn.execute(
+        """
+        INSERT INTO engine_trend_stories (
+            trend_release_id, trend_id, story_id, membership_score, reason
+        ) VALUES (?, ?, ?, ?, ?)
+        """,
+        ("trend_test", "trend_child_a", "story_1", 0.95, "shared_pattern"),
+    )
+    conn.commit()
+    conn.close()
+
+
+def test_trend_list_shows_roots_with_children_inside_the_card(
+    engine_client: TestClient,
+) -> None:
+    """Верхний уровень — рубрики; конкретные события живут внутри карточки.
+
+    Плоский список из рубрик и их же детей ставил бы их рядом как равные, а это две
+    формулировки одного и того же.
+    """
+    _seed_trend_children(Path(os.environ["RC_ENGINE_DB_PATH"]))
+
+    payload = engine_client.get("/api/v2/engine/trends?channel=broad").json()
+
+    assert [item["trend_id"] for item in payload["items"]] == ["trend_1"]
+    children = payload["items"][0]["children"]
+    assert {child["trend_id"] for child in children} == {"trend_child_a", "trend_child_b"}
+    assert children[0]["distinct_actors"]
+
+
+def test_trend_detail_exposes_its_children(engine_client: TestClient) -> None:
+    _seed_trend_children(Path(os.environ["RC_ENGINE_DB_PATH"]))
+
+    payload = engine_client.get("/api/v2/engine/trends/trend_1?channel=broad").json()
+
+    assert {child["trend_id"] for child in payload["children"]} == {
+        "trend_child_a",
+        "trend_child_b",
+    }
+
+
+def test_story_detail_lists_the_most_specific_trend_only(engine_client: TestClient) -> None:
+    """Сюжет лежит и в рубрике, и в её событии; показывать обе строки — дважды одно."""
+    _seed_trend_children(Path(os.environ["RC_ENGINE_DB_PATH"]))
+
+    payload = engine_client.get("/api/v2/engine/stories/story_1?channel=broad").json()
+
+    trend_ids = {trend["trend_id"] for trend in payload["trends"]}
+    assert trend_ids == {"trend_child_a"}
+
+
+def test_radar_shelves_never_show_a_trend_next_to_its_own_child(
+    engine_client: TestClient,
+) -> None:
+    """Иначе родитель и ребёнок занимают две карточки из пяти на Today."""
+    _seed_trend_children(Path(os.environ["RC_ENGINE_DB_PATH"]))
+
+    payload = engine_client.get("/api/v2/radar/2026-07-29?channel=broad").json()
+
+    shelved = {row["trend_id"] for rows in payload["shelves"].values() for row in rows}
+    assert shelved == {"trend_1"}
+
+
+def test_trend_children_render_on_the_list_page(engine_client: TestClient) -> None:
+    _seed_trend_children(Path(os.environ["RC_ENGINE_DB_PATH"]))
+
+    response = engine_client.get("/trends")
+
+    assert response.status_code == 200
+    assert "Проверяемый тренд by companies" in response.text
+    assert "Anthropic, TikTok" in response.text

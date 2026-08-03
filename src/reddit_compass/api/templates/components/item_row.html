@@ -44,6 +44,22 @@
         {% if row_link_url %}
         <p class="item-row-link"><a href="{{ row_link_url }}">{{ row_link_label or 'Подробнее' }}</a></p>
         {% endif %}
+        {# Конкретные события под рубрикой (theme → key event). Строками внутри карточки,
+           а не отдельными строками списка: иначе рубрика и её же событие стоят рядом как
+           равные и говорят одно и то же. #}
+        {% if row_children %}
+        <ul class="item-row-children">
+            {% for child in row_children %}
+            <li>
+                <a href="/trends/{{ child.trend_id }}?{{ analysis_query }}">{{ child.title }}</a>
+                <span>{{ child.story_count }} событий</span>
+                {% if child.distinct_actors %}
+                <span>{{ child.distinct_actors[:4] | join(", ") }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+        {% endif %}
     </div>
     <div class="item-row-sources">
         {% include "components/source_bar.html" %}

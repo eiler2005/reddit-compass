@@ -686,6 +686,24 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
         "review_id",
         "TEXT NOT NULL DEFAULT ''",
     )
+    # Иерархия трендов: тема (уровень *theme*) держит под собой конкретные события
+    # (*key event*). Пустая строка вместо NULL — как у всех добавленных колонок, и
+    # `_row_value` в api/v2.py всё равно нормализует NULL к дефолту.
+    _ensure_engine_column(
+        conn,
+        "engine_trends",
+        "parent_trend_id",
+        "TEXT NOT NULL DEFAULT ''",
+    )
+    # Акторы схемного слоя нигде не сохранялись: `source_count` держит только их число,
+    # поэтому выигрыш типизации («Got», «Just», «Laid» → «EA», «J2», «Linkedin») был
+    # виден метрике и невиден человеку. Адаптер уже носит список в словаре.
+    _ensure_engine_column(
+        conn,
+        "engine_trends",
+        "distinct_actors",
+        "TEXT NOT NULL DEFAULT '[]'",
+    )
     _ensure_engine_column(
         conn,
         "signal_releases",
@@ -4319,12 +4337,14 @@ def _discover_trends_schema_v2(
     stories: list[dict[str, Any]],
     *,
     params: dict[str, Any],
+    actor_types: dict[str, tuple[str, str]] | None = None,
 ) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
     """Адаптер слоя Trends v2 (event schema induction) к контракту create_trend_release.
 
     В отличие от ``embedding_v2`` группирует не по векторной близости, а по схеме события
-    ``(действие, домен)`` и требует ≥2 различных акторов. Подробности и замеры —
-    ``intelligence/trend_schema.py`` и ``docs/ENGINE_GENERATIONS.md``.
+    ``(действие, домен)`` и требует ≥2 различных акторов. ``trend_schema_depth`` добавляет
+    третьим компонентом ключа тип актора и превращает плоский список в дерево. Подробности
+    и замеры — ``intelligence/trend_schema.py`` и ``docs/ENGINE_GENERATIONS.md``.
     """
     from .trend_schema import discover_schema_trends
 
@@ -4334,7 +4354,19 @@ def _discover_trends_schema_v2(
         min_stories=int(params.get("min_stories", 3)),
         min_dates=int(params.get("min_dates", 2)),
         min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
+        depth=int(params.get("trend_schema_depth", 2)),
+        actor_types=actor_types,
     )
+    # Первый проход считает trend_id каждой записи, второй связывает детей с родителем:
+    # id родителя известен только после того, как посчитан его собственный.
+    id_by_schema_key = {
+        str(trend["schema_key"]): _stable_id(
+            "trend",
+            str(trend["schema_key"]),
+            *sorted(str(story_id) for story_id in trend["story_ids"]),
+        )
+        for trend in raw_trends
+    }
     adapted: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
     for trend in raw_trends:
         story_ids = [str(story_id) for story_id in trend["story_ids"]]
@@ -4359,7 +4391,12 @@ def _discover_trends_schema_v2(
         adapted.append(
             (
                 {
-                    "trend_id": _stable_id("trend", str(trend["schema_key"]), *sorted(story_ids)),
+                    "trend_id": id_by_schema_key[str(trend["schema_key"])],
+                    # Ребёнок схлопнутого родителя естественно получает пустую строку и
+                    # становится корнем — висячей ссылки не возникает.
+                    "parent_trend_id": id_by_schema_key.get(
+                        str(trend.get("parent_schema_key") or ""), ""
+                    ),
                     "name_ru": str(trend["name_ru"]),
                     "pattern": str(trend["pattern"]),
                     "domain_ids": domains,
@@ -4381,6 +4418,55 @@ def _discover_trends_schema_v2(
             )
         )
     return adapted
+
+
+def _reconcile_trend_hierarchy(
+    trends: list[tuple[dict[str, Any], list[tuple[str, float, str]]]],
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Чинит дерево после того, как по нему прошлось LLM-ревью.
+
+    ``apply_cached_trend_reviews`` умеет две вещи, ломающие иерархию:
+
+    * **удалить тренд** — по ``decision == "reject"`` и когда принятых сюжетов меньше
+      трёх. Если удалён родитель, его дети остаются с ``parent_trend_id`` в пустоту и
+      пропадают из плоского списка, который фильтрует по корням. Такой ребёнок обязан
+      сам стать корнем: потерять его со всех поверхностей хуже, чем слегка странный
+      верхний уровень;
+    * **переименовать тренд** — ``review.trend_name_ru``. Если ребёнка переименовали в
+      имя родителя, релиз падает на поле ``trends_duplicate_name_count`` (max 0).
+
+    Обе правки делаются здесь, потому что раньше их делать нечем: до ревью дерево
+    заведомо согласовано, а после — уже поздно, дальше идёт INSERT.
+    """
+    alive = {str(trend["trend_id"]) for trend, _ in trends}
+    seen_names: dict[str, str] = {}
+    reconciled: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
+    # Корни первыми: имя родителя занимает своё место раньше, чем разводятся дети.
+    ordered = sorted(trends, key=lambda entry: bool(entry[0].get("parent_trend_id")))
+    for trend, memberships in ordered:
+        trend_id = str(trend["trend_id"])
+        parent_id = str(trend.get("parent_trend_id") or "")
+        if parent_id and parent_id not in alive:
+            parent_id = ""
+        name = str(trend["name_ru"])
+        if seen_names.get(name, trend_id) != trend_id:
+            name = f"{name} ({trend['source_count']} акторов)"
+        seen_names.setdefault(name, trend_id)
+        reconciled.append(({**trend, "parent_trend_id": parent_id, "name_ru": name}, memberships))
+
+    # Родитель без второго ребёнка больше не родитель. Ребёнка при этом отбрасываем, а не
+    # поднимаем в корни: его состав — подмножество родительского, родитель остаётся и всё
+    # держит. Правило то же, что при открытии, но повторно применить его можно только
+    # здесь — после того, как ревью проредило дерево.
+    children_per_parent = Counter(
+        str(trend["parent_trend_id"]) for trend, _ in reconciled if trend.get("parent_trend_id")
+    )
+    lonely = {parent for parent, count in children_per_parent.items() if count < 2}
+    return [
+        (trend, memberships)
+        for trend, memberships in reconciled
+        if str(trend.get("parent_trend_id") or "") not in lonely
+    ]
 
 
 def _discover_trends_embedding_v2(
@@ -4457,8 +4543,22 @@ def create_trend_release(
         "review_model": "qwen3.8-max-preview",
         "review_prompt_version": TREND_REVIEW_PROMPT_VERSION,
         "verified_only": verified_only,
+        # Ручка гранулярности схемного слоя. Ключ общий для всех методов, поэтому
+        # `params_hash` меняется и у `embedding_v2` — это принято сознательно: релиз
+        # обязан записывать, чем он был сконфигурирован, а два семейства хэшей для
+        # одного метода хуже, чем один сдвиг у всех.
+        "trend_schema_depth": 2,
         **(params or {}),
     }
+    # Отпечаток таблицы типов — только там, где она вообще читается. Без него два релиза с
+    # одинаковым `params_hash` могли бы иметь разное содержание, если файл изменился под
+    # ними; с ним `embedding_v2` не churn'ится на пустом месте.
+    if method == "schema_v2" and int(params["trend_schema_depth"]) >= 3:
+        from .actor_types import actor_types_digest, load_actor_types, resolve_actor_types_path
+
+        params["actor_types_digest"] = actor_types_digest(
+            load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
+        )
     params_hash = _hash_json(params)
     created_at = now_iso()
     trend_release_id = _stable_id(
@@ -4489,8 +4589,31 @@ def create_trend_release(
     frozen_items = {
         item.item_id: item for item in load_frozen_items(conn, facet_release.data_release_id)
     }
+    actor_types: dict[str, tuple[str, str]] = {}
+    requested_depth = int(params.get("trend_schema_depth", 2))
+    effective_depth = requested_depth
     if method == "schema_v2":
-        trends = _discover_trends_schema_v2(stories, params=params)
+        from .actor_types import load_actor_types, resolve_actor_types_path
+
+        if requested_depth >= 3:
+            actor_types = load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
+            if not actor_types:
+                # Прецедент — EMBEDDING FALLBACK: ночной прогон не имеет права публиковать
+                # один алгоритм под именем другого. Глубина 3 без таблицы типов — это
+                # глубина 2, и релиз обязан говорить об этом вслух.
+                effective_depth = 2
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "ACTOR TYPING FALLBACK: actor_types.json not found or empty; "
+                    "trend_schema_depth downgraded %d -> 2",
+                    requested_depth,
+                )
+        trends = _discover_trends_schema_v2(
+            stories,
+            params={**params, "trend_schema_depth": effective_depth},
+            actor_types=actor_types or None,
+        )
     elif method == "embedding_v2":
         trends = _discover_trends_embedding_v2(
             conn,
@@ -4537,7 +4660,24 @@ def create_trend_release(
         model=str(params["review_model"]),
         prompt_version=str(params["review_prompt_version"]),
     )
+    # Ревью могло удалить родителя и переименовать ребёнка — дерево чиним до записи.
+    trends = _reconcile_trend_hierarchy(trends)
     confirmed_trend_count = sum(1 for trend, _ in trends if trend["review_status"] == "confirmed")
+    child_count = sum(1 for trend, _ in trends if trend.get("parent_trend_id"))
+    parent_count = len(
+        {str(trend["parent_trend_id"]) for trend, _ in trends if trend.get("parent_trend_id")}
+    )
+    grouped_ids = {story_id for _, memberships in trends for story_id, _, _ in memberships}
+    typed_grouped = 0
+    if actor_types:
+        from .actor_types import normalize_title_key
+
+        title_by_id = {str(story["story_id"]): str(story.get("title") or "") for story in stories}
+        typed_grouped = sum(
+            1
+            for story_id in grouped_ids
+            if normalize_title_key(title_by_id.get(story_id, "")) in actor_types
+        )
     metrics = {
         "story_count": len(stories),
         "trend_count": len(trends),
@@ -4546,6 +4686,12 @@ def create_trend_release(
         "evidence_coverage": 1.0 if trends else 0.0,
         "confirmed_trend_count": confirmed_trend_count,
         "pending_review_count": len(trends) - confirmed_trend_count,
+        "trend_schema_depth_requested": requested_depth,
+        "trend_schema_depth_effective": effective_depth,
+        "actor_typing_available": bool(actor_types),
+        "actor_typed_share": round(100 * typed_grouped / max(len(grouped_ids), 1), 1),
+        "trend_parent_count": parent_count,
+        "trend_child_count": child_count,
     }
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -4571,8 +4717,9 @@ def create_trend_release(
                    (trend_release_id, trend_id, name_ru, pattern, domain_ids,
                     confidence, lifecycle, source_scope, first_seen, last_seen,
                     story_count, source_count, project_scores, evidence_story_ids,
-                    counterpoints, review_status, review_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    counterpoints, review_status, review_id, parent_trend_id,
+                    distinct_actors)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trend_release_id,
                     trend["trend_id"],
@@ -4591,6 +4738,8 @@ def create_trend_release(
                     _json(trend["counterpoints"]),
                     trend["review_status"],
                     trend["review_id"],
+                    trend.get("parent_trend_id", ""),
+                    _json(trend.get("distinct_actors", [])),
                 ),
             )
             conn.executemany(
@@ -4664,11 +4813,20 @@ def prepare_trend_review_jobs(
         str(story["story_id"]): story
         for story in _load_engine_stories(conn, release.story_release_id)
     }
+    # Ревьюим рубрики верхнего уровня, а не всё подряд. Две причины, и вторая важнее:
+    #   * состав родителя — надмножество составов его детей, поэтому платить за
+    #     пересекающееся содержание дважды незачем;
+    #   * Today показывает корни и фильтрует по `review_status == confirmed`. Если
+    #     ревьюить детей вместо родителей, ни один родитель с детьми не станет
+    #     confirmed и уйдёт с главной страницы.
+    # Кэш при этом продолжает попадать: `input_hash` считается от множества сюжетов, а у
+    # корней оно то же самое, что было на глубине 2.
     rows = conn.execute(
         """
         SELECT trend_id
         FROM engine_trends
         WHERE trend_release_id = ?
+          AND parent_trend_id = ''
         ORDER BY confidence DESC, trend_id
         LIMIT ?
         """,
@@ -6250,6 +6408,7 @@ async def run_engine_cycle(
     theme_catalog: dict[str, list[str]] | None = None,
     pack_by_subreddit: dict[str, str] | None = None,
     trend_method: str = "embedding_v2",
+    trend_depth: int = 2,
     embed_model: str = MODEL2VEC_DEFAULT,
     review_model: str = "qwen3.6-flash",
     review_limit: int = 0,
@@ -6380,8 +6539,18 @@ async def run_engine_cycle(
             params=reviewed_story_params,
         )
         auto_label_story_pairs(conn, stories.story_release_id)
+    # `review_model` передаём явно: `apply_cached_trend_reviews` ищет кэш под ним, а
+    # `store_trend_review_response` пишет под `trend_review_model`. Совпадали они только
+    # потому, что дефолты одинаковы, — с `--trend-review-model X` кэш переставал попадать.
+    trend_params: dict[str, Any] = {
+        "trend_schema_depth": trend_depth,
+        "review_model": trend_review_model,
+    }
     trends = create_trend_release(
-        conn, story_release_id=stories.story_release_id, method=use_trend_method
+        conn,
+        story_release_id=stories.story_release_id,
+        method=use_trend_method,
+        params=trend_params,
     )
     trend_review_attempted = 0
     trend_review_valid = 0
@@ -6416,11 +6585,15 @@ async def run_engine_cycle(
                 trend_review_invalid += 1
         # Re-materialize so cached decisions become confirmed/rejected status
         # on the release that is inspected and potentially published.
+        # `params` здесь обязателен: без него публикуется глубина 2 под `params_hash`,
+        # который утверждает глубину 3, — то есть ровно то, против чего написан
+        # EMBEDDING FALLBACK. Стережёт тест `test_run_engine_cycle_keeps_trend_depth…`.
         if trend_review_valid:
             trends = create_trend_release(
                 conn,
                 story_release_id=stories.story_release_id,
                 method=use_trend_method,
+                params=trend_params,
             )
     pulse_result: dict[str, Any] | None = None
     if pulse:

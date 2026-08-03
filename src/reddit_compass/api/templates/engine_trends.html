@@ -40,9 +40,10 @@
                 ],
                 row_meta=[
                     trend.story_count ~ " событий",
-                    trend.source_count ~ " источников",
+                    trend.source_count ~ " акторов",
                     trend.review_status
                 ],
+                row_children=trend.children,
                 domain_ids=trend.domain_ids,
                 project_scores=trend.project_scores,
                 source_scope=trend.source_scope,

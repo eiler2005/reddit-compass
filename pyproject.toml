@@ -36,6 +36,13 @@ embed = [
 adjudicate = [
   "sentence-transformers>=4,<6",
 ]
+# Типизация акторов для глубины 3 схемного слоя Trends (GLiNER, zero-shot).
+# В прод-образ намеренно не входит: типизация считается на Mac после цикла, а в релиз
+# едет готовой таблицей actor_types.json. Лимиты контейнера (4g / 4 cpu) выстраданы под
+# cross-encoder, и добавлять туда вторую torch-модель нельзя.
+actors = [
+  "gliner>=0.2,<1",
+]
 
 [project.scripts]
 reddit-compass = "reddit_compass.cli:main"

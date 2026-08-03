@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from reddit_compass.intelligence.actor_types import normalize_title_key
+from reddit_compass.intelligence.quality import is_bad_trend_name
 from reddit_compass.intelligence.trend_schema import (
     discover_schema_trends,
     extract_action,
@@ -239,6 +241,293 @@ def test_low_signal_stories_never_reach_the_trend_layer() -> None:
 
     for title in published_as_trends:
         assert is_low_signal_title(title) or is_routine_beat(title), title
+
+
+def _typed(*pairs: tuple[str, str, str]) -> dict[str, tuple[str, str]]:
+    """Таблица типов по заголовкам: ``(заголовок, актор, тип)``."""
+    return {normalize_title_key(title): (actor, kind) for title, actor, kind in pairs}
+
+
+_LAYOFF_STORIES = [
+    _story("s1", "Amazon lays off 14000 managers", "2026-07-28", "labor_career"),
+    _story("s2", "Salesforce cuts 4000 jobs", "2026-07-29", "labor_career"),
+    _story("s3", "Intel announces fresh layoffs", "2026-07-30", "labor_career"),
+]
+
+
+def test_depth_two_output_is_unchanged_by_the_new_parameters() -> None:
+    """Критерий аддитивности: глубина 3 без таблицы типов тождественна глубине 2."""
+    baseline = discover_schema_trends(_LAYOFF_STORIES)
+
+    assert discover_schema_trends(_LAYOFF_STORIES, depth=3, actor_types={}) == baseline
+    assert discover_schema_trends(_LAYOFF_STORIES, depth=3, actor_types=None) == baseline
+
+
+def test_depth_three_splits_a_group_into_children_under_one_parent() -> None:
+    stories = [
+        _story("s1", "EU fines Google 890mn over ad tech", "2026-07-28", "business_markets"),
+        _story("s2", "Brussels fines Apple over app rules", "2026-07-29", "business_markets"),
+        _story("s3", "Ireland fines Meta over data transfers", "2026-07-30", "business_markets"),
+        _story("s4", "Sony penalty over refunds upheld", "2026-07-28", "business_markets"),
+        _story("s5", "Valve faces a penalty over refunds", "2026-07-29", "business_markets"),
+        _story("s6", "Nintendo penalty over pricing stands", "2026-07-30", "business_markets"),
+    ]
+    actor_types = _typed(
+        ("EU fines Google 890mn over ad tech", "EU", "government agency"),
+        ("Brussels fines Apple over app rules", "Brussels", "government agency"),
+        ("Ireland fines Meta over data transfers", "Ireland", "government agency"),
+        ("Sony penalty over refunds upheld", "Sony", "company"),
+        ("Valve faces a penalty over refunds", "Valve", "company"),
+        ("Nintendo penalty over pricing stands", "Nintendo", "company"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+
+    roots = [trend for trend in trends if trend["depth"] == 2]
+    children = [trend for trend in trends if trend["depth"] == 3]
+    assert len(roots) == 1
+    assert len(children) == 2
+    assert {child["actor_type"] for child in children} == {"company", "government agency"}
+    assert all(child["parent_schema_key"] == roots[0]["schema_key"] for child in children)
+
+
+def test_children_strictly_refine_the_parent() -> None:
+    """Глубина 3 только дробит: состав родителя — надмножество составов детей."""
+    stories = [
+        _story("s1", "EU fines Google 890mn over ad tech", "2026-07-28", "business_markets"),
+        _story("s2", "Brussels fines Apple over app rules", "2026-07-29", "business_markets"),
+        _story("s3", "Ireland fines Meta over data transfers", "2026-07-30", "business_markets"),
+        _story("s4", "Sony penalty over refunds upheld", "2026-07-28", "business_markets"),
+        _story("s5", "Valve faces a penalty over refunds", "2026-07-29", "business_markets"),
+        _story("s6", "Nintendo penalty over pricing stands", "2026-07-30", "business_markets"),
+        # Без типа — обязан остаться в родителе и не попасть ни в одного ребёнка.
+        _story("s7", "Regulators weigh a fine over ad tech", "2026-07-31", "business_markets"),
+    ]
+    actor_types = _typed(
+        ("EU fines Google 890mn over ad tech", "EU", "government agency"),
+        ("Brussels fines Apple over app rules", "Brussels", "government agency"),
+        ("Ireland fines Meta over data transfers", "Ireland", "government agency"),
+        ("Sony penalty over refunds upheld", "Sony", "company"),
+        ("Valve faces a penalty over refunds", "Valve", "company"),
+        ("Nintendo penalty over pricing stands", "Nintendo", "company"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+    root = next(trend for trend in trends if trend["depth"] == 2)
+    children = [trend for trend in trends if trend["depth"] == 3]
+
+    child_stories = {story_id for child in children for story_id in child["story_ids"]}
+    assert child_stories <= set(root["story_ids"])
+    assert sum(int(child["story_count"]) for child in children) <= int(root["story_count"])
+    assert "s7" in root["story_ids"]
+    assert "s7" not in child_stories
+
+
+def test_a_single_surviving_child_collapses_into_the_parent() -> None:
+    """Один ребёнок означает, что типизация ничего не разделила.
+
+    Публиковать его — молча потерять нетипизированные сюжеты из слоя с покрытием ~5 %.
+    """
+    actor_types = _typed(
+        ("Amazon lays off 14000 managers", "Amazon", "company"),
+        ("Salesforce cuts 4000 jobs", "Salesforce", "company"),
+        ("Intel announces fresh layoffs", "Intel", "company"),
+    )
+
+    trends = discover_schema_trends(_LAYOFF_STORIES, depth=3, actor_types=actor_types)
+
+    assert [trend["depth"] for trend in trends] == [2]
+    assert trends[0]["story_count"] == 3
+
+
+def test_actor_type_must_be_appropriate_for_the_action() -> None:
+    """`product launches` с типом `person` дал акторов «I», Mamdani, Rep. Russell Fry.
+
+    Проверка контрфактическая: обе подгруппы берут все три порога, поэтому без таблицы
+    уместности здесь родились бы два ребёнка, и один из них — «product launches in AI by
+    individuals». Таблица оставляет ровно одного кандидата, и группа схлопывается.
+    """
+    launches = [
+        _story("s1", "Mamdani launches a new tool for agents", "2026-07-28"),
+        _story("s2", "Rep. Russell Fry unveils a new product", "2026-07-29"),
+        _story("s3", "Sam Altman releases a new service", "2026-07-30"),
+        _story("s4", "OpenAI launches a new model", "2026-07-28"),
+        _story("s5", "Anthropic unveils a new tool", "2026-07-29"),
+        _story("s6", "Mistral releases a new model", "2026-07-30"),
+    ]
+    people = _typed(
+        ("Mamdani launches a new tool for agents", "Mamdani", "person"),
+        ("Rep. Russell Fry unveils a new product", "Rep. Russell Fry", "person"),
+        ("Sam Altman releases a new service", "Sam Altman", "person"),
+    )
+    companies = _typed(
+        ("OpenAI launches a new model", "OpenAI", "company"),
+        ("Anthropic unveils a new tool", "Anthropic", "company"),
+        ("Mistral releases a new model", "Mistral", "company"),
+    )
+
+    # Контроль: у действия, которому люди уместны, такая же разметка даёт двух детей.
+    control = discover_schema_trends(
+        [
+            _story("c1", "Mamdani sues Meta over training data", "2026-07-28"),
+            _story("c2", "Rep. Russell Fry sues OpenAI over privacy", "2026-07-29"),
+            _story("c3", "Sam Altman sues a former partner", "2026-07-30"),
+            _story("c4", "Reddit sues Anthropic over scraping", "2026-07-28"),
+            _story("c5", "Getty sues Stability over images", "2026-07-29"),
+            _story("c6", "Disney sues Midjourney over characters", "2026-07-30"),
+        ],
+        depth=3,
+        actor_types=_typed(
+            ("Mamdani sues Meta over training data", "Mamdani", "person"),
+            ("Rep. Russell Fry sues OpenAI over privacy", "Rep. Russell Fry", "person"),
+            ("Sam Altman sues a former partner", "Sam Altman", "person"),
+            ("Reddit sues Anthropic over scraping", "Reddit", "company"),
+            ("Getty sues Stability over images", "Getty", "company"),
+            ("Disney sues Midjourney over characters", "Disney", "company"),
+        ),
+    )
+    assert {trend["actor_type"] for trend in control} == {"", "person", "company"}
+
+    trends = discover_schema_trends(launches, depth=3, actor_types={**people, **companies})
+
+    assert {trend["actor_type"] for trend in trends} == {""}
+    root = trends[0]
+    assert root["story_count"] == 6, "люди остаются в родителе, а не выбрасываются"
+
+
+def test_a_category_is_not_an_actor() -> None:
+    """GLiNER не отличает «Anthropic» от «AI firms»; для outage тип company допустим."""
+    stories = [
+        _story("s1", "AI firms report an outage", "2026-07-28"),
+        _story("s2", "AI goes down for several hours", "2026-07-29"),
+        _story("s3", "ChatGPT downtime hits users", "2026-07-30"),
+    ]
+    actor_types = _typed(
+        ("AI firms report an outage", "AI firms", "company"),
+        ("AI goes down for several hours", "AI", "company"),
+        ("ChatGPT downtime hits users", "ChatGPT", "company"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+
+    assert all(trend["depth"] == 2 for trend in trends)
+
+
+def test_publishers_are_rejected_on_the_typed_path_too() -> None:
+    """Проверка была только у регулярочного пути, типизированный её обходил.
+
+    В замере глубины 3 на 4 746 сюжетах тренд `regulatory fines in business by companies`
+    из-за этого получил акторов «Financial Times» и «Fox Business» — подпись источника,
+    а не участника события.
+    """
+    stories = [
+        _story("s1", "Financial Times reports a fine on Google", "2026-07-28", "business_markets"),
+        _story("s2", "Fox Business covers a penalty on Apple", "2026-07-29", "business_markets"),
+        _story("s3", "Bloomberg reports a fine on Meta", "2026-07-30", "business_markets"),
+        _story("s4", "China fines a chipmaker over exports", "2026-07-28", "business_markets"),
+        _story("s5", "Russia fines a platform over content", "2026-07-29", "business_markets"),
+        _story("s6", "US sanctions a shipping group", "2026-07-30", "business_markets"),
+    ]
+    actor_types = _typed(
+        ("Financial Times reports a fine on Google", "Financial Times", "company"),
+        ("Fox Business covers a penalty on Apple", "Fox Business", "company"),
+        ("Bloomberg reports a fine on Meta", "Bloomberg", "company"),
+        ("China fines a chipmaker over exports", "China", "country"),
+        ("Russia fines a platform over content", "Russia", "country"),
+        ("US sanctions a shipping group", "US", "country"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+
+    typed_actors = {
+        actor for trend in trends if trend["depth"] == 3 for actor in trend["distinct_actors"]
+    }
+    assert not typed_actors & {"Financial Times", "Fox Business", "Bloomberg"}
+
+
+def test_min_distinct_actors_holds_inside_every_child() -> None:
+    """Условие, из-за которого третьим компонентом не может быть сам актор."""
+    stories = [
+        _story("s1", "EU fines Google 890mn over ad tech", "2026-07-28", "business_markets"),
+        _story("s2", "Brussels fines Apple over app rules", "2026-07-29", "business_markets"),
+        _story("s3", "Ireland fines Meta over data transfers", "2026-07-30", "business_markets"),
+        _story("s4", "Sony penalty over refunds upheld", "2026-07-28", "business_markets"),
+        _story("s5", "Sony penalty over pricing stands", "2026-07-29", "business_markets"),
+        _story("s6", "Sony penalty over ads upheld", "2026-07-30", "business_markets"),
+    ]
+    # Три сюжета одного актора — сюжетная линия, а не паттерн: ребёнка быть не должно.
+    actor_types = _typed(
+        ("EU fines Google 890mn over ad tech", "EU", "government agency"),
+        ("Brussels fines Apple over app rules", "Brussels", "government agency"),
+        ("Ireland fines Meta over data transfers", "Ireland", "government agency"),
+        ("Sony penalty over refunds upheld", "Sony", "company"),
+        ("Sony penalty over pricing stands", "Sony", "company"),
+        ("Sony penalty over ads upheld", "Sony", "company"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+
+    assert "company" not in {trend["actor_type"] for trend in trends}
+    for trend in trends:
+        assert len(trend["distinct_actors"]) >= 2
+
+
+def test_child_names_extend_the_parent_and_stay_distinct() -> None:
+    """Поле `trends_duplicate_name_count` — max 0, дубль имени валит релиз."""
+    stories = [
+        _story("s1", "EU fines Google 890mn over ad tech", "2026-07-28", "business_markets"),
+        _story("s2", "Brussels fines Apple over app rules", "2026-07-29", "business_markets"),
+        _story("s3", "Ireland fines Meta over data transfers", "2026-07-30", "business_markets"),
+        _story("s4", "Sony penalty over refunds upheld", "2026-07-28", "business_markets"),
+        _story("s5", "Valve faces a penalty over refunds", "2026-07-29", "business_markets"),
+        _story("s6", "Nintendo penalty over pricing stands", "2026-07-30", "business_markets"),
+    ]
+    actor_types = _typed(
+        ("EU fines Google 890mn over ad tech", "EU", "government agency"),
+        ("Brussels fines Apple over app rules", "Brussels", "government agency"),
+        ("Ireland fines Meta over data transfers", "Ireland", "government agency"),
+        ("Sony penalty over refunds upheld", "Sony", "company"),
+        ("Valve faces a penalty over refunds", "Valve", "company"),
+        ("Nintendo penalty over pricing stands", "Nintendo", "company"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+    names = [str(trend["name_ru"]) for trend in trends]
+    root_name = next(str(t["name_ru"]) for t in trends if t["depth"] == 2)
+
+    assert len(set(names)) == len(names)
+    assert not any(is_bad_trend_name(name) for name in names)
+    assert sorted(name for name in names if name != root_name) == [
+        f"{root_name} by companies",
+        f"{root_name} by government agencies",
+    ]
+
+
+def test_child_keys_always_use_three_slots() -> None:
+    """Иначе сюжет без домена дал бы `layoffs|company` и столкнулся с доменом «company»."""
+    stories = [
+        {**_story("s1", "EU fines Google 890mn over ad tech", "2026-07-28"), "domain_ids": []},
+        {**_story("s2", "Brussels fines Apple over app rules", "2026-07-29"), "domain_ids": []},
+        {**_story("s3", "Ireland fines Meta over data transfers", "2026-07-30"), "domain_ids": []},
+        {**_story("s4", "Sony penalty over refunds upheld", "2026-07-28"), "domain_ids": []},
+        {**_story("s5", "Valve faces a penalty over refunds", "2026-07-29"), "domain_ids": []},
+        {**_story("s6", "Nintendo penalty over pricing stands", "2026-07-30"), "domain_ids": []},
+    ]
+    actor_types = _typed(
+        ("EU fines Google 890mn over ad tech", "EU", "government agency"),
+        ("Brussels fines Apple over app rules", "Brussels", "government agency"),
+        ("Ireland fines Meta over data transfers", "Ireland", "government agency"),
+        ("Sony penalty over refunds upheld", "Sony", "company"),
+        ("Valve faces a penalty over refunds", "Valve", "company"),
+        ("Nintendo penalty over pricing stands", "Nintendo", "company"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
+
+    children = [trend for trend in trends if trend["depth"] == 3]
+    assert children
+    assert all(str(child["schema_key"]).count("|") == 2 for child in children)
+    assert "regulator_fine||company" in {str(child["schema_key"]) for child in children}
 
 
 def test_unmapped_domains_still_get_distinct_names() -> None:

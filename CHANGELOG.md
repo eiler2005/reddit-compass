@@ -7,6 +7,36 @@
 
 ### Added
 
+- **Ручка гранулярности трендов: `trend_schema_depth`.** Схемный ключ был жёстко
+  `(действие, домен)` — уровень *theme* в терминах research, из-за чего
+  `product launches in AI` на 37 сюжетов читался рубрикой, а не паттерном. Теперь глубина —
+  параметр релиза: `2` = как было, `3` = плюс **тип** актора (`… by companies`,
+  `… by countries`), то есть уровень *key event*. Третьим компонентом может быть только тип:
+  по самому актору каждая группа одноакторна по построению, и `min_distinct_actors >= 2` —
+  само определение тренда — не выполнится никогда.
+
+  Глубина 3 только дробит и никогда не удаляет: строки родителей байт-в-байт равны выводу
+  глубины 2, состав родителя — надмножество составов детей. Замер на 4 746 сюжетах:
+  31 → 35 трендов, 2 родителя и 4 ребёнка, потеряно 0, дублей имён 0, одноакторных 0,
+  полы гейта не сдвинулись. Параметр входит в `params_hash`, откат — публикация прежнего релиза.
+
+  **Претензию про `product launches in AI` это не снимает:** тип актора различает только
+  регуляторные действия, а у запусков и сбоев все акторы — компании. Следующий шаг —
+  объект действия четвёртым компонентом. Числа и разбор — `docs/ENGINE_GENERATIONS.md`.
+
+- **Типизация акторов (`intelligence/actor_types.py`, extra `[actors]`).** Zero-shot GLiNER
+  `gliner_small-v2.5` по меткам `company / government agency / person / country`. Даёт третий
+  компонент ключа и чистит списки акторов: `Got, Just, Laid` → `EA, J2, Linkedin`. В прод-образ
+  **не входит** — лимиты контейнера выстраданы под cross-encoder; типизация считается на Mac
+  и едет в релиз готовой таблицей (`RC_TREND_DEPTH=3` в `scripts/fetch-and-sync.sh`).
+  Нет таблицы — глубина падает до 2 с `ACTOR TYPING FALLBACK` в логе и в метриках релиза.
+
+- **Иерархия трендов в API и UI.** Колонки `engine_trends.parent_trend_id` и
+  `distinct_actors`. Список `/trends` показывает рубрики, а конкретные события — строками
+  внутри карточки: «bans and restrictions in AI · by companies 4 · by countries 3».
+  Акторы наконец сохраняются и видны — раньше `source_count` держал только их число, и
+  выигрыш типизации был виден метрике, но не человеку.
+
 - **IPRoyal proxy handoff.** Added a credential-free operational note for the
   IPRoyal Residential sticky-session configuration, Hermes connectivity check,
   and Reddit runtime boundary in `docs/IPROYAL_HANDOFF.md`.
@@ -84,6 +114,22 @@
   и фолбэком, когда model2vec недоступен.
 
 ### Fixed
+
+- **Издания протекали в акторов тренда.** Отсев `_PUBLISHER_TOKENS` жил внутри регулярочного
+  `extract_actor`, а типизированный путь его обходил, поэтому
+  `regulatory fines in business by companies` собрал «Financial Times» и «Fox Business».
+  Проверка вынесена в `is_publisher` и применена к обоим путям. Заголовки приходят с суффиксом
+  источника «— Fox Business», который GLiNER читает как сущность, — токен добавлен в список.
+  Поймано ревизией по содержанию: все структурные метрики при этом были зелёными.
+
+- **Три из восьми ключей `_DOMAIN_LABELS` не были доменами.** `world` и `science_climate` —
+  идентификаторы **рубрик** (`taxonomy._RUBRICS`), `surveillance_privacy` — опечатка вместо
+  `security_privacy`. Пять доменов из одиннадцати уходили в фолбэк и назывались
+  «layoffs in climate energy infrastructure».
+
+- **`run_engine_cycle` не передавал `review_model` в трендовый релиз.** Кэш ревью искался под
+  дефолтом `qwen3.8-max-preview`, а писался под `trend_review_model`; совпадало только потому,
+  что дефолты одинаковы — с `--trend-review-model X` кэш переставал попадать.
 
 - **Порог ребра до медоида обесточивал весь слой ревью.** `_valid_group_against_medoid`
   требовал `score >= 0.72` жёстко зашитым числом — выше всей серой зоны (0.45–0.65).
