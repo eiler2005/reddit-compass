@@ -35,7 +35,9 @@ services:
     # RSS ~1.03 ГБ). Локальные замеры этого не показывали — на Mac лимита нет.
     # 4g даёт запас; на хосте 15 ГБ, остальные сервисы ограничены отдельно.
     mem_limit: 4g
-    memswap_limit: 1g
+    # Docker требует memswap_limit >= mem_limit. Равенство означает «свопа нет»:
+    # контейнер ограничен четырьмя гигабайтами RAM и в своп не уходит.
+    memswap_limit: 4g
     cpus: 1.0
     pids_limit: 256
     security_opt: ["no-new-privileges:true"]
