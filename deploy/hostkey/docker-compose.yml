@@ -30,7 +30,11 @@ services:
     volumes:
       - rc_data:/data
     networks: [rc_net]
-    mem_limit: 1g
+    # Стадия cross-encoder держит в памяти torch и модель: при 1g контейнер убивался
+    # OOM-killer'ом сразу после загрузки весов («Killed process … (reddit-compass)»,
+    # RSS ~1.03 ГБ). Локальные замеры этого не показывали — на Mac лимита нет.
+    # 4g даёт запас; на хосте 15 ГБ, остальные сервисы ограничены отдельно.
+    mem_limit: 4g
     memswap_limit: 1g
     cpus: 1.0
     pids_limit: 256
