@@ -16,11 +16,17 @@ from reddit_compass.intelligence.engine import engine_db
 from reddit_compass.intelligence.trend_schema_llm import (
     ACTION_KEYS,
     action_label,
+    actor_aliases_digest,
+    actor_normalization_prompt,
+    apply_actor_aliases,
     extract_schemas,
     extraction_prompt,
+    load_actor_aliases,
     load_schemas,
+    parse_actor_normalization,
     parse_batch,
     schemas_digest,
+    store_actor_aliases,
     store_schemas,
     title_key,
 )
@@ -300,3 +306,56 @@ def test_missing_api_key_fails_immediately() -> None:
 
     with pytest.raises(ValueError, match="Ключ Qwen"):
         asyncio.run(extract_schemas(["a", "b"], runner, batch_size=1))
+
+
+def test_actor_normalization_prompt_numbers_every_name() -> None:
+    prompt = actor_normalization_prompt(["Linkedin", "DeepSeek-V4-Flash"])
+
+    assert "1. Linkedin" in prompt
+    assert "2. DeepSeek-V4-Flash" in prompt
+
+
+def test_parse_actor_normalization_maps_only_known_indices() -> None:
+    raw = """{"results":[
+      {"i":1,"canonical":"LinkedIn"},
+      {"i":9,"canonical":"Out of range"},
+      {"i":2,"canonical":"   "},
+      "not a dict"]}"""
+
+    mapping = parse_actor_normalization(raw, ["Linkedin", "Deepseek"])
+
+    assert mapping == {"Linkedin": "LinkedIn"}
+
+
+def test_parse_actor_normalization_rejects_invalid_json() -> None:
+    assert parse_actor_normalization("{not json", ["a"]) is None
+    assert parse_actor_normalization('{"results": "nope"}', ["a"]) is None
+
+
+def test_actor_aliases_roundtrip_and_apply(tmp_path: Path) -> None:
+    engine = engine_db(tmp_path / "trend_engine.db")
+    assert load_actor_aliases(engine) == {}
+
+    store_actor_aliases(engine, {"Linkedin": "LinkedIn", "OpenAI": "OpenAI"}, model="m")
+    aliases = load_actor_aliases(engine)
+    assert aliases == {"Linkedin": "LinkedIn", "OpenAI": "OpenAI"}
+
+    schemas = {
+        "h1": {"is_event": True, "actor": "Linkedin", "key": "launch"},
+        "h2": {"is_event": True, "actor": "Google", "key": "launch"},
+    }
+    normalized = apply_actor_aliases(schemas, aliases)
+    assert normalized["h1"]["actor"] == "LinkedIn"
+    # Неизвестный актор не трогается, а прочие поля не меняются.
+    assert normalized["h2"] is schemas["h2"]
+
+    # Пустой кэш — no-op: релиз без нормализации строится как раньше.
+    assert apply_actor_aliases(schemas, {}) is schemas
+
+
+def test_actor_aliases_digest_is_stable_and_sensitive() -> None:
+    first = actor_aliases_digest({"a": "A", "b": "B"})
+    second = actor_aliases_digest({"b": "B", "a": "A"})
+    assert first == second
+    assert first != actor_aliases_digest({"a": "A2", "b": "B"})
+    assert first != actor_aliases_digest({})

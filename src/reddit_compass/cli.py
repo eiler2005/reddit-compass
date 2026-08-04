@@ -33,6 +33,7 @@ from .intelligence.cross_encoder import DEFAULT_CROSS_ENCODER_THRESHOLD
 from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
 from .intelligence.engine import DEFAULT_TREND_METHOD
 from .intelligence.trend_schema_llm import (
+    ACTOR_NORMALIZATION_BATCH,
     DEFAULT_EXTRACT_MODEL,
     EXTRACT_BATCH,
     EXTRACT_CONCURRENCY,
@@ -656,42 +657,70 @@ async def _review_trend_jobs(
     review_runner: Callable[[str, str], Awaitable[str]],
     store_response: Callable[..., dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Review a bounded batch without letting one Qwen failure abort it.
+    """Review a bounded batch without letting one Qwen failure abort it."""
+    from .intelligence.engine import run_trend_review_batch
 
-    A transport timeout is deliberately not persisted as an ``invalid`` LLM
-    decision: invalid answers are cacheable, while a transient provider error
-    must remain eligible for a later retry.
-    """
-    results: list[dict[str, Any]] = []
-    errors: list[str] = []
-    for job in jobs:
-        target_id = str(job["target_id"])
-        try:
-            raw_response = await review_runner(str(job["prompt"]), model)
-        except Exception as exc:  # bounded optional review; retain the batch
-            error = exc.__class__.__name__
-            errors.append(f"{target_id}:{error}")
-            logger.warning("Trend review failed for %s: %s", target_id, error)
-            results.append(
+    return await run_trend_review_batch(
+        jobs,
+        model=model,
+        review_runner=review_runner,
+        store_response=store_response,
+    )
+
+
+async def _cmd_qwen(args: argparse.Namespace) -> None:
+    """Леджер расхода Qwen и прозрачность роутера (см. docs/QWEN_ROUTING.md)."""
+    from . import qwen_policy
+
+    if args.qwen_action == "pick":
+        model, endpoint, why = qwen_policy.pick_model(args.task)
+        print(
+            json.dumps(
                 {
-                    "target_id": target_id,
-                    "decision": "error",
-                    "valid": False,
-                    "error": error,
-                }
-            )
-            continue
-        results.append(
-            store_response(
-                target_id=target_id,
-                input_hash=str(job["input_hash"]),
-                raw_response=raw_response,
-                allowed_story_ids={str(story_id) for story_id in job["story_ids"]},
-                model=model,
-                prompt_version=str(job["prompt_version"]),
+                    "task": args.task,
+                    "model": model,
+                    "endpoint": endpoint,
+                    "reason": why,
+                    "offpeak_now": qwen_policy.in_offpeak(),
+                },
+                ensure_ascii=False,
+                indent=2,
             )
         )
-    return results, errors
+        return
+    totals = qwen_policy.usage_totals()
+    tp_quota = qwen_policy.token_plan_quota()
+    tp_used = sum(total for (_model, endpoint), total in totals.items() if endpoint == "token-plan")
+    rows = []
+    for (model, endpoint), used in sorted(totals.items()):
+        quota = tp_quota if endpoint == "token-plan" else qwen_policy.payg_free_quota()
+        rows.append(
+            {
+                "model": model,
+                "endpoint": endpoint,
+                "used": used,
+                # У token-plan квота общая на все модели — остаток виден в блоке token_plan.
+                "left": None
+                if (quota is None or endpoint == "token-plan")
+                else max(quota - used, 0),
+            }
+        )
+    print(
+        json.dumps(
+            {
+                "offpeak_now": qwen_policy.in_offpeak(),
+                "token_plan": {
+                    "used": tp_used,
+                    "quota": tp_quota,
+                    "left": None if tp_quota is None else max(tp_quota - tp_used, 0),
+                },
+                "payg_free_quota_per_model": qwen_policy.payg_free_quota(),
+                "by_model": rows,
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 async def _cmd_engine(args: argparse.Namespace) -> None:
@@ -741,8 +770,12 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         verify_data_release,
     )
     from .intelligence.trend_schema_llm import (
+        actor_normalization_prompt,
         extract_schemas,
+        load_actor_aliases,
         load_schemas,
+        parse_actor_normalization,
+        store_actor_aliases,
         store_schemas,
         title_key,
     )
@@ -1102,6 +1135,73 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 )
                 return
         if args.engine_group == "schemas":
+            if args.engine_action == "normalize-actors":
+                # Словарь берём из story_schemas, story-release не нужен.
+                # Импорт call_qwen_json обязан быть в этой ветке: имя локальное для
+                # всей функции (см. ветку extract), без него — UnboundLocalError.
+                from .qwen_policy import pick_model
+                from .signals import call_qwen_json, transient_provider_errors
+
+                if args.model:
+                    bulk_model, bulk_endpoint = str(args.model), None
+                else:
+                    bulk_model, bulk_endpoint, _ = pick_model("bulk")
+
+                actors = [
+                    str(row["actor"])
+                    for row in engine_conn.execute(
+                        """SELECT DISTINCT actor FROM story_schemas
+                           WHERE is_event = 1 AND actor <> '' ORDER BY actor"""
+                    )
+                ]
+                known = set(load_actor_aliases(engine_conn))
+                pending = [actor for actor in actors if actor not in known]
+                if args.limit > 0:
+                    pending = pending[: args.limit]
+                batch_size = max(1, int(args.batch_size))
+                total_batches = (len(pending) + batch_size - 1) // batch_size
+                print(
+                    f"акторов {len(actors)}, в кэше {len(actors) - len(pending)}, "
+                    f"обработать {len(pending)}",
+                    file=sys.stderr,
+                )
+                # Пишем после каждого батча: обрыв не теряет уже оплаченную нормализацию.
+                stored = 0
+                for start in range(0, len(pending), batch_size):
+                    batch = pending[start : start + batch_size]
+                    try:
+                        raw = await call_qwen_json(
+                            actor_normalization_prompt(batch),
+                            model=bulk_model or None,
+                            endpoint=bulk_endpoint,
+                            timeout_seconds=180.0,
+                            think=False,
+                        )
+                    except transient_provider_errors() as exc:
+                        print(
+                            f"  батч {start // batch_size + 1}/{total_batches}: {exc}",
+                            file=sys.stderr,
+                        )
+                        continue
+                    mapping = parse_actor_normalization(raw, batch)
+                    if mapping is None:
+                        print(
+                            f"  батч {start // batch_size + 1}/{total_batches}: неразбираемый JSON",
+                            file=sys.stderr,
+                        )
+                        continue
+                    # Не упомянутые моделью имена пишем тождественными: инкремент
+                    # отличает «обработано» от «ещё нет».
+                    stored += store_actor_aliases(
+                        engine_conn,
+                        {actor: mapping.get(actor, actor) for actor in batch},
+                        model=bulk_model,
+                    )
+                    print(f"  батч {start // batch_size + 1}/{total_batches}", file=sys.stderr)
+                print(
+                    json.dumps({"actors": len(actors), "processed": len(pending), "stored": stored})
+                )
+                return
             titles = [
                 str(row["title"] or "")
                 for row in engine_conn.execute(
@@ -1125,7 +1225,14 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 # Импорт нужен именно здесь: другие ветки этой же функции импортируют
                 # `call_qwen_json` локально, поэтому имя считается локальным для всей
                 # функции, и без импорта в этой ветке лямбда падает с NameError.
+                from .qwen_policy import pick_model
                 from .signals import call_qwen_json
+
+                # Явный --model побеждает роутер; без него — бесплатные квоты payg.
+                if args.model:
+                    bulk_model, bulk_endpoint = str(args.model), None
+                else:
+                    bulk_model, bulk_endpoint, _ = pick_model("bulk")
 
                 # Пишем после каждого батча, а не в конце: обрыв на середине иначе
                 # терял бы часы работы, а промежуточного прогресса не видно вовсе.
@@ -1133,14 +1240,18 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
 
                 def _persist(batch: list[dict[str, Any]]) -> None:
                     nonlocal written
-                    written += store_schemas(engine_conn, batch, model=args.model)
+                    written += store_schemas(engine_conn, batch, model=bulk_model)
 
                 await extract_schemas(
                     pending,
                     lambda prompt, model: call_qwen_json(
-                        prompt, model=model or None, timeout_seconds=180.0
+                        prompt,
+                        model=model or None,
+                        endpoint=bulk_endpoint,
+                        timeout_seconds=180.0,
+                        think=False,
                     ),
-                    model=args.model,
+                    model=bulk_model,
                     batch_size=int(args.batch_size),
                     concurrency=int(args.concurrency),
                     on_batch=lambda n, total: print(f"  батч {n}/{total}", file=sys.stderr),
@@ -1232,7 +1343,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return
             if args.engine_action == "review":
-                from .signals import call_qwen_json
+                from .signals import TREND_REVIEW_TIMEOUT_SECONDS, call_qwen_json
 
                 jobs = prepare_trend_review_jobs(
                     engine_conn,
@@ -1243,7 +1354,9 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 results, errors = await _review_trend_jobs(
                     jobs,
                     model=args.model,
-                    review_runner=lambda prompt, model: call_qwen_json(prompt, model=model),
+                    review_runner=lambda prompt, model: call_qwen_json(
+                        prompt, model=model, timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS
+                    ),
                     store_response=lambda **kwargs: store_trend_review_response(
                         engine_conn, **kwargs
                     ),
@@ -1716,7 +1829,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 raise SystemExit(1)
             return
         if args.engine_group == "cycle":
-            from .signals import call_qwen_json
+            from .signals import TREND_REVIEW_TIMEOUT_SECONDS, call_qwen_json
 
             config = _load_config(args)
             theme_catalog = {theme.id: theme.keywords for theme in config.themes}
@@ -1726,7 +1839,11 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             corpus_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
             corpus_conn = open_corpus_readonly(corpus_path)
             review_runner = (
-                (lambda prompt, model: call_qwen_json(prompt, model=model))
+                (
+                    lambda prompt, model: call_qwen_json(
+                        prompt, model=model, timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS
+                    )
+                )
                 if _engine_review_requested(args)
                 else None
             )
@@ -2077,6 +2194,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Топ-N постов по score (0 = все). Для быстрого анализа: --top 200",
     )
+    qwen_p = sub.add_parser(
+        "qwen",
+        parents=[common],
+        help="Стоимостная маршрутизация Qwen: леджер расхода и роутер",
+    )
+    qwen_sub = qwen_p.add_subparsers(dest="qwen_action", required=True)
+    qwen_sub.add_parser(
+        "usage", help="Расход по моделям/эндпоинтам и остатки квот (подписка и бесплатные)"
+    )
+    qwen_pick = qwen_sub.add_parser("pick", help="Какую модель роутер выбрал бы сейчас для задачи")
+    qwen_pick.add_argument("--task", choices=["bulk", "synth"], default="bulk")
     sub.add_parser("radar", parents=[common], help="Trend radar: отчёт с ссылками (без LLM)")
     sub.add_parser("hn", parents=[common], help="Hacker News: AI-stories через Algolia API")
     sub.add_parser(
@@ -2455,6 +2583,17 @@ def build_parser() -> argparse.ArgumentParser:
         "stats", help="Что уже в кэше: доля событий и доля `other`"
     )
     engine_schemas_stats.add_argument("--story-release", required=True)
+    engine_schemas_normalize = engine_schemas_sub.add_parser(
+        "normalize-actors",
+        help="Второй LLM-проход: канонические имена по словарю различных акторов",
+    )
+    engine_schemas_normalize.add_argument("--model", default=DEFAULT_EXTRACT_MODEL)
+    engine_schemas_normalize.add_argument(
+        "--batch-size", type=int, default=ACTOR_NORMALIZATION_BATCH
+    )
+    engine_schemas_normalize.add_argument(
+        "--limit", type=int, default=0, help="Ограничить число акторов (0 — все)"
+    )
 
     engine_actors = engine_sub.add_parser("actors", help="Actor typing for schema_v2 depth 3")
     engine_actors_sub = engine_actors.add_subparsers(dest="engine_action", required=True)
@@ -2812,6 +2951,7 @@ def main() -> None:
         "version": _cmd_version,
         "db": _cmd_db,
         "lab": _cmd_lab,
+        "qwen": _cmd_qwen,
     }
     handler = handlers.get(args.command)
     if handler is None:

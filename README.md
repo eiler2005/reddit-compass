@@ -153,6 +153,7 @@ public sources
 | Both SQLite databases, tables and ownership boundary | [`docs/DATABASE_SCHEMA.md`](docs/DATABASE_SCHEMA.md) |
 | Story/trend algorithms, Golden Set, review, quality and rollback | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) |
 | Quality floors and regression gates | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) |
+| Qwen cost routing: free quotas, discount window, usage ledger | [`docs/QWEN_ROUTING.md`](docs/QWEN_ROUTING.md) |
 | Source capability registry and sections | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) |
 
 ## Architecture at a glance

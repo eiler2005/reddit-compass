@@ -9,6 +9,9 @@
     <div class="page-header">
         <p class="eyebrow">Trend · {{ trend.lifecycle }} · {{ trend.review_status }}</p>
         <h1>{{ trend.title }}</h1>
+        {% if trend.review_name_ru and trend.review_name_ru != trend.title %}
+        <p class="section-note">{{ trend.review_name_ru }}</p>
+        {% endif %}
         <p class="section-note">
             {{ trend.story_count }} stories · {{ trend.source_count }} source clusters ·
             {{ "%.0f"|format(trend.confidence * 100) }}% confidence
@@ -47,7 +50,7 @@
         <h2>Counterpoints</h2>
         <ul class="evidence-list">
             {% for counterpoint in trend.counterpoints %}
-            <li>{{ counterpoint }}</li>
+            <li><a href="/stories/{{ counterpoint }}?{{ analysis_query }}">{{ counterpoint }}</a></li>
             {% endfor %}
         </ul>
     </section>

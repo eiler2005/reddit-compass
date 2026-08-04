@@ -257,6 +257,9 @@ class TrendOut(BaseModel):
     trend_id: str
     title: str
     pattern: str
+    # Русское имя из трендового ревью: оригинальное имя остаётся в title,
+    # это показывается рядом как подпись.
+    review_name_ru: str = ""
     domain_ids: list[str] = Field(default_factory=list)
     confidence: float = 0.0
     lifecycle: str = "insufficient_history"
@@ -883,6 +886,7 @@ def _trend_out(
     return TrendOut(
         trend_id=str(row["trend_id"]),
         title=str(row["name_ru"] or ""),
+        review_name_ru=str(_row_value(row, "review_name_ru", "") or ""),
         pattern=str(row["pattern"] or ""),
         domain_ids=_json_list(row["domain_ids"]),
         confidence=float(row["confidence"] or 0.0),
@@ -1357,6 +1361,7 @@ def _engine_radar(
             {
                 "trend_id": row["trend_id"],
                 "title": row["name_ru"],
+                "review_name_ru": str(_row_value(row, "review_name_ru", "") or ""),
                 "pattern": row["pattern"],
                 "domain_ids": domain_ids,
                 "confidence": float(row["confidence"] or 0.0),

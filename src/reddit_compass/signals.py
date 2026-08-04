@@ -1,8 +1,9 @@
 """LLM-анализ сигналов: Qwen API → pain points, business relevance, темы для колонок.
 
 Вход: posts.jsonl (snapshot). Выход: signals.jsonl + секция в отчёте.
-API: QwenCloud OpenAI-compatible (Qwen). Ключ: DASHSCOPE_API_KEY (pay-as-you-go).
-Модель: qwen-plus (bulk-классификация), qwen-max (синтез).
+API: QwenCloud OpenAI-compatible (Qwen). Два ключа: pay-as-you-go (бесплатные
+квоты 1M токенов на модель) и token-plan; маршрутизация по модели — см.
+``_get_api_config``.
 """
 
 from __future__ import annotations
@@ -26,6 +27,12 @@ MAX_CONCURRENT = 3
 _TOKEN_PLAN_URL = "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
 _DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 
+# Семейство qwen3.8-max отсутствует на pay-as-you-go ключе (проверено по /v1/models),
+# поэтому только оно ходит через token-plan. Всё остальное — pay-as-you-go:
+# у него бесплатные квоты 1M токенов на модель в течение 90 дней после активации,
+# и именно туда уходят массовые прогоны (извлечение, классификация, нормализация).
+_TOKEN_PLAN_ONLY_MODELS = frozenset({"qwen3.8-max-preview", "qwen3.8-max"})
+
 # Модельная пирамида (цена/качество):
 #   qwen3.8-max-preview — синтез (сложное, мало вызовов, скидка 17:00–03:00 МСК)
 #   qwen3.6-flash       — классификация постов (простое извлечение, дёшево)
@@ -34,6 +41,10 @@ _MODEL_SYNTHESIS = "qwen3.8-max-preview"  # сложное → дорогая м
 _MODEL_CLASSIFY = "qwen3.6-flash"  # массовая классификация → самая дешёвая
 _MODEL_CHEAP = "qwen3.6-flash"  # простое → самая дешёвая
 ENGINE_REVIEW_TIMEOUT_SECONDS = 75.0
+# Трендовое ревью кормит модели до двадцати сюжетов с заголовками и саммари и ждёт
+# структурированный вердикт: на qwen3.8-max-preview такой вызов занимает до ~160 с,
+# поэтому потолок story-ревью (75 с) для него не подходит.
+TREND_REVIEW_TIMEOUT_SECONDS = 240.0
 
 
 class QwenApiError(RuntimeError):
@@ -63,22 +74,37 @@ def transient_provider_errors() -> tuple[type[BaseException], ...]:
     return (QwenApiError, TimeoutError, OSError, aiohttp.ClientError)
 
 
-def _get_api_config() -> tuple[str, str, str, str]:
+def _get_api_config(
+    model: str | None = None, endpoint: str | None = None
+) -> tuple[str, str, str, str]:
     """Возвращает (api_key, base_url, classification_model, synthesis_model).
 
-    Приоритет: QWEN_TOKEN_PLAN_KEY (token-plan) → QWEN_Pay_As_You_Go / DASHSCOPE_API_KEY.
-    Пирамида моделей: классификация=qwen3.7-plus, синтез=qwen3.8-max-preview.
+    Маршрутизация по модели и эндпоинту: pay-as-you-go ключ берёт всё, что умеет
+    (бесплатные квоты 1M токенов на модель), token-plan — семейство qwen3.8-max,
+    которого на pay-as-you-go нет. Явный ``endpoint`` (из ``qwen_policy.pick_model``)
+    побеждает эвристику: одна и та же модель может жить на обоих ключах, и выбирать
+    надо тот, где осталась квота. Пирамида моделей одинакова в обеих ветках:
+    классификация=qwen3.6-flash, синтез=qwen3.8-max-preview.
     """
-    # Token-plan ключ (пирамида qwen3.7-plus / qwen3.8-max-preview)
     token_plan_key = os.environ.get("QWEN_TOKEN_PLAN_KEY", "")
+    payg_key = ""
+    # Крокозябрное имя — историческое из .env.secrets; верхнее — то же, но по стандарту.
+    for var in (
+        "DASHSCOPE_API_KEY",
+        "QWEN_PAY_AS_YOU_GO_PLAN_KEY",
+        "QWEN_Pay_As_You_Go_PLAN_KEY",
+    ):
+        payg_key = os.environ.get(var, "") or payg_key
+    if endpoint == "token-plan" and token_plan_key:
+        return token_plan_key, _TOKEN_PLAN_URL, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
+    if endpoint == "payg" and payg_key:
+        base_url = os.environ.get("DASHSCOPE_BASE_URL", _DASHSCOPE_INTL_URL)
+        return payg_key, base_url, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
+    if payg_key and not (token_plan_key and model in _TOKEN_PLAN_ONLY_MODELS):
+        base_url = os.environ.get("DASHSCOPE_BASE_URL", _DASHSCOPE_INTL_URL)
+        return payg_key, base_url, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
     if token_plan_key:
         return token_plan_key, _TOKEN_PLAN_URL, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
-    # Pay-as-you-go / стандартный ключ (qwen-plus/max)
-    for var in ("DASHSCOPE_API_KEY", "QWEN_Pay_As_You_Go_PLAN_KEY"):
-        key = os.environ.get(var, "")
-        if key:
-            base_url = os.environ.get("DASHSCOPE_BASE_URL", _DASHSCOPE_INTL_URL)
-            return key, base_url, "qwen-plus", "qwen-max"
     raise ValueError(
         "Ключ Qwen не установлен. Задайте QWEN_TOKEN_PLAN_KEY "
         "или DASHSCOPE_API_KEY. Получить: https://home.qwencloud.com/api-keys"
@@ -131,23 +157,36 @@ async def _call_qwen(
     model: str | None = None,
     temperature: float = 0.3,
     timeout_seconds: float = 300.0,
+    endpoint: str | None = None,
+    think: bool | None = None,
 ) -> str:
-    """Вызов Qwen API (OpenAI-compatible, через aiohttp)."""
+    """Вызов Qwen API (OpenAI-compatible, через aiohttp).
+
+    ``think=False`` выключает reasoning у моделей, которые думают по умолчанию:
+    замер показал ~150 reasoning-токенов на запрос «Say ok» у qwen3.6-flash —
+    для массового извлечения это сгоревшая квота. ``None`` — поведение сервера.
+    """
     import aiohttp
 
+    from .qwen_policy import record_usage
+
     timeout = max(0.001, float(timeout_seconds))
-    api_key, base_url, default_model, _ = _get_api_config()
+    api_key, base_url, default_model, _ = _get_api_config(model, endpoint)
+    resolved_model = model or default_model
+    resolved_endpoint = "token-plan" if base_url == _TOKEN_PLAN_URL else "payg"
     url = f"{base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
     payload = {
-        "model": model or default_model,
+        "model": resolved_model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": 8000,
     }
+    if think is not None:
+        payload["enable_thinking"] = think
 
     async with (
         aiohttp.ClientSession() as session,
@@ -171,6 +210,13 @@ async def _call_qwen(
             logger.warning("Qwen API error %d: %s", resp.status, text[:200])
             raise QwenApiError(resp.status, text)
         data = await resp.json()
+        usage = data.get("usage") or {}
+        record_usage(
+            model=resolved_model,
+            endpoint=resolved_endpoint,
+            prompt_tokens=int(usage.get("prompt_tokens") or 0),
+            completion_tokens=int(usage.get("completion_tokens") or 0),
+        )
         content: str = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content
 
@@ -180,6 +226,8 @@ async def call_qwen_json(
     *,
     model: str | None = None,
     timeout_seconds: float = ENGINE_REVIEW_TIMEOUT_SECONDS,
+    endpoint: str | None = None,
+    think: bool | None = None,
 ) -> str:
     """Run one bounded, temperature-zero Engine JSON review.
 
@@ -200,6 +248,8 @@ async def call_qwen_json(
             model=model,
             temperature=0.0,
             timeout_seconds=timeout_seconds,
+            endpoint=endpoint,
+            think=think,
         ),
         timeout=timeout_seconds,
     )
@@ -262,8 +312,11 @@ async def analyze_posts(
     if not cards:
         return []
 
-    _, _, classification_model, _ = _get_api_config()
-    model = model or classification_model
+    endpoint: str | None = None
+    if model is None:
+        from .qwen_policy import pick_model
+
+        model, endpoint, _ = pick_model("bulk")
 
     signals: list[SignalCard] = []
     batches = [cards[i : i + BATCH_SIZE] for i in range(0, len(cards), BATCH_SIZE)]
@@ -287,7 +340,7 @@ async def analyze_posts(
         messages = [{"role": "user", "content": prompt}]
 
         try:
-            response = await _call_qwen(messages, model=model)
+            response = await _call_qwen(messages, model=model, endpoint=endpoint, think=False)
             if not response:
                 continue
 
@@ -335,7 +388,7 @@ async def analyze_posts(
             logger.warning("LLM batch %d: timeout, retry через 10с...", batch_idx + 1)
             await asyncio.sleep(10)
             try:
-                response = await _call_qwen(messages, model=model)
+                response = await _call_qwen(messages, model=model, endpoint=endpoint, think=False)
                 if response:
                     text = response.strip()
                     if text.startswith("```"):
@@ -395,8 +448,11 @@ async def synthesize(
     model: str | None = None,
 ) -> SynthesisResult:
     """Синтез: топ-темы, идеи для колонок, сдвиги нарратива."""
-    _, _, _, synthesis_model = _get_api_config()
-    model = model or synthesis_model
+    endpoint: str | None = None
+    if model is None:
+        from .qwen_policy import pick_model
+
+        model, endpoint, _ = pick_model("synth")
     if not signals:
         return SynthesisResult(model=model)
 
@@ -422,7 +478,7 @@ async def synthesize(
     messages = [{"role": "user", "content": prompt}]
 
     try:
-        response = await _call_qwen(messages, model=model, temperature=0.5)
+        response = await _call_qwen(messages, model=model, temperature=0.5, endpoint=endpoint)
         if not response:
             return SynthesisResult(model=model)
 

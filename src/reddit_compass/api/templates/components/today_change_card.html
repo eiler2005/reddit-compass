@@ -13,6 +13,9 @@
         <span>{{ trend.confidence_pct }}%</span>
     </div>
     <h3>{{ trend.title }}</h3>
+    {% if trend.review_name_ru and trend.review_name_ru != trend.title %}
+    <p class="section-note">{{ trend.review_name_ru }}</p>
+    {% endif %}
     {% if trend.pattern %}<p>{{ trend.pattern }}</p>{% endif %}
     <div class="today-card-footer">
         <span>{{ trend.source_count }} источников</span>

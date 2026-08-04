@@ -206,13 +206,13 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
             trend_release_id, trend_id, name_ru, pattern, domain_ids,
             confidence, lifecycle, source_scope, first_seen, last_seen,
             story_count, source_count, project_scores, evidence_story_ids,
-            review_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            review_status, review_name_ru, counterpoints
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             "trend_test",
             "trend_1",
-            "Проверяемый тренд",
+            "verified trend pattern",
             "Три независимых события",
             '["world_geopolitics"]',
             0.91,
@@ -225,6 +225,8 @@ def engine_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient
             '{"rbc": 92, "book": 71}',
             '["story_1"]',
             "confirmed",
+            "Проверяемый тренд",
+            '["story_1"]',
         ),
     )
     conn.execute(
@@ -875,6 +877,26 @@ def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:
     assert "Evidence items" in story_detail.text
     assert trend_detail.status_code == 200
     assert "Stories inside trend" in trend_detail.text
+
+
+def test_trend_ui_original_title_russian_subtitle_and_linked_chips(
+    engine_client: TestClient,
+) -> None:
+    """Оригинальное имя — заголовок, русское имя ревью — подпись рядом;
+    доменные чипы — ссылки на фильтр текущего слоя; counterpoints — ссылки на stories."""
+    trends = engine_client.get("/trends")
+
+    assert trends.status_code == 200
+    assert "verified trend pattern" in trends.text
+    assert "Проверяемый тренд" in trends.text
+    assert "domain=world_geopolitics" in trends.text
+
+    detail = engine_client.get("/trends/trend_1")
+
+    assert detail.status_code == 200
+    assert "verified trend pattern" in detail.text
+    assert "Проверяемый тренд" in detail.text
+    assert 'href="/stories/story_1?' in detail.text
 
 
 def test_published_layer_ui_preserves_shadow_channel(engine_client: TestClient) -> None:

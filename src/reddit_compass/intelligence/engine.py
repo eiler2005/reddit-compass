@@ -7,15 +7,17 @@ there. Published Radar versions are immutable; rollback only changes a pointer.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import logging
 import math
 import random
 import re
 import sqlite3
 import subprocess
 from collections import Counter, defaultdict
-from collections.abc import Awaitable, Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
@@ -306,6 +308,18 @@ CREATE TABLE IF NOT EXISTS story_schemas (
     action            TEXT NOT NULL DEFAULT '',
     object            TEXT NOT NULL DEFAULT '',
     action_key        TEXT NOT NULL DEFAULT ''
+);
+
+-- Канонические имена акторов: второй LLM-проход по словарю различных акторов из
+-- story_schemas. Отдельная таблица со своей версией промпта намеренно: правка
+-- нормализации не должна обнулять кэш извлечения (SCHEMA_PROMPT_VERSION в ключе
+-- title_hash — это ~40 минут полного пере-извлечения).
+CREATE TABLE IF NOT EXISTS actor_aliases (
+    actor           TEXT PRIMARY KEY,
+    canonical       TEXT NOT NULL,
+    prompt_version  TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    created_at      TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS engine_labels (
@@ -719,6 +733,15 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
         "engine_trends",
         "distinct_actors",
         "TEXT NOT NULL DEFAULT '[]'",
+    )
+    # Ревью подтверждает когерентность и состав, но не переименовывает тренд: имя и
+    # pattern остаются оригинальными (язык корпуса), а русское имя ревью живёт рядом
+    # в отдельной колонке и показывается в UI как подпись.
+    _ensure_engine_column(
+        conn,
+        "engine_trends",
+        "review_name_ru",
+        "TEXT NOT NULL DEFAULT ''",
     )
     _ensure_engine_column(
         conn,
@@ -4683,7 +4706,13 @@ def create_trend_release(
     if method == "schema_v3":
         # Отпечаток кэша извлечения обязателен: модель недетерминирована, и без него два
         # релиза с одинаковым `params_hash` имели бы разное содержание.
-        from .trend_schema_llm import SCHEMA_PROMPT_VERSION, load_schemas, schemas_digest
+        from .trend_schema_llm import (
+            SCHEMA_PROMPT_VERSION,
+            actor_aliases_digest,
+            load_actor_aliases,
+            load_schemas,
+            schemas_digest,
+        )
 
         titles = [
             str(row["title"] or "")
@@ -4694,6 +4723,7 @@ def create_trend_release(
         ]
         params["schema_prompt_version"] = SCHEMA_PROMPT_VERSION
         params["schemas_digest"] = schemas_digest(load_schemas(conn, titles))
+        params["actor_aliases_digest"] = actor_aliases_digest(load_actor_aliases(conn))
     params_hash = _hash_json(params)
     created_at = now_iso()
     trend_release_id = _stable_id(
@@ -4751,7 +4781,7 @@ def create_trend_release(
         )
     elif method == "schema_v3":
         from .actor_types import load_actor_types, resolve_actor_types_path
-        from .trend_schema_llm import load_schemas
+        from .trend_schema_llm import apply_actor_aliases, load_actor_aliases, load_schemas
 
         if requested_depth >= 3:
             actor_types = load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
@@ -4765,6 +4795,7 @@ def create_trend_release(
                 "schema_v3 требует кэш извлечения: сначала `engine schemas extract`. "
                 "Таблица story_schemas пуста для сюжетов этого релиза."
             )
+        llm_schemas = apply_actor_aliases(llm_schemas, load_actor_aliases(conn))
         trends = _discover_trends_schema_v3(
             stories,
             params={**params, "trend_schema_depth": effective_depth},
@@ -4891,8 +4922,8 @@ def create_trend_release(
                     confidence, lifecycle, source_scope, first_seen, last_seen,
                     story_count, source_count, project_scores, evidence_story_ids,
                     counterpoints, review_status, review_id, parent_trend_id,
-                    distinct_actors)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    distinct_actors, review_name_ru)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trend_release_id,
                     trend["trend_id"],
@@ -4913,6 +4944,7 @@ def create_trend_release(
                     trend["review_id"],
                     trend.get("parent_trend_id", ""),
                     _json(trend.get("distinct_actors", [])),
+                    trend.get("review_name_ru", ""),
                 ),
             )
             conn.executemany(
@@ -4971,6 +5003,26 @@ def get_trend_release(conn: sqlite3.Connection, trend_release_id: str) -> TrendR
     )
 
 
+# Ревью видит двадцать сильнейших сюжетов тренда, а не все: у корней бывает сотни
+# членов (замер 5 августа: 277 у крупнейшего), и полный состав давал промпт в 60+ тысяч
+# символов, на котором qwen3.8-max-preview не отвечал ни за 75, ни за 300 секунд.
+# Ревью и так определяет состав подтверждённого тренда через story_ids, поэтому
+# показ выборки — не потеря информации, а её дозирование.
+TREND_REVIEW_MAX_STORIES = 20
+# Скромно, по образцу EXTRACT_CONCURRENCY: одна стадия не должна съедать всю квоту.
+TREND_REVIEW_CONCURRENCY = 6
+
+
+def _review_story_ids(memberships: Sequence[tuple[str, float]]) -> list[str]:
+    """Общая для подготовки и применения ревью выборка: топ по score, при равенстве — по id.
+
+    ``input_hash`` считается от этого множества, поэтому оба конца обязаны резать
+    его одинаково, иначе кэш ревью никогда не попадёт в релиз.
+    """
+    ordered = sorted(memberships, key=lambda entry: (-entry[1], entry[0]))
+    return [story_id for story_id, _ in ordered[:TREND_REVIEW_MAX_STORIES]]
+
+
 def prepare_trend_review_jobs(
     conn: sqlite3.Connection,
     trend_release_id: str,
@@ -5008,18 +5060,19 @@ def prepare_trend_review_jobs(
     jobs: list[dict[str, Any]] = []
     for row in rows:
         trend_id = str(row["trend_id"])
-        story_ids = [
-            str(membership["story_id"])
-            for membership in conn.execute(
-                """
-                SELECT story_id
-                FROM engine_trend_stories
-                WHERE trend_release_id = ? AND trend_id = ?
-                ORDER BY story_id
-                """,
-                (trend_release_id, trend_id),
-            ).fetchall()
-        ]
+        story_ids = _review_story_ids(
+            [
+                (str(membership["story_id"]), float(membership["membership_score"]))
+                for membership in conn.execute(
+                    """
+                    SELECT story_id, membership_score
+                    FROM engine_trend_stories
+                    WHERE trend_release_id = ? AND trend_id = ?
+                    """,
+                    (trend_release_id, trend_id),
+                ).fetchall()
+            ]
+        )
         payload = _trend_review_payload(story_ids, stories)
         input_hash = _hash_json(payload)
         cached = conn.execute(
@@ -5089,6 +5142,55 @@ def store_trend_review_response(
     }
 
 
+async def run_trend_review_batch(
+    jobs: Sequence[dict[str, Any]],
+    *,
+    model: str,
+    review_runner: Callable[[str, str], Awaitable[str]],
+    store_response: Callable[..., dict[str, Any]],
+    concurrency: int = TREND_REVIEW_CONCURRENCY,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Ревьюит пакет трендов с ограниченной параллельностью; один сбой не роняет пакет.
+
+    Транспортный таймаут намеренно не сохраняется как ``invalid``-решение: invalid
+    кешируется, а преходящая ошибка провайдера обязана остаться пригодной для
+    повторной попытки в следующем прогоне.
+    """
+    results: list[dict[str, Any]] = [{} for _ in jobs]
+    errors: list[str] = []
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+
+    async def review_one(index: int, job: dict[str, Any]) -> None:
+        target_id = str(job["target_id"])
+        async with semaphore:
+            try:
+                raw_response = await review_runner(str(job["prompt"]), model)
+            except Exception as exc:  # bounded optional review; retain the batch
+                error = exc.__class__.__name__
+                errors.append(f"{target_id}:{error}")
+                logging.getLogger(__name__).warning(
+                    "Trend review failed for %s: %s", target_id, error
+                )
+                results[index] = {
+                    "target_id": target_id,
+                    "decision": "error",
+                    "valid": False,
+                    "error": error,
+                }
+                return
+        results[index] = store_response(
+            target_id=target_id,
+            input_hash=str(job["input_hash"]),
+            raw_response=raw_response,
+            allowed_story_ids={str(story_id) for story_id in job["story_ids"]},
+            model=model,
+            prompt_version=str(job["prompt_version"]),
+        )
+
+    await asyncio.gather(*(review_one(index, job) for index, job in enumerate(jobs)))
+    return results, errors
+
+
 def apply_cached_trend_reviews(
     conn: sqlite3.Connection,
     *,
@@ -5101,7 +5203,11 @@ def apply_cached_trend_reviews(
     resolved: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
     for trend, memberships in trends:
         story_ids = [story_id for story_id, _, _ in memberships]
-        payload = _trend_review_payload(story_ids, story_by_id)
+        # Та же выборка, что в prepare_trend_review_jobs: иначе input_hash не совпадёт.
+        payload = _trend_review_payload(
+            _review_story_ids([(sid, score) for sid, score, _ in memberships]),
+            story_by_id,
+        )
         input_hash = _hash_json(payload)
         row = conn.execute(
             """
@@ -5151,8 +5257,10 @@ def apply_cached_trend_reviews(
             (
                 {
                     **trend,
-                    "name_ru": review.trend_name_ru or trend["name_ru"],
-                    "pattern": review.pattern or trend["pattern"],
+                    # Имя и pattern остаются оригинальными: тренды читаются на языке
+                    # корпуса, ревью лишь подтверждает когерентность и состав.
+                    # Русское имя ревью — рядом, в review_name_ru.
+                    "review_name_ru": review.trend_name_ru,
                     "domain_ids": review.domains or trend["domain_ids"],
                     "confidence": review.confidence,
                     "story_count": len(accepted_memberships),
@@ -6736,25 +6844,18 @@ async def run_engine_cycle(
             limit=trend_review_limit,
             model=trend_review_model,
         )
-        for job in trend_jobs:
-            trend_review_attempted += 1
-            try:
-                raw = await review_runner(str(job["prompt"]), trend_review_model)
-                result = store_trend_review_response(
-                    conn,
-                    target_id=str(job["target_id"]),
-                    input_hash=str(job["input_hash"]),
-                    raw_response=raw,
-                    allowed_story_ids={str(story_id) for story_id in job["story_ids"]},
-                    model=trend_review_model,
-                    prompt_version=str(job["prompt_version"]),
-                )
-            except Exception as exc:  # Keep the deterministic candidate release inspectable.
-                trend_review_errors.append(exc.__class__.__name__)
-                continue
+        trend_results, trend_errors = await run_trend_review_batch(
+            trend_jobs,
+            model=trend_review_model,
+            review_runner=review_runner,
+            store_response=lambda **kwargs: store_trend_review_response(conn, **kwargs),
+        )
+        trend_review_attempted = len(trend_jobs)
+        trend_review_errors = trend_errors
+        for result in trend_results:
             if result.get("valid"):
                 trend_review_valid += 1
-            else:
+            elif "error" not in result:
                 trend_review_invalid += 1
         # Re-materialize so cached decisions become confirmed/rejected status
         # on the release that is inspected and potentially published.

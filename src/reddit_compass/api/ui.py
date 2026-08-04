@@ -839,6 +839,7 @@ def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, 
             {
                 "url": str(decorated.get("url") or ""),
                 "title": str(decorated.get("title") or "")[:240],
+                "review_name_ru": str(decorated.get("review_name_ru") or "")[:240],
                 "pattern": str(decorated.get("pattern") or "")[:360],
                 "lifecycle_label": str(decorated.get("lifecycle_label") or ""),
                 "source_scope_label": str(decorated.get("source_scope_label") or ""),

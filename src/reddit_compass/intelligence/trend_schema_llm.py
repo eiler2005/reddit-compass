@@ -40,6 +40,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Awaitable, Callable, Sequence
+from datetime import UTC, datetime
 from typing import Any
 
 from ..signals import transient_provider_errors
@@ -364,3 +365,121 @@ async def extract_schemas(
             f"Первая ошибка — {first_error}"
         )
     return collected
+
+
+# ── Нормализация акторов: второй проход по словарю различных акторов ─────────
+#
+# Актор в story_schemas — свободный текст модели: «Linkedin» и «LinkedIn», «Deepseek»
+# и «DeepSeek-V4-Flash» считаются разными участниками и завышают distinct_actors —
+# метрику, на которой держится само определение тренда. Префиксный дедуп
+# (canonical_actors) ловит варианты одного имени, но не «Community» вместо компании;
+# модель же сопоставляет по смыслу. Кэш отдельный и со своей версией промпта: правка
+# нормализации не должна обнулять кэш извлечения.
+
+ACTOR_NORMALIZATION_PROMPT_VERSION = "actor-norm-v1-2026-08-05"
+ACTOR_NORMALIZATION_BATCH = 40
+
+
+def actor_normalization_prompt(actors: Sequence[str]) -> str:
+    numbered = "\n".join(f"{index + 1}. {actor}" for index, actor in enumerate(actors))
+    return (
+        "You canonicalize actor names extracted from news headlines.\n"
+        "For EACH numbered name return the canonical name of the SAME real-world "
+        "entity.\n"
+        "Merge only variants of one entity: spelling, capitalization, abbreviations, "
+        "descriptive suffixes about the same organization "
+        "(“Linkedin” -> “LinkedIn”, “DeepSeek-V4-Flash” -> “DeepSeek”).\n"
+        "Never merge distinct entities: “China” and “China Mobile” stay different; "
+        "a person and a company stay different.\n"
+        "Generic categories (“grocery stores”, “AI firms”) stay as written.\n"
+        "Return JSON only, no prose: "
+        '{"results":[{"i":1,"canonical":"LinkedIn"}]}\n'
+        "One entry per name, same numbering, nothing else.\n\nNames:\n" + numbered
+    )
+
+
+def parse_actor_normalization(raw: str, actors: Sequence[str]) -> dict[str, str] | None:
+    """Разбирает ответ в словарь ``сырой актор -> канонический``. None = невалидный JSON."""
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        return None
+    results = parsed.get("results") if isinstance(parsed, dict) else parsed
+    if not isinstance(results, list):
+        return None
+    mapping: dict[str, str] = {}
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            index = int(entry.get("i", 0))
+        except (TypeError, ValueError):
+            continue
+        if not 1 <= index <= len(actors):
+            continue
+        canonical = str(entry.get("canonical") or "").strip()
+        if canonical:
+            mapping[actors[index - 1]] = canonical
+    return mapping
+
+
+def load_actor_aliases(conn: sqlite3.Connection) -> dict[str, str]:
+    """Кэш нормализации. Отсутствие таблицы — пустой словарь, метод работает как раньше."""
+    try:
+        rows = conn.execute("SELECT actor, canonical FROM actor_aliases").fetchall()
+    except sqlite3.Error:
+        return {}
+    return {str(row["actor"]): str(row["canonical"]) for row in rows}
+
+
+def store_actor_aliases(conn: sqlite3.Connection, mapping: dict[str, str], *, model: str) -> int:
+    """Кладёт нормализацию в кэш; тождественные строки тоже пишутся, чтобы инкремент
+    отличал «обработано без изменения» от «ещё не обработано»."""
+    written = 0
+    with conn:
+        for actor, canonical in mapping.items():
+            conn.execute(
+                """INSERT INTO actor_aliases
+                   (actor, canonical, prompt_version, model, created_at)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(actor) DO UPDATE SET
+                       canonical = excluded.canonical,
+                       prompt_version = excluded.prompt_version,
+                       model = excluded.model,
+                       created_at = excluded.created_at""",
+                (
+                    actor,
+                    canonical,
+                    ACTOR_NORMALIZATION_PROMPT_VERSION,
+                    model,
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            written += 1
+    return written
+
+
+def actor_aliases_digest(aliases: dict[str, str]) -> str:
+    """Отпечаток для ``params_hash``: релиз обязан воспроизводимо говорить, чьими
+    именами акторов он построен."""
+    payload = json.dumps(
+        {actor: aliases[actor] for actor in sorted(aliases)},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode()).hexdigest()[:12]
+
+
+def apply_actor_aliases(
+    schemas: dict[str, dict[str, Any]], aliases: dict[str, str]
+) -> dict[str, dict[str, Any]]:
+    """Подменяет акторов в кэше схем каноническими именами. Пустой кэш — no-op."""
+    if not aliases:
+        return schemas
+    normalized: dict[str, dict[str, Any]] = {}
+    for digest, schema in schemas.items():
+        actor = str(schema.get("actor") or "")
+        canonical = aliases.get(actor, actor)
+        normalized[digest] = {**schema, "actor": canonical} if canonical != actor else schema
+    return normalized

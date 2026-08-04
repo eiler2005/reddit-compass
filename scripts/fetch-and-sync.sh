@@ -110,8 +110,11 @@ do_sync() {
     # Прогон при этом публиковался на broad через --force, то есть гейт молчал, а
     # боевой канал жил с недособранными сюжетами. Лимиты контейнера (4g / 4 cpu,
     # OMP/MKL/TORCH_NUM_THREADS=4) выставлены ровно под эту стадию.
+    # --trend-review-limit: ревью копит кэш llm_reviews и материализует confirmed в
+    # релиз, без него /today (фильтр по confirmed) пуст. Корни ревьювятся топ-20
+    # выборкой, пакет идёт с ограниченной параллельностью — минуты, не часы.
     ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
-        docker compose run --rm reddit-compass engine cycle --cross-encoder 2>&1 | tail -5"
+        docker compose run --rm reddit-compass engine cycle --cross-encoder --trend-review-limit 12 2>&1 | tail -5"
     echo "   Engine cycle done. Publishing..."
 
     # Read latest story/trend release IDs and publish
@@ -168,11 +171,58 @@ print(conn.execute('SELECT trend_release_id FROM trend_releases ORDER BY created
         rm -f "${titles_tmp}" "${types_tmp}"
     fi
 
-    echo "   Publishing: story=${story_id} trend=${trend_id}"
+    # ── Поколение 5: schema_v3 поверх кэша извлечения ───────────────────────
+    # Кэш keyed по заголовкам, поэтому каждую ночь считается только дневная
+    # дельта. Порядок важен: цикл сначала создаёт story-релиз, extract греет
+    # кэш по нему, propose строит тренды поверх кэша, review + повторный
+    # propose материализуют confirmed (иначе /today пуст).
+    #
+    # По умолчанию выключено. При включении публикация идёт на broad-preview
+    # без --force: новое поколение не попадает на broad без ревизии владельца
+    # и зелёного гейта. Включение — RC_TREND_METHOD=schema_v3.
+    if [[ "${RC_TREND_METHOD:-embedding_v2}" == "schema_v3" ]]; then
+        echo "   schema_v3: extract + normalize + propose + review (story=${story_id})..."
+        ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm reddit-compass engine schemas extract \
+                --story-release ${story_id} 2>&1 | tail -3"
+        ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm reddit-compass engine schemas normalize-actors 2>&1 | tail -3"
+        ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm reddit-compass engine trends propose \
+                --story-release ${story_id} --method schema_v3 --trend-depth 3 2>&1 | tail -3"
+        trend_id=$(ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm --entrypoint python3 reddit-compass -c \"
+import sqlite3
+conn = sqlite3.connect('/data/trend_engine.db')
+print(conn.execute('SELECT trend_release_id FROM trend_releases ORDER BY created_at DESC LIMIT 1').fetchone()[0])
+\" 2>/dev/null" 2>/dev/null)
+        ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm reddit-compass engine trends review \
+                --trend-release ${trend_id} --limit 200 2>&1 | tail -3"
+        # Ре-материализация: кэш ревью становится статусом confirmed в новом релизе.
+        ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm reddit-compass engine trends propose \
+                --story-release ${story_id} --method schema_v3 --trend-depth 3 2>&1 | tail -3"
+        trend_id=$(ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
+            docker compose run --rm --entrypoint python3 reddit-compass -c \"
+import sqlite3
+conn = sqlite3.connect('/data/trend_engine.db')
+print(conn.execute('SELECT trend_release_id FROM trend_releases ORDER BY created_at DESC LIMIT 1').fetchone()[0])
+\" 2>/dev/null" 2>/dev/null)
+        echo "   schema_v3 собран: trend=${trend_id}"
+    fi
+
+    local publish_channel="broad" publish_extra="--force"
+    if [[ "${RC_TREND_METHOD:-embedding_v2}" == "schema_v3" ]]; then
+        publish_channel="broad-preview"
+        publish_extra=""
+    fi
+
+    echo "   Publishing: story=${story_id} trend=${trend_id} channel=${publish_channel}"
     ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
         docker compose run --rm reddit-compass engine publish \
             --story-release ${story_id} --trend-release ${trend_id} \
-            --channel broad --allow-partial --force 2>&1 | tail -3"
+            --channel ${publish_channel} --allow-partial ${publish_extra} 2>&1 | tail -3"
     echo "✅ [$(date +%H:%M:%S)] VPS pipeline complete: collect → engine → publish."
 }
 

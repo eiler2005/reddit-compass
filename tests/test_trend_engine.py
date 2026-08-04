@@ -21,6 +21,7 @@ from reddit_compass.intelligence.engine import (
     _event_numbers,
     _story_topic_keys,
     active_label_story_pairs,
+    apply_cached_trend_reviews,
     auto_label_story_pairs,
     cache_release_embeddings,
     compare_story_engine_variants,
@@ -44,15 +45,18 @@ from reddit_compass.intelligence.engine import (
     load_frozen_items,
     load_release_embeddings,
     prepare_story_review_jobs,
+    prepare_trend_review_jobs,
     publish_radar,
     resolve_pair_labels,
     rollback_publication,
     run_engine_cycle,
     store_quality_report,
     store_story_review_response,
+    store_trend_review_response,
     train_story_merge_model,
     verify_data_release,
 )
+from reddit_compass.intelligence.engine_reviews import TREND_REVIEW_PROMPT_VERSION
 from reddit_compass.intelligence.migrations import migrate
 from reddit_compass.intelligence.models import (
     ContentItem,
@@ -2293,3 +2297,115 @@ def test_library_trend_method_matches_production() -> None:
     from reddit_compass.intelligence.engine import DEFAULT_TREND_METHOD
 
     assert DEFAULT_TREND_METHOD == "embedding_v2"
+
+
+def _seed_trend_review_release(engine: sqlite3.Connection, membership_count: int) -> None:
+    """Корневой тренд с ``membership_count`` сюжетами; score растёт с индексом."""
+    engine.execute(
+        """INSERT INTO trend_releases
+           (trend_release_id, story_release_id, window, method, params_hash, status, created_at)
+           VALUES ('trends_review_test', 'stories_review_test', '7d', 'schema_v3', 'ph',
+                   'ready', '2026-08-05T00:00:00Z')"""
+    )
+    engine.execute(
+        """INSERT INTO engine_trends
+           (trend_release_id, trend_id, name_ru, pattern, confidence)
+           VALUES ('trends_review_test', 'trend_root', 'root', 'root', 0.9)"""
+    )
+    for index in range(membership_count):
+        story_id = f"story_{index:02}"
+        engine.execute(
+            """INSERT INTO engine_stories
+               (story_release_id, story_id, canonical_key, title, summary_ru,
+                first_seen, last_seen, source_count)
+               VALUES (?, ?, ?, ?, ?, '2026-07-28', '2026-08-03', 2)""",
+            (
+                "stories_review_test",
+                story_id,
+                story_id,
+                f"Title {index}",
+                f"Summary {index}",
+            ),
+        )
+        engine.execute(
+            """INSERT INTO engine_trend_stories
+               (trend_release_id, trend_id, story_id, membership_score)
+               VALUES ('trends_review_test', 'trend_root', ?, ?)""",
+            (story_id, 1.0 + index),
+        )
+    engine.commit()
+
+
+def test_trend_review_jobs_cap_the_prompt_at_twenty_strongest(tmp_path: Path) -> None:
+    """У корней бывают сотни членов: ревью видит топ-20 по score, иначе промпт несъедобен."""
+    engine = engine_db(tmp_path / "trend_engine.db")
+    _seed_trend_review_release(engine, 25)
+
+    jobs = prepare_trend_review_jobs(engine, "trends_review_test", limit=10)
+
+    assert len(jobs) == 1
+    assert jobs[0]["story_ids"] == [f"story_{index:02}" for index in range(24, 4, -1)]
+
+
+def test_trend_review_cache_applies_to_release_with_more_stories(tmp_path: Path) -> None:
+    """prepare и apply обязаны хэшировать одну и ту же выборку, иначе кэш не попадёт в релиз."""
+    engine = engine_db(tmp_path / "trend_engine.db")
+    _seed_trend_review_release(engine, 25)
+    jobs = prepare_trend_review_jobs(engine, "trends_review_test", limit=10)
+    shown = jobs[0]["story_ids"]
+    store_trend_review_response(
+        engine,
+        target_id="trend_root",
+        input_hash=str(jobs[0]["input_hash"]),
+        raw_response=json.dumps(
+            {
+                "decision": "coherent_trend",
+                "trend_name_ru": "тестовый паттерн",
+                "pattern": "повторяющийся паттерн",
+                "story_ids": shown[:5],
+                "evidence_story_ids": shown[:3],
+                "counterpoints": [],
+                "domains": [],
+                "confidence": 0.8,
+            }
+        ),
+        allowed_story_ids=set(shown),
+    )
+
+    stories = [
+        {
+            "story_id": f"story_{index:02}",
+            "title": f"Title {index}",
+            "summary_ru": f"Summary {index}",
+            "domain_ids": '["other"]',
+            "theme_ids": "[]",
+            "first_seen": "2026-07-28",
+            "last_seen": "2026-08-03",
+            "source_count": 2,
+        }
+        for index in range(25)
+    ]
+    memberships = [(f"story_{index:02}", 1.0 + index, "") for index in range(25)]
+    trend = {
+        "trend_id": "trend_root",
+        "name_ru": "root",
+        "pattern": "root",
+        "domain_ids": [],
+        "confidence": 0.9,
+    }
+
+    resolved = apply_cached_trend_reviews(
+        engine,
+        trends=[(trend, memberships)],
+        stories=stories,
+        model="qwen3.8-max-preview",
+        prompt_version=TREND_REVIEW_PROMPT_VERSION,
+    )
+
+    assert len(resolved) == 1
+    assert resolved[0][0]["review_status"] == "confirmed"
+    assert resolved[0][0]["story_count"] == 5
+    # Ревью не переименовывает тренд: оригинал нетронут, русское имя — в review_name_ru.
+    assert resolved[0][0]["name_ru"] == "root"
+    assert resolved[0][0]["pattern"] == "root"
+    assert resolved[0][0]["review_name_ru"] == "тестовый паттерн"

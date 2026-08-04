@@ -312,7 +312,9 @@ def test_chip_cloud_drops_single_character_domains() -> None:
         project_scores={},
     )
 
-    assert html.count('<span class="chip">') == 1
+    # Чипы — ссылки-фильтры; мусор короче двух символов по-прежнему отсекается.
+    assert html.count('class="chip"') == 1
+    assert '<a class="chip"' in html
     assert "ai_technology" in html
 
 

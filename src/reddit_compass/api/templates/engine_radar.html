@@ -114,6 +114,9 @@
                     <span>{{ "%.0f"|format(trend.confidence * 100) }}% confidence</span>
                 </div>
                 <h3><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h3>
+                {% if trend.review_name_ru and trend.review_name_ru != trend.title %}
+                <p class="section-note">{{ trend.review_name_ru }}</p>
+                {% endif %}
                 <p>{{ trend.pattern }}</p>
                 <p class="section-note">
                     {{ trend.story_count }} независимых stories · {{ trend.source_count }} source clusters

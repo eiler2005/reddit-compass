@@ -22,9 +22,14 @@
 {% set scores = project_scores if project_scores is mapping else {} %}
 {% set limit = chip_limit | default(0, true) | int %}
 {% set shown = domains[:limit] if limit else domains %}
+{# Партиал рендерится и без request (тесты, фрагменты): тогда ссылки ведут на
+   относительный путь — браузер разрешит его против текущей страницы. #}
+{% set chip_path = request.path if request is defined else "" %}
 <div class="chip-cloud">
     {% for domain_id in shown %}
-    <span class="chip">{{ domain_id }}</span>
+    {# Чип — ссылка: клик фильтрует текущий слой по рубрике. analysis_query несёт
+       channel/publication_id; request.path — текущую страницу (/trends, /stories, /news). #}
+    <a class="chip" href="{% if analysis_query %}{{ chip_path }}?{{ analysis_query }}&domain={{ domain_id }}{% else %}{{ chip_path }}?domain={{ domain_id }}{% endif %}">{{ domain_id }}</a>
     {% endfor %}
     {% if limit and domains | length > limit %}
     <span class="chip chip-more" title="{{ domains | join(', ') }}">+{{ domains | length - limit }}</span>

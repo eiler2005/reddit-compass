@@ -32,6 +32,7 @@
             {% with
                 row_url="/trends/" ~ trend.trend_id ~ "?" ~ analysis_query,
                 row_title=trend.title,
+                row_subtitle=trend.review_name_ru,
                 row_summary=trend.pattern,
                 row_weight=trend.source_count,
                 row_badges=[

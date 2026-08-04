@@ -23,6 +23,10 @@
             {% endfor %}
         </div>
         <h3 class="item-row-title"><a href="{{ row_url }}">{{ row_title }}</a></h3>
+        {# Русская подпись из трендового ревью рядом с оригинальным именем. #}
+        {% if row_subtitle and row_subtitle != row_title %}
+        <p class="item-row-summary section-note">{{ row_subtitle }}</p>
+        {% endif %}
         {# У части сюжетов summary_ru совпадает с заголовком: повторять его
            строкой ниже — чистый шум, особенно в плотном списке. #}
         {% if row_summary and row_summary != row_title %}
