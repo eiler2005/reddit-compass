@@ -1122,16 +1122,30 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     f"извлекать {len(pending)}",
                     file=sys.stderr,
                 )
-                records = await extract_schemas(
+                # Импорт нужен именно здесь: другие ветки этой же функции импортируют
+                # `call_qwen_json` локально, поэтому имя считается локальным для всей
+                # функции, и без импорта в этой ветке лямбда падает с NameError.
+                from .signals import call_qwen_json
+
+                # Пишем после каждого батча, а не в конце: обрыв на середине иначе
+                # терял бы часы работы, а промежуточного прогресса не видно вовсе.
+                written = 0
+
+                def _persist(batch: list[dict[str, Any]]) -> None:
+                    nonlocal written
+                    written += store_schemas(engine_conn, batch, model=args.model)
+
+                await extract_schemas(
                     pending,
                     lambda prompt, model: call_qwen_json(
-                        prompt, model=model, timeout_seconds=180.0
+                        prompt, model=model or None, timeout_seconds=180.0
                     ),
                     model=args.model,
                     batch_size=int(args.batch_size),
+                    concurrency=int(args.concurrency),
                     on_batch=lambda n, total: print(f"  батч {n}/{total}", file=sys.stderr),
+                    on_records=_persist,
                 )
-                written = store_schemas(engine_conn, records, model=args.model)
                 print(json.dumps({"extracted": written, "requested": len(pending)}))
                 return
             if args.engine_action == "stats":
