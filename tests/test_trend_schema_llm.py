@@ -48,10 +48,25 @@ def test_unknown_action_key_falls_back_to_other() -> None:
     assert parse_batch(raw, ["X did something"])[0]["key"] == "other"
 
 
-def test_other_never_becomes_a_trend() -> None:
-    """`other` — признание, что словарь узок, а не корзина для всего непонятого."""
-    assert action_label("other") == ""
-    assert all(action_label(key) for key in ACTION_KEYS)
+def test_non_trend_keys_never_become_trends() -> None:
+    """`other` и `incident` нужны извлечению, но слою — нет.
+
+    `incident` остаётся в промпте, чтобы модель не растаскивала происшествия по
+    осмысленным ключам, но тренда из него быть не должно: на прогоне 3 августа он дал
+    пять трендов на 220 сюжетов, где в одной «схеме» лежали жара в Европе,
+    столкнувшиеся вертолёты и помолвка.
+    """
+    from reddit_compass.intelligence.trend_schema_llm import NON_TREND_KEYS
+
+    assert {"other", "incident"} == NON_TREND_KEYS
+    for key in NON_TREND_KEYS:
+        assert action_label(key) == ""
+    assert all(action_label(key) for key in ACTION_KEYS if key not in NON_TREND_KEYS)
+
+
+def test_incident_is_still_offered_to_the_model() -> None:
+    """Без явной корзины происшествия загрязняют `shutdown`, `regulation` и прочие."""
+    assert "incident" in extraction_prompt(["headline"])
 
 
 def test_broken_json_yields_no_records_instead_of_guesses() -> None:

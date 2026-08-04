@@ -91,6 +91,20 @@ ACTION_VOCABULARY: tuple[tuple[str, str], ...] = (
 _ACTION_LABELS = dict(ACTION_VOCABULARY)
 ACTION_KEYS = tuple(key for key, _ in ACTION_VOCABULARY)
 
+# Ключи, которые модели предлагаются, но трендом не становятся.
+#
+# `incident` остаётся в промпте намеренно, хотя тренда не даёт: без явной корзины для
+# происшествий модель растаскивала бы землетрясения и аварии по `shutdown`, `regulation`
+# и прочим осмысленным ключам и портила бы их. Пусть складывает сюда — а слой это просто
+# не берёт. Замер на прогоне 3 августа: 349 записей, и внутри одной «схемы события»
+# оказались жара в Европе, столкнувшиеся вертолёты, освистанный политик и помолвка. Пять
+# трендов на 220 сюжетов вида «происшествия по всему миру» — рубрика худшего сорта.
+#
+# `other` не даёт тренда по той же причине, но это не потеря: частотный разбор 596
+# записей показал плоский длинный хвост (самый частый глагол — `announced`, 18 раз, 3 %).
+# Разовое событие не станет трендом ни при каком словаре — оно не возьмёт `min_stories`.
+NON_TREND_KEYS: frozenset[str] = frozenset({"other", "incident"})
+
 _PROMPT_HEAD = """You extract event schemas from news headlines.
 
 For EACH numbered headline decide whether it REPORTS A CONCRETE EVENT that happened or \
@@ -140,7 +154,13 @@ def title_key(title: str) -> str:
 
 
 def action_label(action_key: str) -> str:
-    """Метка действия для имени тренда. Пустая строка — ключ вне словаря."""
+    """Метка действия для имени тренда.
+
+    Пустая строка — из этого ключа тренда не будет: либо он вне словаря, либо это
+    корзина из ``NON_TREND_KEYS``, которая нужна извлечению, но не слою.
+    """
+    if action_key in NON_TREND_KEYS:
+        return ""
     return _ACTION_LABELS.get(action_key, "")
 
 
