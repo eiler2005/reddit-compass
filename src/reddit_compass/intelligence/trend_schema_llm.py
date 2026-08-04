@@ -43,7 +43,11 @@ from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
 SCHEMA_PROMPT_VERSION = "trend-schema-v3-2026-08-04"
-DEFAULT_EXTRACT_MODEL = "qwen3.6-flash"
+# Пустая строка — «модель по умолчанию у провайдера». Имя модели тут выдумывать нельзя:
+# набор зависит от того, каким ключом сконфигурирован клиент (`signals._get_api_config`),
+# и выдуманное имя даёт 400 на каждом вызове. Один раз это уже стоило прогона: 467 батчей
+# отработали за 90 секунд, все с ошибкой, и отчёт сказал «успешно, извлечено 0».
+DEFAULT_EXTRACT_MODEL = ""
 EXTRACT_BATCH = 10
 # Предел одновременных вызовов провайдера. Последовательно 9 317 заголовков — около
 # шести часов; с восемью в полёте это минуты. Скромно намеренно: одна стадия не должна
@@ -291,28 +295,44 @@ async def extract_schemas(
 
     semaphore = asyncio.Semaphore(max(1, concurrency))
     done = 0
+    failed = 0
+    first_error = ""
     collected: list[dict[str, Any]] = []
     lock = asyncio.Lock()
 
     async def run_chunk(chunk: list[str]) -> None:
-        nonlocal done
+        nonlocal done, failed, first_error
         # Промпт строим ДО try: ошибка сборки промпта — дефект кода, а не сбой сети, и
         # маскировать её под «провайдер не ответил» нельзя. Именно так широкий except
         # однажды спрятал KeyError из `format` и превратил его в тихий пустой батч.
         prompt = extraction_prompt(chunk)
+        error = ""
         async with semaphore:
             try:
                 raw = await runner(prompt, model)
-            except Exception:  # Один сорванный вызов не обязан ронять весь прогон.
+            except Exception as exc:  # Один сорванный вызов не обязан ронять весь прогон.
                 raw = ""
+                error = f"{type(exc).__name__}: {exc}"
         records = parse_batch(raw, chunk)
         async with lock:
             collected.extend(records)
             done += 1
+            if error or not records:
+                failed += 1
+                if not first_error:
+                    first_error = error or "провайдер вернул неразбираемый JSON"
             if on_records is not None and records:
                 on_records(records)
             if on_batch is not None:
                 on_batch(done, len(chunks))
 
     await asyncio.gather(*(run_chunk(chunk) for chunk in chunks))
+    # Провалились все батчи — это отказ стадии, а не «событий не нашлось». Тихо вернуть
+    # пустой список и отрапортовать успех нельзя: ровно так неверное имя модели дало
+    # «извлечено 0» на 467 батчах и выглядело как отсутствие паттернов в корпусе.
+    if chunks and failed == len(chunks):
+        raise RuntimeError(
+            f"Извлечение схем провалилось на всех {len(chunks)} батчах. "
+            f"Первая ошибка — {first_error}"
+        )
     return collected

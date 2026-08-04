@@ -232,3 +232,30 @@ def test_actions_outside_the_vocabulary_produce_no_trend(key: str) -> None:
     story = {"story_id": "s1", "title": title, "domain_ids": ["ai_technology"]}
 
     assert _llm_schema_resolver(schemas)(story) is None
+
+
+def test_total_failure_is_loud_not_an_empty_result() -> None:
+    """Неверное имя модели однажды дало «извлечено 0» на 467 батчах и выглядело как
+    отсутствие паттернов в корпусе. Отказ стадии обязан быть отказом."""
+
+    async def runner(prompt: str, model: str) -> str:
+        raise RuntimeError("400 model not found")
+
+    with pytest.raises(RuntimeError, match="провалилось на всех"):
+        asyncio.run(extract_schemas(["a", "b", "c"], runner, batch_size=1))
+
+
+def test_partial_failure_still_returns_what_worked() -> None:
+    """Один сорванный вызов не обязан ронять прогон — падает только тотальный отказ."""
+    calls = 0
+
+    async def runner(prompt: str, model: str) -> str:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("hiccup")
+        return _GOOD
+
+    records = asyncio.run(extract_schemas(["a", "b"], runner, batch_size=1, concurrency=1))
+
+    assert records
