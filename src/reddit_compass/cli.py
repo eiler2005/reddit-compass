@@ -1112,9 +1112,11 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             if args.engine_action == "extract":
                 if args.limit > 0:
                     titles = titles[: args.limit]
-                pending = [
-                    t for t in titles if title_key(t) not in load_schemas(engine_conn, titles)
-                ]
+                # Кэш читаем ОДИН раз. Вызов внутри условия давал O(n²): на 9 317
+                # заголовках это ~87 млн хэшей и полный скан таблицы на каждый элемент —
+                # процесс жёг 99 % CPU и не доходил до первого запроса к модели.
+                have = load_schemas(engine_conn, titles)
+                pending = [t for t in titles if title_key(t) not in have]
                 print(
                     f"заголовков {len(titles)}, в кэше {len(titles) - len(pending)}, "
                     f"извлекать {len(pending)}",
