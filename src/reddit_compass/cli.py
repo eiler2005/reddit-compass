@@ -32,7 +32,11 @@ from .intelligence.actor_types import DEFAULT_ACTOR_MODEL, DEFAULT_ACTOR_THRESHO
 from .intelligence.cross_encoder import DEFAULT_CROSS_ENCODER_THRESHOLD
 from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
 from .intelligence.engine import DEFAULT_TREND_METHOD
-from .intelligence.trend_schema_llm import DEFAULT_EXTRACT_MODEL, EXTRACT_BATCH
+from .intelligence.trend_schema_llm import (
+    DEFAULT_EXTRACT_MODEL,
+    EXTRACT_BATCH,
+    EXTRACT_CONCURRENCY,
+)
 from .models import PostCard, TrackedThreadState, ViralitySignal
 from .search_keywords import search_all_keywords
 from .track_threads import track_all_threads
@@ -2422,6 +2426,12 @@ def build_parser() -> argparse.ArgumentParser:
     engine_schemas_extract.add_argument("--story-release", required=True)
     engine_schemas_extract.add_argument("--model", default=DEFAULT_EXTRACT_MODEL)
     engine_schemas_extract.add_argument("--batch-size", type=int, default=EXTRACT_BATCH)
+    engine_schemas_extract.add_argument(
+        "--concurrency",
+        type=int,
+        default=EXTRACT_CONCURRENCY,
+        help="Сколько батчей держать в полёте одновременно",
+    )
     engine_schemas_extract.add_argument(
         "--limit", type=int, default=0, help="Ограничить число заголовков (0 — все)"
     )

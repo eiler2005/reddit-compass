@@ -124,6 +124,46 @@ def test_extract_dedupes_titles_and_survives_a_failing_batch() -> None:
     assert len(records) == 1
 
 
+def test_records_are_persisted_after_every_batch_not_at_the_end() -> None:
+    """Первая версия писала всё в конце: обрыв на середине терял часы работы."""
+    seen: list[int] = []
+
+    async def runner(prompt: str, model: str) -> str:
+        return _GOOD
+
+    asyncio.run(
+        extract_schemas(
+            ["a headline", "b headline", "c headline", "d headline"],
+            runner,
+            batch_size=1,
+            concurrency=1,
+            on_records=lambda batch: seen.append(len(batch)),
+        )
+    )
+
+    assert len(seen) == 4, "кэш обязан пополняться после каждого батча"
+
+
+def test_batches_run_concurrently() -> None:
+    """Последовательно 9 317 заголовков — около шести часов; это неприемлемо и в проде."""
+    in_flight = 0
+    peak = 0
+
+    async def runner(prompt: str, model: str) -> str:
+        nonlocal in_flight, peak
+        in_flight += 1
+        peak = max(peak, in_flight)
+        await asyncio.sleep(0.01)
+        in_flight -= 1
+        return _GOOD
+
+    titles = [f"headline number {index}" for index in range(12)]
+    asyncio.run(extract_schemas(titles, runner, batch_size=1, concurrency=4))
+
+    assert peak > 1, "батчи идут последовательно"
+    assert peak <= 4, "предел одновременных вызовов не соблюдается"
+
+
 def test_extract_never_calls_the_model_for_an_empty_input() -> None:
     async def runner(prompt: str, model: str) -> str:  # pragma: no cover - не вызывается
         raise AssertionError("модель не должна вызываться")

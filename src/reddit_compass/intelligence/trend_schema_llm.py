@@ -34,6 +34,7 @@ production» уходит в ``shutdown``, чего регулярка не сд
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
@@ -44,6 +45,10 @@ from typing import Any
 SCHEMA_PROMPT_VERSION = "trend-schema-v3-2026-08-04"
 DEFAULT_EXTRACT_MODEL = "qwen3.6-flash"
 EXTRACT_BATCH = 10
+# Предел одновременных вызовов провайдера. Последовательно 9 317 заголовков — около
+# шести часов; с восемью в полёте это минуты. Скромно намеренно: одна стадия не должна
+# съедать всю квоту у ночного цикла.
+EXTRACT_CONCURRENCY = 8
 
 # Закрытый словарь действий. Широкий настолько, чтобы `other` осталась меньшинством, и
 # при этом достаточно грубый, чтобы разные формулировки одного события сходились в один
@@ -259,28 +264,55 @@ async def extract_schemas(
     *,
     model: str = DEFAULT_EXTRACT_MODEL,
     batch_size: int = EXTRACT_BATCH,
+    concurrency: int = EXTRACT_CONCURRENCY,
     on_batch: Callable[[int, int], None] | None = None,
+    on_records: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> list[dict[str, Any]]:
-    """Извлекает схемы батчами. ``runner`` инъектируется, поэтому тесты модель не трогают."""
+    """Извлекает схемы батчами. ``runner`` инъектируется, поэтому тесты модель не трогают.
+
+    Батчи идут **параллельно** с ограничением ``concurrency``: последовательно 9 317
+    заголовков заняли бы около шести часов, что неприемлемо и для ночного прогона, а не
+    только для ручного замера. Одна стадия — один провайдер, поэтому предел держим
+    скромным: смысл не выжать максимум, а уйти от часов к минутам.
+
+    ``on_records`` вызывается **после каждого батча**, чтобы кэш пополнялся по ходу.
+    Первая версия писала всё в конце: обрыв на середине терял часы работы, а
+    промежуточного прогресса не было видно вовсе.
+    """
     unique: dict[str, str] = {}
     for title in titles:
         digest = title_key(title)
         if digest not in unique:
             unique[digest] = title
     ordered = list(unique.values())
-    records: list[dict[str, Any]] = []
-    total = (len(ordered) + batch_size - 1) // batch_size
-    for number, start in enumerate(range(0, len(ordered), batch_size), start=1):
-        chunk = ordered[start : start + batch_size]
+    chunks = [ordered[start : start + batch_size] for start in range(0, len(ordered), batch_size)]
+    if not chunks:
+        return []
+
+    semaphore = asyncio.Semaphore(max(1, concurrency))
+    done = 0
+    collected: list[dict[str, Any]] = []
+    lock = asyncio.Lock()
+
+    async def run_chunk(chunk: list[str]) -> None:
+        nonlocal done
         # Промпт строим ДО try: ошибка сборки промпта — дефект кода, а не сбой сети, и
         # маскировать её под «провайдер не ответил» нельзя. Именно так широкий except
         # однажды спрятал KeyError из `format` и превратил его в тихий пустой батч.
         prompt = extraction_prompt(chunk)
-        try:
-            raw = await runner(prompt, model)
-        except Exception:  # Один сорванный вызов не обязан ронять весь прогон.
-            raw = ""
-        records.extend(parse_batch(raw, chunk))
-        if on_batch is not None:
-            on_batch(number, total)
-    return records
+        async with semaphore:
+            try:
+                raw = await runner(prompt, model)
+            except Exception:  # Один сорванный вызов не обязан ронять весь прогон.
+                raw = ""
+        records = parse_batch(raw, chunk)
+        async with lock:
+            collected.extend(records)
+            done += 1
+            if on_records is not None and records:
+                on_records(records)
+            if on_batch is not None:
+                on_batch(done, len(chunks))
+
+    await asyncio.gather(*(run_chunk(chunk) for chunk in chunks))
+    return collected
