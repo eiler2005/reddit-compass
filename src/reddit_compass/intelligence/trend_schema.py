@@ -634,6 +634,7 @@ def _split_by_object(
     root_name: str,
     members: list[_Member],
     actor_types: dict[str, tuple[str, str]] | None,
+    object_text_of: Callable[[dict[str, Any]], str] | None,
     *,
     min_stories: int,
     min_dates: int,
@@ -650,7 +651,13 @@ def _split_by_object(
     action_key, _, domain = schema_key.partition("|")
     by_object: dict[str, list[tuple[_Member, str]]] = defaultdict(list)
     for story, label, regex_actor in members:
-        found = extract_object(str(story.get("title") or ""))
+        # Текст, по которому опознаётся объект. У `schema_v2` это заголовок целиком —
+        # больше взять неоткуда. У `schema_v3` модель отдаёт сам объект («Apple Watch
+        # app», «smart glasses»), и лексикон по нему работает куда точнее: замер показал,
+        # что по заголовку делилось 27 сюжетов из 63, потому что в заголовке слишком
+        # много посторонних слов.
+        source = object_text_of(story) if object_text_of is not None else ""
+        found = extract_object(source or str(story.get("title") or ""))
         if found is None:
             continue
         object_key, object_label = found
@@ -695,6 +702,7 @@ def discover_schema_trends(
     depth: int = 2,
     actor_types: dict[str, tuple[str, str]] | None = None,
     schema_of: Callable[[dict[str, Any]], tuple[str, str, str] | None] | None = None,
+    object_text_of: Callable[[dict[str, Any]], str] | None = None,
 ) -> list[dict[str, Any]]:
     """Группирует сюжеты по схеме события.
 
@@ -778,6 +786,7 @@ def discover_schema_trends(
                 root_name,
                 members,
                 actor_types,
+                object_text_of,
                 min_stories=min_stories,
                 min_dates=min_dates,
                 min_distinct_actors=min_distinct_actors,

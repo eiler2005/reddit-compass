@@ -4455,7 +4455,13 @@ def _llm_schema_resolver(
     сравнение поколений мерит извлечение, а не изменившиеся правила группировки.
     Домены и их метки те же; отличается только то, откуда взялось действие.
     """
-    from .trend_schema import _domain_label, _story_domains, has_out_of_scope_domain
+    from .trend_schema import (
+        _domain_label,
+        _story_domains,
+        has_out_of_scope_domain,
+        is_non_actor,
+        is_publisher,
+    )
     from .trend_schema_llm import action_label, title_key
 
     def resolve(story: dict[str, Any]) -> tuple[str, str, str] | None:
@@ -4465,18 +4471,43 @@ def _llm_schema_resolver(
             return None
         action_key = str(record.get("key") or "")
         label = action_label(action_key)
-        # `other` намеренно не даёт тренда: это признание, что словарь узок, а не
-        # корзина, в которую можно ссыпать всё непонятое и назвать её паттерном.
+        # Пустая метка — ключ из `NON_TREND_KEYS` или вне словаря. Такие корзины нужны
+        # извлечению, чтобы модель не растаскивала мусор по осмысленным ключам, но
+        # трендом не становятся.
         if not label:
             return None
         domains = _story_domains(story)
         if has_out_of_scope_domain(domains):
             return None
+        # Актор от модели проходит те же проверки, что и регулярочный: издания и
+        # категории не участники события. Раньше этот путь их не проходил, и в тренды
+        # уезжали «AI Agent Automation», «A user», «Community».
+        actor = str(record.get("actor") or "")
+        if is_publisher(actor) or is_non_actor(actor):
+            actor = ""
         domain = domains[0] if domains else ""
         domain_label = _domain_label(domain)
         key = f"{action_key}|{domain}" if domain else action_key
         name = f"{label} {domain_label}".strip() if domain_label else label
-        return key, name, str(record.get("actor") or "")
+        return key, name, actor
+
+    return resolve
+
+
+def _llm_object_resolver(
+    schemas: dict[str, dict[str, Any]],
+) -> Callable[[dict[str, Any]], str]:
+    """Текст объекта от модели для фасета объекта.
+
+    Лексикон объекта поверх целого заголовка работает плохо: слишком много посторонних
+    слов. По чистому объекту («Apple Watch app», «smart glasses», «chipmaking tools») он
+    точнее — замер показал, что по заголовку из 63 сюжетов делилось только 27.
+    """
+    from .trend_schema_llm import title_key
+
+    def resolve(story: dict[str, Any]) -> str:
+        record = schemas.get(title_key(str(story.get("title") or "")))
+        return str(record.get("object") or "") if record else ""
 
     return resolve
 
@@ -4504,6 +4535,7 @@ def _discover_trends_schema_v3(
             depth=int(params.get("trend_schema_depth", 2)),
             actor_types=actor_types,
             schema_of=_llm_schema_resolver(schemas),
+            object_text_of=_llm_object_resolver(schemas),
         ),
         stories,
     )

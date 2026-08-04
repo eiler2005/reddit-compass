@@ -103,7 +103,10 @@ ACTION_KEYS = tuple(key for key, _ in ACTION_VOCABULARY)
 # `other` не даёт тренда по той же причине, но это не потеря: частотный разбор 596
 # записей показал плоский длинный хвост (самый частый глагол — `announced`, 18 раз, 3 %).
 # Разовое событие не станет трендом ни при каком словаре — оно не возьмёт `min_stories`.
-NON_TREND_KEYS: frozenset[str] = frozenset({"other", "incident"})
+# `milestones` — та же болезнь, замеченная одним замером позже: семь трендов на 80
+# сюжетов, и внутри «Archaeologists», «Brain implant», «'Severance'», «Australian Rose
+# Davies», «Boxer». Рекорд — не повторяющийся паттерн, а разовое достижение.
+NON_TREND_KEYS: frozenset[str] = frozenset({"other", "incident", "milestone"})
 
 _PROMPT_HEAD = """You extract event schemas from news headlines.
 

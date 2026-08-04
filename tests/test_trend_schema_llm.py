@@ -58,7 +58,7 @@ def test_non_trend_keys_never_become_trends() -> None:
     """
     from reddit_compass.intelligence.trend_schema_llm import NON_TREND_KEYS
 
-    assert {"other", "incident"} == NON_TREND_KEYS
+    assert sorted(NON_TREND_KEYS) == ["incident", "milestone", "other"]
     for key in NON_TREND_KEYS:
         assert action_label(key) == ""
     assert all(action_label(key) for key in ACTION_KEYS if key not in NON_TREND_KEYS)
