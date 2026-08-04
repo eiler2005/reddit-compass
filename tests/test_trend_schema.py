@@ -7,9 +7,11 @@ from typing import Any
 from reddit_compass.intelligence.actor_types import normalize_title_key
 from reddit_compass.intelligence.quality import is_bad_trend_name
 from reddit_compass.intelligence.trend_schema import (
+    canonical_actors,
     discover_schema_trends,
     extract_action,
     extract_actor,
+    is_not_an_event,
     story_schema,
 )
 
@@ -451,6 +453,65 @@ def _launches(*titles_dates: tuple[str, str]) -> list[dict[str, Any]]:
     ]
 
 
+def test_questions_and_self_promotion_are_not_events() -> None:
+    """Все заголовки — из группы `product launches in AI` прогона 3 августа.
+
+    Глагол лексикона в них есть, события — нет, и никакая гранулярность их не разводит.
+    Двенадцать таких на 38 сюжетов, то есть треть группы.
+    """
+    not_events = [
+        "When will Merge Labs with OpenAI release their BCI technology?",
+        "How should AI assistance be disclosed in an open scientific-framework release?",
+        "How do you make your AI applications stand out when every company is launching one?",
+        "Launch HN: Screenpipe (YC S26) – Record how you work and turn that into agents",
+        "Show HN: a tool that ships your app",
+        "Just Launched my Vibe coded project on Peerlist!",
+        "We analyzed our Product Hunt launch traffic: 431 requests",
+    ]
+
+    for title in not_events:
+        assert is_not_an_event(title), title
+        assert story_schema(_story("s", title, "2026-08-01")) is None, title
+
+
+def test_real_events_survive_the_event_filter() -> None:
+    """Фильтр не имеет права уносить нормальные новостные заголовки."""
+    events = [
+        "OpenAI launches a new reasoning model",
+        "EU fines Google 890mn over ad tech",
+        "Amazon lays off 14000 managers",
+        "Nvidia, SK Group unveil AI data centers initiative",
+    ]
+
+    for title in events:
+        assert not is_not_an_event(title), title
+
+
+def test_actor_variants_collapse_to_one_participant() -> None:
+    """Число различных акторов — метрика, на которой стоит определение тренда.
+
+    Без дедупликации она завышена: в релизе 3 августа `… : models` показывал «Deepseek»
+    и «DeepSeek-V4-Flash» как двух участников.
+    """
+    assert canonical_actors({"Deepseek", "DeepSeek-V4-Flash"}) == ["Deepseek"]
+    assert canonical_actors({"OpenAI", "OpenAI Models Escaped", "Google Hit With", "Google"}) == [
+        "Google",
+        "OpenAI",
+    ]
+    assert canonical_actors({"Meta", "Microsoft"}) == ["Meta", "Microsoft"]
+
+
+def test_deduplicated_actors_are_counted_against_the_threshold() -> None:
+    """Иначе порог берётся вариантами одного имени, и тренд рождается из ничего."""
+    stories = [
+        _story("s1", "DeepSeek launches a new model", "2026-07-28"),
+        _story("s2", "DeepSeek V4 Flash launches a new model", "2026-07-29"),
+        _story("s3", "DeepSeek V4 Pro launches a new model", "2026-07-30"),
+    ]
+
+    assert discover_schema_trends(stories) == []
+
+
 def test_object_splits_a_group_the_actor_type_cannot() -> None:
     """У `launch` допустим единственный тип актора, поэтому делит только объект.
 
@@ -530,8 +591,8 @@ def test_stories_without_a_recognised_object_stay_in_the_parent() -> None:
         ("Tau Robotics unveils a humanoid robot", "2026-07-28"),
         ("Kroger stores launch a robot programme", "2026-07-29"),
         ("China unveils humanoid robots for factories", "2026-07-30"),
-        # Ни одного опознанного объекта: вопрос, а не запуск.
-        ("How do you make your AI project stand out when everyone is launching?", "2026-07-31"),
+        # Действие есть, объекта в лексиконе нет — заголовок из корпуса 3 августа.
+        ("Anthropic launched a financial literacy toy for young engineers", "2026-07-31"),
     )
 
     trends = discover_schema_trends(stories, depth=3, actor_types={})

@@ -342,6 +342,80 @@ def extract_action(title: str) -> tuple[str, str] | None:
     return None
 
 
+# Событие — это то, что произошло. Вопрос о событии, анонс собственного проекта и рассказ
+# от первого лица событиями не являются, но глагол лексикона в них есть, и они доезжали до
+# трендов. Замер на `product launches in AI` (38 сюжетов) показал двенадцать таких:
+#   «When will Merge Labs with OpenAI release their BCI technology?»
+#   «How should AI assistance be disclosed in an open scientific-framework release?»
+#   «Launch HN: Screenpipe (YC S26) – Record how you work…»
+#   «Just Launched my Vibe coded project on Peerlist!»
+#   «We analyzed our Product Hunt launch traffic: 431 requests…»
+# Это треть группы, и никакая гранулярность их не разводит — их нужно не пускать.
+_QUESTION_OPENERS = re.compile(
+    r"^(how|when|why|what|which|who|where|should|does|do|did|is|are|can|could|would|will)\b",
+    re.IGNORECASE,
+)
+_FORUM_PREFIX = re.compile(r"^(show|ask|launch|tell)\s+hn\s*:", re.IGNORECASE)
+# «I», «my», «we», «our» — маркер рассказа о себе. В новостных заголовках первое лицо
+# практически не встречается, а в самопрезентациях с форумов — почти всегда.
+_FIRST_PERSON = re.compile(r"\b(i|me|my|mine|we|us|our|ours)\b", re.IGNORECASE)
+
+
+def _is_pronoun(match: str) -> bool:
+    """Отличает местоимение от аббревиатуры в верхнем регистре.
+
+    Без этого `us` с ``IGNORECASE`` съедает «US» — Соединённые Штаты, один из самых
+    частых акторов корпуса. Замер отсеял так «US State Department Calls For Halt To
+    Executions Of Protesters In Iran» и «KARR security alarms installed on 2,000,000 US
+    vehicles». Аббревиатура пишется капсом целиком, местоимение — нет; исключение
+    единственное и очевидное: «I».
+    """
+    return len(match) == 1 or not match.isupper()
+
+
+def is_not_an_event(title: str) -> bool:
+    """Заголовок описывает не событие: вопрос, анонс своего проекта, рассказ о себе."""
+    stripped = title.strip()
+    if not stripped:
+        return True
+    if stripped.endswith("?") or _QUESTION_OPENERS.match(stripped):
+        return True
+    if _FORUM_PREFIX.match(stripped):
+        return True
+    return any(_is_pronoun(match.group(1)) for match in _FIRST_PERSON.finditer(stripped))
+
+
+def canonical_actors(actors: set[str]) -> list[str]:
+    """Схлопывает варианты одного актора: «Deepseek» и «DeepSeek-V4-Flash» — один участник.
+
+    Дедупликации не было вовсе, а именно число различных акторов отличает тренд от
+    сюжетной линии. То есть метрика, на которой стоит определение, была завышена: в
+    релизе 3 августа тренд `… : models` показывал восемь акторов, из которых «Deepseek» и
+    «DeepSeek-V4-Flash» — один и тот же.
+
+    Правило: если нормализованные токены одного актора начинают другого, это один актор,
+    и берётся более короткая форма. «OpenAI» поглощает «OpenAI Models Escaped», «Google» —
+    «Google Hit With».
+
+    Ошибаться это правило может только в сторону слияния («China» поглотит «China
+    Mobile»), и это безопасная сторона: слияние занижает число акторов и мешает тренду
+    появиться, тогда как отсутствие дедупликации порождает тренды из ничего.
+    """
+    normalized: list[tuple[tuple[str, ...], str]] = []
+    for actor in actors:
+        tokens = tuple(re.sub(r"[^\w\s]", " ", actor.lower()).split())
+        if tokens:
+            normalized.append((tokens, actor))
+    # Короткие формы первыми: они и становятся каноническими.
+    normalized.sort(key=lambda entry: (len(entry[0]), entry[1]))
+    canonical: list[tuple[tuple[str, ...], str]] = []
+    for tokens, original in normalized:
+        if any(tokens[: len(chosen)] == chosen for chosen, _ in canonical):
+            continue
+        canonical.append((tokens, original))
+    return sorted(original for _, original in canonical)
+
+
 def is_publisher(candidate: str) -> bool:
     """Издание, а не участник события.
 
@@ -432,6 +506,8 @@ def story_schema(story: dict[str, Any]) -> tuple[str, str, str] | None:
     именно связки — «AI capex becomes a balance-sheet concern across different companies».
     """
     title = str(story.get("title") or "")
+    if is_not_an_event(title):
+        return None
     domains = _story_domains(story)
     if has_out_of_scope_domain(domains):
         return None
@@ -465,7 +541,9 @@ def _make_trend(
     """Группа как тренд, либо ``None``, если не взяла хотя бы один порог."""
     if len(members) < min_stories:
         return None
-    if len(actors) < min_distinct_actors:
+    # Дедуп до проверки порога, а не после: иначе порог берётся вариантами одного имени.
+    distinct = canonical_actors(actors)
+    if len(distinct) < min_distinct_actors:
         return None
     dates = sorted(
         {
@@ -484,7 +562,7 @@ def _make_trend(
         "name_ru": name,
         "pattern": name,
         "story_ids": [str(story["story_id"]) for story, _, _ in members],
-        "distinct_actors": sorted(actors),
+        "distinct_actors": distinct,
         "first_seen": dates[0],
         "last_seen": dates[-1],
         "story_count": len(members),
