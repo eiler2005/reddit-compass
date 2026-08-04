@@ -119,6 +119,37 @@ def test_sports_and_military_senses_are_vetoed() -> None:
     assert [extract_action(title) for title in out_of_scope] == [None] * len(out_of_scope)
 
 
+def test_sports_governance_is_vetoed_by_domain_not_by_wording() -> None:
+    """Спортивное регулирование не содержит спортивной лексики вообще.
+
+    Все четыре заголовка — из прогона 3 августа. Регулярка `_SPORTS_MARKERS` их не
+    ловит («FA rule breaches», «points deduction», «agent rules»), и оштрафованный
+    футбольный клуб доехал до тренда `regulatory fines in business by companies`.
+    Причина, по которой домен нужно смотреть целиком: `_story_domain` берёт первый,
+    а разметка была ``["business_markets", "sports"]``.
+    """
+    leaked = [
+        ("Chelsea fined £10 million for FA rule breaches, avoid points deduction", ["sports"]),
+        ("Chelsea fined £10m but avoid suspended points deduction", ["sports"]),
+        ("Chelsea fined £10m for breaching agent rules", ["business_markets", "sports"]),
+    ]
+
+    for title, domains in leaked:
+        assert extract_action(title) is not None, f"вето по заголовку и не должно ловить: {title}"
+        story = {**_story("s", title, "2026-08-01"), "domain_ids": domains}
+        assert story_schema(story) is None, title
+
+
+def test_business_stories_survive_the_domain_veto() -> None:
+    """Вето по домену не имеет права уносить обычные деловые сюжеты."""
+    story = {
+        **_story("s", "EU fines Google 890mn over ad tech", "2026-08-01"),
+        "domain_ids": ["business_markets"],
+    }
+
+    assert story_schema(story) is not None
+
+
 def test_in_scope_actions_survive_the_veto() -> None:
     in_scope = {
         "US bans Chinese open source AI models": "ban",
@@ -411,6 +442,131 @@ def test_a_category_is_not_an_actor() -> None:
     trends = discover_schema_trends(stories, depth=3, actor_types=actor_types)
 
     assert all(trend["depth"] == 2 for trend in trends)
+
+
+def _launches(*titles_dates: tuple[str, str]) -> list[dict[str, Any]]:
+    return [
+        _story(f"s{index}", title, date)
+        for index, (title, date) in enumerate(titles_dates, start=1)
+    ]
+
+
+def test_object_splits_a_group_the_actor_type_cannot() -> None:
+    """У `launch` допустим единственный тип актора, поэтому делит только объект.
+
+    Ровно этот случай и есть исходная претензия: `product launches in AI` на 38 сюжетов
+    читался рубрикой, и типизация акторов его не трогала.
+    """
+    stories = _launches(
+        ("OpenAI releases GPT-6 weights", "2026-07-28"),
+        ("DeepSeek launches an open source model", "2026-07-29"),
+        ("Meta releases a new language model", "2026-07-30"),
+        ("Tau Robotics unveils a humanoid robot", "2026-07-28"),
+        ("Kroger stores launch a robot programme", "2026-07-29"),
+        ("China unveils humanoid robots for factories", "2026-07-30"),
+    )
+    typed = _typed(
+        ("OpenAI releases GPT-6 weights", "OpenAI", "company"),
+        ("DeepSeek launches an open source model", "DeepSeek", "company"),
+        ("Meta releases a new language model", "Meta", "company"),
+        ("Tau Robotics unveils a humanoid robot", "Tau Robotics", "company"),
+        ("Kroger stores launch a robot programme", "Kroger", "company"),
+        ("China unveils humanoid robots for factories", "China", "country"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types=typed)
+
+    children = [t for t in trends if t["depth"] == 3]
+    assert {str(t["name_ru"]) for t in children} == {
+        "product launches in AI: models",
+        "product launches in AI: robots",
+    }
+
+
+def test_object_child_names_carry_the_parent_action() -> None:
+    """Метка объекта не имеет права нести действие внутри себя.
+
+    Первая версия называла ребёнка «model releases in AI». Под `outages and breaches`
+    это давало бессмыслицу, а два разных родителя — одинаковое имя и падение поля
+    `trends_duplicate_name_count`.
+    """
+    stories = _launches(
+        ("OpenAI releases GPT-6 weights", "2026-07-28"),
+        ("DeepSeek launches an open source model", "2026-07-29"),
+        ("Meta releases a new language model", "2026-07-30"),
+        ("Tau Robotics unveils a humanoid robot", "2026-07-28"),
+        ("Kroger stores launch a robot programme", "2026-07-29"),
+        ("China unveils humanoid robots for factories", "2026-07-30"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types={})
+    names = [str(t["name_ru"]) for t in trends]
+    root = next(str(t["name_ru"]) for t in trends if t["depth"] == 2)
+
+    assert len(set(names)) == len(names)
+    assert all(name == root or name.startswith(f"{root}: ") for name in names)
+
+
+def test_object_split_needs_no_actor_type_table() -> None:
+    """Разбиение по объекту обязано работать без таблицы типов."""
+    stories = _launches(
+        ("OpenAI releases GPT-6 weights", "2026-07-28"),
+        ("DeepSeek launches an open source model", "2026-07-29"),
+        ("Meta releases a new language model", "2026-07-30"),
+        ("Tau Robotics unveils a humanoid robot", "2026-07-28"),
+        ("Kroger stores launch a robot programme", "2026-07-29"),
+        ("China unveils humanoid robots for factories", "2026-07-30"),
+    )
+
+    assert [t for t in discover_schema_trends(stories, depth=3, actor_types={}) if t["depth"] == 3]
+
+
+def test_stories_without_a_recognised_object_stay_in_the_parent() -> None:
+    """Инвариант строгого уточнения держится и на фасете объекта."""
+    stories = _launches(
+        ("OpenAI releases GPT-6 weights", "2026-07-28"),
+        ("DeepSeek launches an open source model", "2026-07-29"),
+        ("Meta releases a new language model", "2026-07-30"),
+        ("Tau Robotics unveils a humanoid robot", "2026-07-28"),
+        ("Kroger stores launch a robot programme", "2026-07-29"),
+        ("China unveils humanoid robots for factories", "2026-07-30"),
+        # Ни одного опознанного объекта: вопрос, а не запуск.
+        ("How do you make your AI project stand out when everyone is launching?", "2026-07-31"),
+    )
+
+    trends = discover_schema_trends(stories, depth=3, actor_types={})
+    root = next(t for t in trends if t["depth"] == 2)
+    in_children = {sid for t in trends if t["depth"] == 3 for sid in t["story_ids"]}
+
+    assert "s7" in root["story_ids"]
+    assert "s7" not in in_children
+    assert in_children <= set(root["story_ids"])
+
+
+def test_actor_type_wins_when_it_actually_discriminates() -> None:
+    """Объект — запасной фасет, а не замена: где тип актора делит, берётся он."""
+    stories = [
+        _story("s1", "EU fines Google 890mn over ad tech", "2026-07-28", "business_markets"),
+        _story("s2", "Brussels fines Apple over app rules", "2026-07-29", "business_markets"),
+        _story("s3", "Ireland fines Meta over data transfers", "2026-07-30", "business_markets"),
+        _story("s4", "Sony penalty over refunds upheld", "2026-07-28", "business_markets"),
+        _story("s5", "Valve faces a penalty over refunds", "2026-07-29", "business_markets"),
+        _story("s6", "Nintendo penalty over pricing stands", "2026-07-30", "business_markets"),
+    ]
+    typed = _typed(
+        ("EU fines Google 890mn over ad tech", "EU", "government agency"),
+        ("Brussels fines Apple over app rules", "Brussels", "government agency"),
+        ("Ireland fines Meta over data transfers", "Ireland", "government agency"),
+        ("Sony penalty over refunds upheld", "Sony", "company"),
+        ("Valve faces a penalty over refunds", "Valve", "company"),
+        ("Nintendo penalty over pricing stands", "Nintendo", "company"),
+    )
+
+    children = [
+        t for t in discover_schema_trends(stories, depth=3, actor_types=typed) if t["depth"] == 3
+    ]
+
+    assert {str(t["actor_type"]) for t in children} == {"company", "government agency"}
 
 
 def test_publishers_are_rejected_on_the_typed_path_too() -> None:

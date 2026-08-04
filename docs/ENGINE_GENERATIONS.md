@@ -184,7 +184,33 @@ reddit-compass engine rollback --channel broad --to PUBLICATION_ID
 Полы гейта у обеих глубин одинаковы: `trends_bad_name_count` 0, `trends_duplicate_name_count`
 0, `trends_max_story_share` 0.63 при поле 10.
 
-**Главное ограничение, ради которого стоит читать этот раздел.** Тип актора различает только
+**Третий компонент — тот фасет, который реально различает.** Сначала пробуется тип актора;
+если он даёт меньше двух детей, пробуется **объект** действия. Одна ручка (`depth`), инвариант
+строгого уточнения цел, имена читаемы:
+
+```
+38x product launches in AI
+   ↳ 9x product launches in AI: models    Meta, Microsoft, DeepSeek, LG AI Research
+   ↳ 9x product launches in AI: tools     Google, Granola, Jack Dorsey, Cracken
+   ↳ 3x product launches in AI: robots    China, Kroger, Tau Robotics
+
+18x bans and restrictions in AI
+   ↳ 4x … by companies            Anthropic, TikTok, xAI
+   ↳ 3x … by government agencies  FCC, White House
+```
+
+Объект берётся детерминированным лексиконом. **Zero-shot GLiNER по меткам «AI model /
+software product / hardware device» проверен и не годится** — отрицательный результат,
+повторять не нужно: это экстрактор именованных сущностей, а перечисленное — абстрактные
+категории, и метки ложатся почти случайно («humanoid robot» → AI model, «Apple Watch app» →
+hardware device, «Chinese LLM release» → hardware device).
+
+Метки объекта — нейтральные существительные, действие в имя приносит родитель. Первая версия
+зашивала действие в метку («model releases»), и это давало сразу две беды: под `outages and
+breaches` ребёнок назывался «model releases in AI» — бессмыслица, — а два разных родителя
+получали одинаковое имя и роняли `trends_duplicate_name_count` (max 0).
+
+**Ограничение, ради которого стоит читать этот раздел.** Тип актора различает только
 регуляторные действия. Для `launch`, `outage`, `acquisition`, `price_change` таблица
 уместности допускает единственный тип `company` — и это верно по содержанию (человек не
 запускает продукт), но означает, что делить нечем:
@@ -195,10 +221,9 @@ reddit-compass engine rollback --channel broad --to PUBLICATION_ID
 | `outages and breaches in AI` | 30 | `company` | company 21, person 4, country 2 |
 | `bans and restrictions in AI` | 12 | company, country, gov | country 3, company 5, gov 2 ✅ |
 
-То есть исходная претензия — `product launches in AI` читается рубрикой — этим поколением
-**не снята**. Следующий шаг: объект действия четвёртым компонентом ключа
-(`model release` / `product launch` / `feature rollout`), потому что именно объект различает
-запуски.
+Именно поэтому третьим компонентом идёт объект, когда тип актора бессилен. Обратите внимание,
+что объект **не может** быть четвёртым компонентом: группа схлопывается уже на третьем уровне
+(один допустимый тип актора → один ребёнок → схлопывание), и до четвёртого дело не доходит.
 
 **Ревизия по содержанию поймала два дефекта, которые метрики не видели** (все структурные
 показатели были зелёными):

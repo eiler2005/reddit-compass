@@ -165,6 +165,64 @@ _NON_ACTOR_STRINGS: frozenset[str] = frozenset(
 )
 
 
+# Объект действия — второй кандидат в третий компонент ключа, и для доброй половины
+# лексикона единственный работающий. У `launch`, `outage`, `acquisition` таблица
+# уместности допускает один тип актора (`company`), поэтому по актору такая группа не
+# делится в принципе: `product launches in AI` — 38 сюжетов, 23 company, один возможный
+# ребёнок, схлопывается. Различает их именно объект.
+#
+# Здесь детерминированный лексикон, а не модель. Zero-shot GLiNER по меткам
+# «AI model / software product / hardware device» проверен и **не годится**: он
+# экстрактор именованных сущностей, а это абстрактные категории, и метки ложатся почти
+# случайно — «humanoid robot» → AI model, «Apple Watch app» → hardware device,
+# «Chinese LLM release» → hardware device. Отрицательный результат, повторять не нужно.
+#
+# Порядок важен: правила проверяются сверху вниз, первое совпадение выигрывает. Модель
+# идёт раньше инструмента, потому что «cybersecurity model» — про модель, а не про тул.
+# Метки — нейтральные существительные, без действия внутри. Первая версия зашивала
+# действие («model releases»), и получалось двойное зло: ребёнок `outages and breaches
+# in AI` назывался «model releases in AI» — бессмыслица, — а два разных родителя давали
+# одно и то же имя и роняли поле `trends_duplicate_name_count` (max 0). Действие в имя
+# приносит родитель, объект только уточняет.
+_OBJECT_LEXICON: tuple[tuple[str, str, str], ...] = (
+    (
+        "model",
+        r"\b(gpt-?\d|llm|language model|open[- ]source model|model weights|checkpoint|"
+        r"exaone|deepseek|minimax|\bmodels?\b)\b",
+        "models",
+    ),
+    ("robot", r"\b(robots?|humanoids?|drones?)\b", "robots"),
+    (
+        "hardware",
+        r"\b(chips?|gpus?|headsets?|laptops?|smartphones?|wearables?|"
+        r"data ?cent(er|re)s?)\b",
+        "hardware",
+    ),
+    (
+        "tool",
+        r"\b(tools?|apps?|platforms?|services?|apis?|sdks?|features?|agents?|"
+        r"assistants?|plugins?)\b",
+        "tools",
+    ),
+)
+_COMPILED_OBJECTS = tuple(
+    (key, re.compile(pattern, re.IGNORECASE), label) for key, pattern, label in _OBJECT_LEXICON
+)
+
+
+def extract_object(title: str) -> tuple[str, str] | None:
+    """Объект действия: ``(ключ, метка)``. ``None`` — объект не опознан.
+
+    Неопознанный объект — полноценное состояние: такой сюжет остаётся в родителе, и
+    именно туда уходит мусор вроде «How do you make your AI applications stand out?»
+    или «Launch HN: …», у которого объекта нет.
+    """
+    for key, pattern, label in _COMPILED_OBJECTS:
+        if pattern.search(title):
+            return key, label
+    return None
+
+
 def allowed_actor_types(action_key: str) -> frozenset[str]:
     """Типы акторов, уместные для действия. Пустое множество — действие незнакомо."""
     return _ACTION_ACTOR_TYPES.get(action_key, frozenset())
@@ -236,7 +294,7 @@ _SPORTS_MARKERS = re.compile(
     r"playoffs?|world cup|super bowl|striker|midfielder|goalkeeper|quarterback|"
     r"touchdown|doping|coach|dugout|transfer window|tournament|championship|"
     r"season \d|matchday|fixtures?|football|soccer|basketball|baseball|hockey|"
-    r"athletes?|youth academy|substitutes?|penalty kick)\b",
+    r"athletes?|youth academy|substitutes?|penalty kick|sporting)\b",
     re.IGNORECASE,
 )
 _MILITARY_MARKERS = re.compile(
@@ -247,9 +305,31 @@ _MILITARY_MARKERS = re.compile(
 )
 
 
+# Вето по домену, а не только по заголовку. Замер 3 августа: спортивное регулирование
+# не содержит спортивной лексики вообще — «Chelsea fined £10m for breaching agent rules»,
+# «avoid points deduction», «no sporting sanctions». Регулярка их не ловит, и в слой
+# проходило 26 спортивных сюжетов, из них 10 с действием `regulator_fine`.
+#
+# Дописывать в `_SPORTS_MARKERS` названия клубов и оборотов регулятора — та самая
+# рукописная регулярка, на многозначности которой уже было четыре ошибки. Таксономия
+# эти материалы уже разметила, поэтому дешевле спросить её. Ровно это и имел в виду
+# комментарий выше: «увести из слоя целые домены, где эти слова значат другое».
+_OUT_OF_SCOPE_DOMAINS = frozenset({"sports"})
+
+
 def is_out_of_scope(title: str) -> bool:
     """Домены, где глаголы лексикона значат не то: спорт и военные действия."""
     return bool(_SPORTS_MARKERS.search(title) or _MILITARY_MARKERS.search(title))
+
+
+def has_out_of_scope_domain(domains: list[str]) -> bool:
+    """Сюжет отнесён к домену, где лексикон действий неприменим.
+
+    Проверяем **все** домены, а не ведущий: `_story_domain` берёт первый, и сюжет
+    с разметкой ``["business_markets", "sports"]`` иначе уезжает в
+    `regulatory fines in business` — так туда и попал оштрафованный футбольный клуб.
+    """
+    return bool(_OUT_OF_SCOPE_DOMAINS.intersection(domains))
 
 
 def extract_action(title: str) -> tuple[str, str] | None:
@@ -307,7 +387,8 @@ _DOMAIN_LABELS = {
 }
 
 
-def _story_domain(story: dict[str, Any]) -> str:
+def _story_domains(story: dict[str, Any]) -> list[str]:
+    """Все домены сюжета без ``other``; в БД поле лежит JSON-строкой."""
     raw = story.get("domain_ids")
     if isinstance(raw, str):
         try:
@@ -316,8 +397,31 @@ def _story_domain(story: dict[str, Any]) -> str:
             raw = json.loads(raw)
         except ValueError:
             raw = []
-    domains = [str(value) for value in (raw or []) if str(value) != "other"]
+    return [str(value) for value in (raw or []) if str(value) != "other"]
+
+
+def _story_domain(story: dict[str, Any]) -> str:
+    """Ведущий домен сюжета — тот, что попадёт в ключ и в имя."""
+    domains = _story_domains(story)
     return domains[0] if domains else ""
+
+
+def _domain_label(domain: str) -> str:
+    """Человекочитаемый хвост имени тренда.
+
+    Незнакомый домен обязан давать своё имя, а не пустое: иначе ключи
+    ``layoffs|finance_consumer`` и ``layoffs|climate_energy`` дают одинаковое имя
+    «layoffs» и релиз падает на поле ``trends_duplicate_name_count``.
+    """
+    if not domain:
+        return ""
+    return _DOMAIN_LABELS.get(domain, f"in {domain.replace('_', ' ')}")
+
+
+def _schema_domain(schema_key: str) -> str:
+    """Домен из ключа схемы ``действие|домен``."""
+    _, _, domain = schema_key.partition("|")
+    return domain
 
 
 def story_schema(story: dict[str, Any]) -> tuple[str, str, str] | None:
@@ -328,16 +432,15 @@ def story_schema(story: dict[str, Any]) -> tuple[str, str, str] | None:
     именно связки — «AI capex becomes a balance-sheet concern across different companies».
     """
     title = str(story.get("title") or "")
+    domains = _story_domains(story)
+    if has_out_of_scope_domain(domains):
+        return None
     action = extract_action(title)
     if action is None:
         return None
     action_key, label = action
-    domain = _story_domain(story)
-    # Незнакомый домен обязан давать своё имя, а не пустое: иначе ключи
-    # layoffs|finance_consumer и layoffs|climate_energy дают одинаковое имя «layoffs»
-    # и релиз падает на поле trends_duplicate_name_count. Словарь покрывает только
-    # частые домены, поэтому для остальных берём сам идентификатор.
-    domain_label = _DOMAIN_LABELS.get(domain, f"in {domain.replace('_', ' ')}" if domain else "")
+    domain = domains[0] if domains else ""
+    domain_label = _domain_label(domain)
     key = f"{action_key}|{domain}" if domain else action_key
     name = f"{label} {domain_label}".strip() if domain_label else label
     return key, name, extract_actor(title)
@@ -447,6 +550,63 @@ def _split_by_actor_type(
     return children
 
 
+def _split_by_object(
+    schema_key: str,
+    root_name: str,
+    members: list[_Member],
+    actor_types: dict[str, tuple[str, str]] | None,
+    *,
+    min_stories: int,
+    min_dates: int,
+    min_distinct_actors: int,
+) -> list[dict[str, Any]]:
+    """Дети группы по объекту действия: `product launches in AI` → `… : models`.
+
+    Типизация здесь не обязательна — разбиение работает и без таблицы. Но если таблица
+    есть, актора берём из неё: регулярочный извлекатель на этих же заголовках даёт
+    «Built», «Flying», «How», и список акторов ребёнка читается мусором.
+    """
+    from .actor_types import normalize_title_key
+
+    action_key, _, domain = schema_key.partition("|")
+    by_object: dict[str, list[tuple[_Member, str]]] = defaultdict(list)
+    for story, label, regex_actor in members:
+        found = extract_object(str(story.get("title") or ""))
+        if found is None:
+            continue
+        object_key, object_label = found
+        actor = regex_actor
+        typed = (actor_types or {}).get(normalize_title_key(str(story.get("title") or "")))
+        if typed is not None and not is_non_actor(typed[0]) and not is_publisher(typed[0]):
+            actor = typed[0]
+        by_object[object_key].append(((story, label, actor), object_label))
+
+    children: list[dict[str, Any]] = []
+    for object_key, entries in sorted(by_object.items()):
+        sub_members = [member for member, _ in entries]
+        object_label = entries[0][1]
+        child = _make_trend(
+            # Префикс `obj:` разводит ключи объекта и типа актора: иначе действие с
+            # объектом «model» и тип актора «model» дали бы один ключ.
+            f"{action_key}|{domain}|obj:{object_key}",
+            # Действие и домен приносит имя родителя, объект только уточняет. Так имя
+            # остаётся осмысленным для любого действия и не может совпасть у детей
+            # разных родителей.
+            f"{root_name}: {object_label}",
+            sub_members,
+            actors={actor for _, _, actor in sub_members if actor},
+            parent_schema_key=schema_key,
+            actor_type="",
+            depth=3,
+            min_stories=min_stories,
+            min_dates=min_dates,
+            min_distinct_actors=min_distinct_actors,
+        )
+        if child is not None:
+            children.append(child)
+    return children
+
+
 def discover_schema_trends(
     stories: list[dict[str, Any]],
     *,
@@ -506,20 +666,36 @@ def discover_schema_trends(
         if root is None:
             continue
         trends.append(root)
-        if depth < 3 or not actor_types:
+        if depth < 3:
             continue
-        children = _split_by_actor_type(
-            schema_key,
-            root_name,
-            members,
-            actor_types,
-            min_stories=min_stories,
-            min_dates=min_dates,
-            min_distinct_actors=min_distinct_actors,
-        )
-        # Один выживший ребёнок означает, что типизация ничего не разделила, а его состав
-        # — строгое подмножество родительского. Публиковать его значит молча потерять
-        # нетипизированные сюжеты, поэтому схлопываем к родителю.
+        # Третьим компонентом идёт тот фасет схемы, который реально различает. Тип актора
+        # работает только на регуляторных действиях: у `launch`, `outage`, `acquisition`
+        # таблица уместности допускает единственный тип, и группа не делится в принципе.
+        # Тогда пробуем объект — именно он различает запуски.
+        children: list[dict[str, Any]] = []
+        if actor_types:
+            children = _split_by_actor_type(
+                schema_key,
+                root_name,
+                members,
+                actor_types,
+                min_stories=min_stories,
+                min_dates=min_dates,
+                min_distinct_actors=min_distinct_actors,
+            )
+        # Один выживший ребёнок означает, что фасет ничего не разделил, а его состав —
+        # строгое подмножество родительского. Публиковать его значит молча потерять
+        # неразмеченные сюжеты, поэтому это то же самое, что не разделить вовсе.
+        if len(children) < 2:
+            children = _split_by_object(
+                schema_key,
+                root_name,
+                members,
+                actor_types,
+                min_stories=min_stories,
+                min_dates=min_dates,
+                min_distinct_actors=min_distinct_actors,
+            )
         if len(children) >= 2:
             trends.extend(children)
     return sorted(

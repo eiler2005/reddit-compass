@@ -104,8 +104,14 @@ do_sync() {
     ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
         docker compose run --rm reddit-compass collect --from-snapshots --date ${TODAY} --profile broad 2>&1 | tail -5"
     echo "   Finalization done. Running engine cycle..."
+    # --cross-encoder обязателен, а не опционален. Без этой стадии серая зона Stories
+    # остаётся неразобранной, и полы полноты не берутся: замер 3 августа дал
+    # stories_multi_per_1k = 50.6 при поле 65 и compression 0.931 при потолке 0.90.
+    # Прогон при этом публиковался на broad через --force, то есть гейт молчал, а
+    # боевой канал жил с недособранными сюжетами. Лимиты контейнера (4g / 4 cpu,
+    # OMP/MKL/TORCH_NUM_THREADS=4) выставлены ровно под эту стадию.
     ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && \
-        docker compose run --rm reddit-compass engine cycle 2>&1 | tail -5"
+        docker compose run --rm reddit-compass engine cycle --cross-encoder 2>&1 | tail -5"
     echo "   Engine cycle done. Publishing..."
 
     # Read latest story/trend release IDs and publish

@@ -29,6 +29,7 @@ from .detect_virality import detect_virality
 from .export import render_trends_report, write_snapshot, write_trends_report
 from .fetch_subreddits import fetch_all_subreddits
 from .intelligence.actor_types import DEFAULT_ACTOR_MODEL, DEFAULT_ACTOR_THRESHOLD
+from .intelligence.cross_encoder import DEFAULT_CROSS_ENCODER_THRESHOLD
 from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
 from .intelligence.engine import DEFAULT_TREND_METHOD
 from .models import PostCard, TrackedThreadState, ViralitySignal
@@ -978,6 +979,8 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     "near_duplicate_shingle_jaccard": args.near_duplicate_shingle_jaccard,
                     "semantic_dedup_enabled": args.semantic_dedup,
                     "semantic_dedup_max_days": args.semantic_dedup_max_days,
+                    "cross_encoder_enabled": bool(args.cross_encoder),
+                    "cross_encoder_threshold": float(args.cross_encoder_threshold),
                 }
                 # Пороги, зависящие от модели эмбеддингов, передаём ТОЛЬКО если их явно
                 # задали флагом. Иначе дефолт CLI перебил бы профиль модели
@@ -2290,6 +2293,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_stories_propose.add_argument("--auto-merge-threshold", type=float, default=None)
     engine_stories_propose.add_argument("--review-threshold", type=float, default=None)
+    # Стадия была доступна только внутри `engine cycle`, поэтому её нельзя было прогнать
+    # отдельно на готовом facet-релизе — а именно от неё зависит, берутся ли полы полноты.
+    engine_stories_propose.add_argument(
+        "--cross-encoder",
+        action="store_true",
+        help=(
+            "Разобрать серую зону готовым cross-encoder'ом. Без стадии полы полноты не "
+            "берутся (замер: 50.6 multi/1k при поле 65). Требует reddit-compass[adjudicate]."
+        ),
+    )
+    engine_stories_propose.add_argument(
+        "--cross-encoder-threshold",
+        type=float,
+        default=DEFAULT_CROSS_ENCODER_THRESHOLD,
+    )
     engine_stories_propose.add_argument(
         "--no-near-duplicates",
         action="store_true",
