@@ -36,6 +36,33 @@ _MODEL_CHEAP = "qwen3.6-flash"  # простое → самая дешёвая
 ENGINE_REVIEW_TIMEOUT_SECONDS = 75.0
 
 
+class QwenApiError(RuntimeError):
+    """Провайдер ответил не 200.
+
+    Раньше транспорт возвращал на такой ответ пустую строку, и 400, 401 и 429 были
+    неотличимы от «модели нечего сказать». Это корень целого класса тихих поломок:
+    стадия отчитывалась об успехе с нулём результатов, а причина терялась в логе.
+    Ошибка провайдера обязана быть видимой и типизированной, а терпимость к ней —
+    осознанным решением на каждом месте вызова, а не поведением транспорта.
+    """
+
+    def __init__(self, status: int, body: str) -> None:
+        self.status = status
+        self.body = body
+        super().__init__(f"Qwen API {status}: {body[:200]}")
+
+
+def transient_provider_errors() -> tuple[type[BaseException], ...]:
+    """Сбои, при которых батч разумно пропустить, а прогон продолжить.
+
+    Всё остальное — `TypeError`, `KeyError`, отсутствующий ключ API — это дефект кода
+    или конфигурации, и его нужно поднимать наверх, а не прятать за «провайдер молчит».
+    """
+    import aiohttp
+
+    return (QwenApiError, TimeoutError, OSError, aiohttp.ClientError)
+
+
 def _get_api_config() -> tuple[str, str, str, str]:
     """Возвращает (api_key, base_url, classification_model, synthesis_model).
 
@@ -142,7 +169,7 @@ async def _call_qwen(
         if resp.status != 200:
             text = await resp.text()
             logger.warning("Qwen API error %d: %s", resp.status, text[:200])
-            return ""
+            raise QwenApiError(resp.status, text)
         data = await resp.json()
         content: str = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content
@@ -298,6 +325,11 @@ async def analyze_posts(
 
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("LLM batch %d: parse error: %s", batch_idx + 1, exc)
+            continue
+        except QwenApiError as exc:
+            # Классификация Pulse не обязана быть полной: пропуск батча здесь —
+            # осознанный выбор, а не побочный эффект транспорта, возвращавшего "".
+            logger.warning("LLM batch %d: %s", batch_idx + 1, exc)
             continue
         except TimeoutError:
             logger.warning("LLM batch %d: timeout, retry через 10с...", batch_idx + 1)

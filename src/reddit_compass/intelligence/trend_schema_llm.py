@@ -42,11 +42,12 @@ import sqlite3
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
+from ..signals import transient_provider_errors
+
 SCHEMA_PROMPT_VERSION = "trend-schema-v3-2026-08-04"
-# Пустая строка — «модель по умолчанию у провайдера». Имя модели тут выдумывать нельзя:
-# набор зависит от того, каким ключом сконфигурирован клиент (`signals._get_api_config`),
-# и выдуманное имя даёт 400 на каждом вызове. Один раз это уже стоило прогона: 467 батчей
-# отработали за 90 секунд, все с ошибкой, и отчёт сказал «успешно, извлечено 0».
+# Пустая строка — «модель по умолчанию у провайдера». Набор моделей зависит от того,
+# каким ключом сконфигурирован клиент (`signals._get_api_config`), поэтому фиксировать
+# имя здесь значит гадать за конфигурацию.
 DEFAULT_EXTRACT_MODEL = ""
 EXTRACT_BATCH = 10
 # Предел одновременных вызовов провайдера. Последовательно 9 317 заголовков — около
@@ -310,7 +311,11 @@ async def extract_schemas(
         async with semaphore:
             try:
                 raw = await runner(prompt, model)
-            except Exception as exc:  # Один сорванный вызов не обязан ронять весь прогон.
+            except transient_provider_errors() as exc:
+                # Только сбои провайдера. TypeError, KeyError и отсутствующий ключ API —
+                # дефекты кода и конфигурации, они обязаны подняться наверх, а не
+                # притвориться пустым батчем. Три тихие поломки подряд появились ровно
+                # из-за того, что здесь стояло `except Exception`.
                 raw = ""
                 error = f"{type(exc).__name__}: {exc}"
         records = parse_batch(raw, chunk)

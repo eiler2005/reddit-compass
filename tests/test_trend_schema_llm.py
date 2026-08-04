@@ -24,6 +24,7 @@ from reddit_compass.intelligence.trend_schema_llm import (
     store_schemas,
     title_key,
 )
+from reddit_compass.signals import QwenApiError
 
 _TITLES = ["Bank of England holds interest rates at 3.75%", "How do I get into hacking?"]
 _GOOD = """{"results":[
@@ -112,7 +113,7 @@ def test_extract_dedupes_titles_and_survives_a_failing_batch() -> None:
     async def runner(prompt: str, model: str) -> str:
         calls.append(prompt)
         if len(calls) == 1:
-            raise RuntimeError("provider hiccup")
+            raise QwenApiError(429, "rate limited")
         return _GOOD
 
     records = asyncio.run(
@@ -239,7 +240,7 @@ def test_total_failure_is_loud_not_an_empty_result() -> None:
     отсутствие паттернов в корпусе. Отказ стадии обязан быть отказом."""
 
     async def runner(prompt: str, model: str) -> str:
-        raise RuntimeError("400 model not found")
+        raise QwenApiError(400, "model not found")
 
     with pytest.raises(RuntimeError, match="провалилось на всех"):
         asyncio.run(extract_schemas(["a", "b", "c"], runner, batch_size=1))
@@ -253,9 +254,34 @@ def test_partial_failure_still_returns_what_worked() -> None:
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise RuntimeError("hiccup")
+            raise QwenApiError(503, "upstream busy")
         return _GOOD
 
     records = asyncio.run(extract_schemas(["a", "b"], runner, batch_size=1, concurrency=1))
 
     assert records
+
+
+def test_a_code_bug_in_the_runner_is_not_mistaken_for_a_provider_failure() -> None:
+    """Ради этого и сужался except.
+
+    Три тихие поломки подряд появились потому, что `except Exception` вокруг сетевого
+    вызова глотал и `KeyError` из сборки промпта, и неверную конфигурацию. Дефект кода
+    обязан подниматься наверх, а не превращаться в пустой батч.
+    """
+
+    async def runner(prompt: str, model: str) -> str:
+        raise TypeError("это дефект кода, а не сбой сети")
+
+    with pytest.raises(TypeError):
+        asyncio.run(extract_schemas(["a"], runner, batch_size=1))
+
+
+def test_missing_api_key_fails_immediately() -> None:
+    """Отсутствие ключа — ошибка конфигурации, а не «провайдер не ответил»."""
+
+    async def runner(prompt: str, model: str) -> str:
+        raise ValueError("Ключ Qwen не установлен")
+
+    with pytest.raises(ValueError, match="Ключ Qwen"):
+        asyncio.run(extract_schemas(["a", "b"], runner, batch_size=1))
