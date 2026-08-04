@@ -292,6 +292,22 @@ CREATE TABLE IF NOT EXISTS engine_trend_stories (
     PRIMARY KEY (trend_release_id, trend_id, story_id)
 );
 
+-- Схема события, извлечённая LLM из заголовка. Ключ — хэш нормализованного заголовка
+-- вместе с версией промпта, а не story_id: story_id выводится из медоида и меняется между
+-- релизами, заголовок — нет. Кэш и есть то, что едет в релиз: модель недетерминирована,
+-- релизы immutable, поэтому воспроизводимость держится на этой таблице, а её отпечаток
+-- входит в params_hash. Тот же приём, что у llm_reviews с input_hash.
+CREATE TABLE IF NOT EXISTS story_schemas (
+    title_hash        TEXT PRIMARY KEY,
+    prompt_version    TEXT NOT NULL,
+    model             TEXT NOT NULL,
+    is_event          INTEGER NOT NULL DEFAULT 0,
+    actor             TEXT NOT NULL DEFAULT '',
+    action            TEXT NOT NULL DEFAULT '',
+    object            TEXT NOT NULL DEFAULT '',
+    action_key        TEXT NOT NULL DEFAULT ''
+);
+
 CREATE TABLE IF NOT EXISTS engine_labels (
     label_id          TEXT PRIMARY KEY,
     target_kind       TEXT NOT NULL,
@@ -4348,15 +4364,25 @@ def _discover_trends_schema_v2(
     """
     from .trend_schema import discover_schema_trends
 
-    by_id = {str(story["story_id"]): story for story in stories}
-    raw_trends = discover_schema_trends(
+    return _adapt_schema_trends(
+        discover_schema_trends(
+            stories,
+            min_stories=int(params.get("min_stories", 3)),
+            min_dates=int(params.get("min_dates", 2)),
+            min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
+            depth=int(params.get("trend_schema_depth", 2)),
+            actor_types=actor_types,
+        ),
         stories,
-        min_stories=int(params.get("min_stories", 3)),
-        min_dates=int(params.get("min_dates", 2)),
-        min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
-        depth=int(params.get("trend_schema_depth", 2)),
-        actor_types=actor_types,
     )
+
+
+def _adapt_schema_trends(
+    raw_trends: list[dict[str, Any]],
+    stories: list[dict[str, Any]],
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Схемные тренды → контракт ``create_trend_release``. Общий для `schema_v2` и v3."""
+    by_id = {str(story["story_id"]): story for story in stories}
     # Первый проход считает trend_id каждой записи, второй связывает детей с родителем:
     # id родителя известен только после того, как посчитан его собственный.
     id_by_schema_key = {
@@ -4418,6 +4444,69 @@ def _discover_trends_schema_v2(
             )
         )
     return adapted
+
+
+def _llm_schema_resolver(
+    schemas: dict[str, dict[str, Any]],
+) -> Callable[[dict[str, Any]], tuple[str, str, str] | None]:
+    """Извлечение схемы из кэша LLM в контракте ``story_schema``.
+
+    Ключ и имя строятся ровно как в `schema_v2` — ``(действие, домен)`` — поэтому
+    сравнение поколений мерит извлечение, а не изменившиеся правила группировки.
+    Домены и их метки те же; отличается только то, откуда взялось действие.
+    """
+    from .trend_schema import _domain_label, _story_domains, has_out_of_scope_domain
+    from .trend_schema_llm import action_label, title_key
+
+    def resolve(story: dict[str, Any]) -> tuple[str, str, str] | None:
+        title = str(story.get("title") or "")
+        record = schemas.get(title_key(title))
+        if record is None or not record.get("is_event"):
+            return None
+        action_key = str(record.get("key") or "")
+        label = action_label(action_key)
+        # `other` намеренно не даёт тренда: это признание, что словарь узок, а не
+        # корзина, в которую можно ссыпать всё непонятое и назвать её паттерном.
+        if not label:
+            return None
+        domains = _story_domains(story)
+        if has_out_of_scope_domain(domains):
+            return None
+        domain = domains[0] if domains else ""
+        domain_label = _domain_label(domain)
+        key = f"{action_key}|{domain}" if domain else action_key
+        name = f"{label} {domain_label}".strip() if domain_label else label
+        return key, name, str(record.get("actor") or "")
+
+    return resolve
+
+
+def _discover_trends_schema_v3(
+    stories: list[dict[str, Any]],
+    *,
+    params: dict[str, Any],
+    schemas: dict[str, dict[str, Any]],
+    actor_types: dict[str, tuple[str, str]] | None = None,
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Слой Trends v3: то же построение, но действие извлекает LLM, а не лексикон.
+
+    Замер, из-за которого метод появился (`docs/ENGINE_GENERATIONS.md`): лексикон из
+    тринадцати регулярок даёт recall ≈ 13 % и precision ≈ 63 %.
+    """
+    from .trend_schema import discover_schema_trends
+
+    return _adapt_schema_trends(
+        discover_schema_trends(
+            stories,
+            min_stories=int(params.get("min_stories", 3)),
+            min_dates=int(params.get("min_dates", 2)),
+            min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
+            depth=int(params.get("trend_schema_depth", 2)),
+            actor_types=actor_types,
+            schema_of=_llm_schema_resolver(schemas),
+        ),
+        stories,
+    )
 
 
 def _reconcile_trend_hierarchy(
@@ -4553,12 +4642,26 @@ def create_trend_release(
     # Отпечаток таблицы типов — только там, где она вообще читается. Без него два релиза с
     # одинаковым `params_hash` могли бы иметь разное содержание, если файл изменился под
     # ними; с ним `embedding_v2` не churn'ится на пустом месте.
-    if method == "schema_v2" and int(params["trend_schema_depth"]) >= 3:
+    if method in {"schema_v2", "schema_v3"} and int(params["trend_schema_depth"]) >= 3:
         from .actor_types import actor_types_digest, load_actor_types, resolve_actor_types_path
 
         params["actor_types_digest"] = actor_types_digest(
             load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
         )
+    if method == "schema_v3":
+        # Отпечаток кэша извлечения обязателен: модель недетерминирована, и без него два
+        # релиза с одинаковым `params_hash` имели бы разное содержание.
+        from .trend_schema_llm import SCHEMA_PROMPT_VERSION, load_schemas, schemas_digest
+
+        titles = [
+            str(row["title"] or "")
+            for row in conn.execute(
+                "SELECT title FROM engine_stories WHERE story_release_id = ?",
+                (story_release_id,),
+            )
+        ]
+        params["schema_prompt_version"] = SCHEMA_PROMPT_VERSION
+        params["schemas_digest"] = schemas_digest(load_schemas(conn, titles))
     params_hash = _hash_json(params)
     created_at = now_iso()
     trend_release_id = _stable_id(
@@ -4612,6 +4715,28 @@ def create_trend_release(
         trends = _discover_trends_schema_v2(
             stories,
             params={**params, "trend_schema_depth": effective_depth},
+            actor_types=actor_types or None,
+        )
+    elif method == "schema_v3":
+        from .actor_types import load_actor_types, resolve_actor_types_path
+        from .trend_schema_llm import load_schemas
+
+        if requested_depth >= 3:
+            actor_types = load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
+            if not actor_types:
+                effective_depth = 2
+        llm_schemas = load_schemas(conn, [str(story.get("title") or "") for story in stories])
+        if not llm_schemas:
+            # Без кэша извлечения метод не может работать вообще — молча отдавать пустой
+            # релиз нельзя, это выглядело бы как «паттернов нет».
+            raise ValueError(
+                "schema_v3 требует кэш извлечения: сначала `engine schemas extract`. "
+                "Таблица story_schemas пуста для сюжетов этого релиза."
+            )
+        trends = _discover_trends_schema_v3(
+            stories,
+            params={**params, "trend_schema_depth": effective_depth},
+            schemas=llm_schemas,
             actor_types=actor_types or None,
         )
     elif method == "embedding_v2":
@@ -4693,6 +4818,22 @@ def create_trend_release(
         "trend_parent_count": parent_count,
         "trend_child_count": child_count,
     }
+    if method == "schema_v3":
+        from .trend_schema_llm import load_schemas
+
+        cached = load_schemas(conn, [str(story.get("title") or "") for story in stories])
+        events = [rec for rec in cached.values() if rec.get("is_event")]
+        other = [rec for rec in events if rec.get("key") == "other"]
+        metrics.update(
+            {
+                "schema_extracted": len(cached),
+                "schema_event_share": round(100 * len(events) / max(len(cached), 1), 1),
+                # Доля `other` — честная мера того, насколько узок словарь действий.
+                # Растёт — значит словарь пора расширять, а не радоваться охвату.
+                "schema_other_share": round(100 * len(other) / max(len(events), 1), 1),
+                "schema_coverage": round(100 * len(cached) / max(len(stories), 1), 1),
+            }
+        )
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(

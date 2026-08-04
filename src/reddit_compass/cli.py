@@ -32,6 +32,7 @@ from .intelligence.actor_types import DEFAULT_ACTOR_MODEL, DEFAULT_ACTOR_THRESHO
 from .intelligence.cross_encoder import DEFAULT_CROSS_ENCODER_THRESHOLD
 from .intelligence.embeddings import LEXICAL_HASH_EMBEDDING_MODEL
 from .intelligence.engine import DEFAULT_TREND_METHOD
+from .intelligence.trend_schema_llm import DEFAULT_EXTRACT_MODEL, EXTRACT_BATCH
 from .models import PostCard, TrackedThreadState, ViralitySignal
 from .search_keywords import search_all_keywords
 from .track_threads import track_all_threads
@@ -735,6 +736,12 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
         train_story_merge_model,
         verify_data_release,
     )
+    from .intelligence.trend_schema_llm import (
+        extract_schemas,
+        load_schemas,
+        store_schemas,
+        title_key,
+    )
 
     engine_path = (
         Path(args.engine_db) if getattr(args, "engine_db", None) else DEFAULT_ENGINE_DB_PATH
@@ -1084,6 +1091,59 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                                 "Run `engine stories propose` again with the same "
                                 "facet release to create a reviewed attempt."
                             ),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+                return
+        if args.engine_group == "schemas":
+            titles = [
+                str(row["title"] or "")
+                for row in engine_conn.execute(
+                    "SELECT title FROM engine_stories WHERE story_release_id = ? ORDER BY story_id",
+                    (args.story_release,),
+                )
+            ]
+            if args.engine_action == "extract":
+                if args.limit > 0:
+                    titles = titles[: args.limit]
+                pending = [
+                    t for t in titles if title_key(t) not in load_schemas(engine_conn, titles)
+                ]
+                print(
+                    f"заголовков {len(titles)}, в кэше {len(titles) - len(pending)}, "
+                    f"извлекать {len(pending)}",
+                    file=sys.stderr,
+                )
+                records = await extract_schemas(
+                    pending,
+                    lambda prompt, model: call_qwen_json(
+                        prompt, model=model, timeout_seconds=180.0
+                    ),
+                    model=args.model,
+                    batch_size=int(args.batch_size),
+                    on_batch=lambda n, total: print(f"  батч {n}/{total}", file=sys.stderr),
+                )
+                written = store_schemas(engine_conn, records, model=args.model)
+                print(json.dumps({"extracted": written, "requested": len(pending)}))
+                return
+            if args.engine_action == "stats":
+                cached = load_schemas(engine_conn, titles)
+                events = [r for r in cached.values() if r.get("is_event")]
+                other = [r for r in events if r.get("key") == "other"]
+                by_key: dict[str, int] = {}
+                for record in events:
+                    by_key[str(record.get("key"))] = by_key.get(str(record.get("key")), 0) + 1
+                print(
+                    json.dumps(
+                        {
+                            "titles": len(titles),
+                            "cached": len(cached),
+                            "events": len(events),
+                            "event_share": round(100 * len(events) / max(len(cached), 1), 1),
+                            "other_share": round(100 * len(other) / max(len(events), 1), 1),
+                            "by_action": dict(sorted(by_key.items(), key=lambda kv: -kv[1])),
                         },
                         ensure_ascii=False,
                         indent=2,
@@ -2350,6 +2410,26 @@ def build_parser() -> argparse.ArgumentParser:
     # опциональная зависимость [actors] в прод-образ намеренно не входит: VPS отдаёт
     # заголовки (`export-titles`, чистая операция), Mac считает типы (`type`, нужен
     # GLiNER) и кладёт таблицу обратно в /data. См. scripts/fetch-and-sync.sh.
+    # Извлечение схемы LLM отделено от построения релиза намеренно: это долгая сетевая
+    # стадия, а `trends propose` обязан оставаться быстрым и воспроизводимым. В релиз
+    # едет кэш, а не модель.
+    engine_schemas = engine_sub.add_parser("schemas", help="LLM event-schema cache for schema_v3")
+    engine_schemas_sub = engine_schemas.add_subparsers(dest="engine_action", required=True)
+    engine_schemas_extract = engine_schemas_sub.add_parser(
+        "extract",
+        help="Прогреть кэш извлечения по заголовкам story-релиза (нужен ключ Qwen)",
+    )
+    engine_schemas_extract.add_argument("--story-release", required=True)
+    engine_schemas_extract.add_argument("--model", default=DEFAULT_EXTRACT_MODEL)
+    engine_schemas_extract.add_argument("--batch-size", type=int, default=EXTRACT_BATCH)
+    engine_schemas_extract.add_argument(
+        "--limit", type=int, default=0, help="Ограничить число заголовков (0 — все)"
+    )
+    engine_schemas_stats = engine_schemas_sub.add_parser(
+        "stats", help="Что уже в кэше: доля событий и доля `other`"
+    )
+    engine_schemas_stats.add_argument("--story-release", required=True)
+
     engine_actors = engine_sub.add_parser("actors", help="Actor typing for schema_v2 depth 3")
     engine_actors_sub = engine_actors.add_subparsers(dest="engine_action", required=True)
     engine_actors_export = engine_actors_sub.add_parser(
@@ -2381,8 +2461,11 @@ def build_parser() -> argparse.ArgumentParser:
     engine_trends_propose.add_argument(
         "--method",
         default=DEFAULT_TREND_METHOD,
-        choices=["story_graph_v1", "embedding_v2", "schema_v2"],
-        help="Trend discovery method; embedding_v2 clusters story vectors + c-TF-IDF names.",
+        choices=["story_graph_v1", "embedding_v2", "schema_v2", "schema_v3"],
+        help=(
+            "Trend discovery method. schema_v3 берёт действие из LLM-извлечения "
+            "(нужен прогретый `engine schemas extract`), schema_v2 — из лексикона."
+        ),
     )
     engine_trends_propose.add_argument("--top-k", type=int, default=12)
     engine_trends_propose.add_argument("--edge-threshold", type=float, default=0.45)
@@ -2502,7 +2585,7 @@ def build_parser() -> argparse.ArgumentParser:
     engine_cycle.add_argument(
         "--trend-method",
         default="embedding_v2",
-        choices=["story_graph_v1", "embedding_v2", "schema_v2"],
+        choices=["story_graph_v1", "embedding_v2", "schema_v2", "schema_v3"],
     )
     engine_cycle.add_argument(
         "--trend-depth",

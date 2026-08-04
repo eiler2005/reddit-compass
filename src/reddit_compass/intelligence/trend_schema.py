@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from typing import Any
 
 # Нормализованные действия: разные формулировки одного действия обязаны давать один ключ,
@@ -693,8 +694,14 @@ def discover_schema_trends(
     min_distinct_actors: int = 2,
     depth: int = 2,
     actor_types: dict[str, tuple[str, str]] | None = None,
+    schema_of: Callable[[dict[str, Any]], tuple[str, str, str] | None] | None = None,
 ) -> list[dict[str, Any]]:
     """Группирует сюжеты по схеме события.
+
+    ``schema_of`` подменяет извлечение схемы, оставляя правила группировки теми же:
+    пороги, дедуп акторов, схлопывание, выбор фасета и иерархия — общие для всех методов.
+    ``schema_v3`` передаёт сюда LLM-извлечение, `schema_v2` пользуется дефолтом. Одна
+    реализация правил на оба метода: иначе сравнение поколений мерило бы и правила тоже.
 
     ``min_distinct_actors`` — то самое условие, которое отличает тренд от одной сюжетной
     линии. Без него «OpenAI сделала A, потом B, потом C» выглядит как повторяющийся
@@ -714,9 +721,10 @@ def discover_schema_trends(
     Поэтому ``depth=3`` без таблицы типов тождественно ``depth=2``, а откат на глубину 2
     — честное надмножество, а не другой релиз.
     """
+    resolve = schema_of if schema_of is not None else story_schema
     by_action: dict[str, list[_Member]] = defaultdict(list)
     for story in stories:
-        schema = story_schema(story)
+        schema = resolve(story)
         if schema is None:
             continue
         action_key, label, actor = schema
