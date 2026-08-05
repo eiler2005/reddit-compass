@@ -37,6 +37,15 @@
             <span>{{ fact }}</span>
             {% endfor %}
         </p>
+        {# Сами акторы, а не только их число. Имена — исконные, на языке корпуса: их
+           нормализует отдельный LLM-проход, и без вывода его результат виден метрике
+           distinct_actors и невиден человеку. #}
+        {% if row_actors %}
+        <p class="item-row-actors">
+            {% for actor in row_actors[:6] %}<span>{{ actor }}</span>{% endfor %}
+            {% if row_actors | length > 6 %}<span>+{{ row_actors | length - 6 }}</span>{% endif %}
+        </p>
+        {% endif %}
         {% if domain_ids or project_scores %}
         {% with chip_limit=4 %}{% include "components/chip_cloud.html" %}{% endwith %}
         {% endif %}

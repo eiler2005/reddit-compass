@@ -688,23 +688,24 @@ async def _cmd_qwen(args: argparse.Namespace) -> None:
             )
         )
         return
-    totals = qwen_policy.usage_totals()
+    # То же окно, что видит роутер: иначе `usage` показывал бы остаток, по которому
+    # `pick` не работает.
+    grant_start = qwen_policy.payg_grant_start()
+    grant_expired = qwen_policy.payg_grant_expired()
+    totals = qwen_policy.usage_totals(since=grant_start)
     tp_quota = qwen_policy.token_plan_quota()
     tp_used = sum(total for (_model, endpoint), total in totals.items() if endpoint == "token-plan")
     rows = []
     for (model, endpoint), used in sorted(totals.items()):
         quota = tp_quota if endpoint == "token-plan" else qwen_policy.payg_free_quota()
-        rows.append(
-            {
-                "model": model,
-                "endpoint": endpoint,
-                "used": used,
-                # У token-plan квота общая на все модели — остаток виден в блоке token_plan.
-                "left": None
-                if (quota is None or endpoint == "token-plan")
-                else max(quota - used, 0),
-            }
-        )
+        if endpoint == "payg" and grant_expired:
+            left: int | None = 0
+        elif quota is None or endpoint == "token-plan":
+            # У token-plan квота общая на все модели — остаток виден в блоке token_plan.
+            left = None
+        else:
+            left = max(quota - used, 0)
+        rows.append({"model": model, "endpoint": endpoint, "used": used, "left": left})
     print(
         json.dumps(
             {
@@ -715,6 +716,11 @@ async def _cmd_qwen(args: argparse.Namespace) -> None:
                     "left": None if tp_quota is None else max(tp_quota - tp_used, 0),
                 },
                 "payg_free_quota_per_model": qwen_policy.payg_free_quota(),
+                "payg_grant": {
+                    "start": grant_start.date().isoformat() if grant_start else None,
+                    "days": qwen_policy.PAYG_GRANT_DAYS,
+                    "expired": grant_expired,
+                },
                 "by_model": rows,
             },
             ensure_ascii=False,
@@ -1343,8 +1349,12 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
                 return
             if args.engine_action == "review":
+                from .qwen_policy import pick_endpoint
                 from .signals import TREND_REVIEW_TIMEOUT_SECONDS, call_qwen_json
 
+                # Модель закреплена (она в ключе кэша `llm_reviews`), а эндпоинт — нет:
+                # ту же модель берём там, где сейчас дешевле.
+                review_endpoint, _ = pick_endpoint(args.model)
                 jobs = prepare_trend_review_jobs(
                     engine_conn,
                     args.trend_release,
@@ -1355,7 +1365,10 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     jobs,
                     model=args.model,
                     review_runner=lambda prompt, model: call_qwen_json(
-                        prompt, model=model, timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS
+                        prompt,
+                        model=model,
+                        endpoint=review_endpoint or None,
+                        timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS,
                     ),
                     store_response=lambda **kwargs: store_trend_review_response(
                         engine_conn, **kwargs
@@ -1829,6 +1842,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 raise SystemExit(1)
             return
         if args.engine_group == "cycle":
+            from .qwen_policy import pick_endpoint
             from .signals import TREND_REVIEW_TIMEOUT_SECONDS, call_qwen_json
 
             config = _load_config(args)
@@ -1838,10 +1852,18 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
             }
             corpus_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
             corpus_conn = open_corpus_readonly(corpus_path)
+            # Эндпоинт выбираем один раз на цикл: он не входит в ключ кэша, поэтому
+            # свободен, а модель `--trend-review-model` закреплена.
+            cycle_endpoint = (
+                pick_endpoint(args.trend_review_model)[0] if _engine_review_requested(args) else ""
+            )
             review_runner = (
                 (
                     lambda prompt, model: call_qwen_json(
-                        prompt, model=model, timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS
+                        prompt,
+                        model=model,
+                        endpoint=cycle_endpoint or None,
+                        timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS,
                     )
                 )
                 if _engine_review_requested(args)
@@ -2643,9 +2665,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=2,
         choices=[2, 3],
         help=(
-            "Компонентов в схемном ключе (только schema_v2): 2 = (действие, домен), "
-            "3 = + тип актора. На 3 нужна таблица actor_types.json, иначе глубина "
-            "деградирует до 2 с предупреждением."
+            "Компонентов в схемном ключе (schema_v2 и schema_v3): 2 = (действие, "
+            "домен), 3 = + тип актора. На 3 нужна таблица actor_types.json, иначе "
+            "глубина деградирует до 2 с предупреждением."
         ),
     )
     engine_trends_propose.add_argument(
@@ -2674,7 +2696,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_trends_review.add_argument("--trend-release", required=True)
     engine_trends_review.add_argument("--limit", type=int, default=50)
-    engine_trends_review.add_argument("--model", default="qwen3.8-max-preview")
+    engine_trends_review.add_argument("--model", default="qwen3.8-max")
 
     engine_pulse = engine_sub.add_parser("reddit-pulse", help="Reddit Pulse signal operations")
     engine_pulse_sub = engine_pulse.add_subparsers(dest="pulse_action", required=True)
@@ -2794,7 +2816,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_cycle.add_argument(
         "--trend-review-model",
-        default="qwen3.8-max-preview",
+        default="qwen3.8-max",
         help="Qwen model for final bounded trend review.",
     )
     engine_cycle.add_argument(

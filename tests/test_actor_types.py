@@ -131,3 +131,25 @@ def test_missing_extra_names_itself_in_the_error() -> None:
 
     with pytest.raises(RuntimeError, match=r"reddit-compass\[actors\]"):
         load_extractor()
+
+
+def test_depth_downgrade_says_so_out_loud(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """Глубина 3 без таблицы — это глубина 2, и релиз обязан об этом сказать.
+
+    Регрессия: у `schema_v3` стояла своя копия этой ветки, и она молчала — ночной
+    прогон каждую ночь публиковал глубину 2 под именем глубины 3.
+    """
+    from reddit_compass.intelligence.engine import _resolve_actor_typing
+
+    with caplog.at_level("WARNING"):
+        actor_types, effective = _resolve_actor_typing(3, tmp_path / "absent.json")
+
+    assert (actor_types, effective) == ({}, 2)
+    assert "ACTOR TYPING FALLBACK" in caplog.text
+
+
+def test_depth_two_does_not_touch_the_table(tmp_path: Path) -> None:
+    """Глубина 2 таблицу не читает: её отсутствие для неё не событие."""
+    from reddit_compass.intelligence.engine import _resolve_actor_typing
+
+    assert _resolve_actor_typing(2, tmp_path / "absent.json") == ({}, 2)

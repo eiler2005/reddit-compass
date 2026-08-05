@@ -2398,13 +2398,19 @@ def test_trend_review_cache_applies_to_release_with_more_stories(tmp_path: Path)
         engine,
         trends=[(trend, memberships)],
         stories=stories,
-        model="qwen3.8-max-preview",
+        model="qwen3.8-max",
         prompt_version=TREND_REVIEW_PROMPT_VERSION,
     )
 
     assert len(resolved) == 1
     assert resolved[0][0]["review_status"] == "confirmed"
-    assert resolved[0][0]["story_count"] == 5
+    # Из 25 членов ревью видело 20 сильнейших и назвало 5 из них. Отсев касается только
+    # показанных: 5 названных + 5 непоказанных (story_00..story_04) = 10. Непоказанные
+    # остаются, потому что модель о них не высказывалась.
+    assert resolved[0][0]["story_count"] == 10
+    assert [story_id for story_id, _, _ in resolved[0][1]] == [
+        f"story_{index:02}" for index in [*range(5), *range(20, 25)]
+    ]
     # Ревью не переименовывает тренд: оригинал нетронут, русское имя — в review_name_ru.
     assert resolved[0][0]["name_ru"] == "root"
     assert resolved[0][0]["pattern"] == "root"

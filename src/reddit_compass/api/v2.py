@@ -1293,6 +1293,13 @@ def _engine_radar(
         """,
         (trend_release.trend_release_id,),
     ).fetchall()
+    # На полки идут только рубрики верхнего уровня. Иначе родитель и его собственный
+    # ребёнок занимают две карточки из пяти на Today и говорят одно и то же.
+    # Отбрасываем до подсчёта: счётчики в шапке обязаны описывать то, что на полках, —
+    # иначе они считают тренды, которых на странице нет.
+    trend_rows = [
+        row for row in trend_rows if not str(_row_value(row, "parent_trend_id", "") or "")
+    ]
     candidate_count = len(trend_rows)
     confirmed_count = sum(
         1
@@ -1326,12 +1333,6 @@ def _engine_radar(
         # Older engine databases do not have the review table yet.  The
         # candidate view remains usable without the optional Qwen metadata.
         pass
-
-    # На полки идут только рубрики верхнего уровня. Иначе родитель и его собственный
-    # ребёнок занимают две карточки из пяти на Today и говорят одно и то же.
-    trend_rows = [
-        row for row in trend_rows if not str(_row_value(row, "parent_trend_id", "") or "")
-    ]
 
     shelves: dict[str, list[dict[str, Any]]] = {}
     for row in trend_rows:

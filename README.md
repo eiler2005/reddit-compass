@@ -351,9 +351,9 @@ Engine facets and Qwen-reviewed outputs include:
 
 | Task | Model | Why |
 |---|---|---|
-| **Synthesis** (themes, column ideas, narrative shifts) | `qwen3.8-max-preview` | Complex, few calls, off-peak discount 17:00–03:00 MSK |
-| **Classification / pair review** | `qwen3.6-flash` | High-volume bounded review and extraction |
-| **Simple tasks** (filtering, summarization) | `qwen3.6-flash` | Cheapest |
+| **Synthesis + trend review** (themes, coherence over 20 stories) | `qwen3.8-max` | Complex, few calls ($2/$6 per 1M); off-peak discount 17:00–03:00 MSK |
+| **Pair review** («is this the same event?») | `qwen3.6-flash` | Bounded judgement; model is part of the `llm_reviews` cache key |
+| **Bulk extraction / classification** | `qwen3.7-flash` | ~1 020 calls per run; $0.03/$0.13 per 1M — 60× cheaper than max |
 
 ---
 
@@ -492,7 +492,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | Language | Python 3.12, strict mypy |
 | Collection | Playwright, aiohttp, Ladder proxy |
 | Storage | JSONL + SQLite |
-| LLM | Qwen API — pyramid: qwen3.8-max-preview / qwen3.7-plus / qwen3.6-flash |
+| LLM | Qwen API — pyramid: qwen3.8-max / qwen3.6-flash / qwen3.7-flash |
 | API | FastAPI + uvicorn + JWT |
 | Deploy | Docker + Caddy + host-cron |
 | Quality | ruff, mypy strict, pytest coverage gate, repo-local secret scan + detect-secrets |

@@ -1,8 +1,8 @@
 """Маршрутизация ключей Qwen: массовые прогоны — на бесплатные квоты pay-as-you-go.
 
-Семейство qwen3.8-max отсутствует на pay-as-you-go ключе (проверено по /v1/models),
-поэтому только оно ходит через token-plan. Ошибка маршрутизации здесь — это либо
-404 в ночном прогоне, либо платные вызовы там, где есть бесплатная квота.
+На token-plan уходит только то, чего на pay-as-you-go нет. Ошибка маршрутизации
+здесь — это либо 404 в ночном прогоне, либо платные вызовы там, где есть бесплатная
+квота.
 """
 
 from __future__ import annotations
@@ -17,15 +17,30 @@ def test_payg_takes_bulk_models_when_both_keys_set(monkeypatch: pytest.MonkeyPat
     monkeypatch.setenv("QWEN_Pay_As_You_Go_PLAN_KEY", "payg-key")
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
 
-    key, base_url, classify, synthesis = _get_api_config("qwen3.6-flash")
+    key, base_url, classify, synthesis = _get_api_config("qwen3.7-flash")
 
     assert key == "payg-key"
     assert "dashscope-intl" in base_url
-    assert classify == "qwen3.6-flash"
-    assert synthesis == "qwen3.8-max-preview"
+    assert classify == "qwen3.7-flash"
+    assert synthesis == "qwen3.8-max"
 
 
-def test_token_plan_keeps_the_max_family(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ga_max_goes_to_payg_not_the_subscription(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`qwen3.8-max` вышел из превью и появился на payg — гнать его на подписку значит
+    платить там, где лежит бесплатный грант."""
+    monkeypatch.setenv("QWEN_TOKEN_PLAN_KEY", "tp-key")
+    monkeypatch.setenv("QWEN_Pay_As_You_Go_PLAN_KEY", "payg-key")
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+
+    key, base_url, _, _ = _get_api_config("qwen3.8-max")
+
+    assert key == "payg-key"
+    assert "dashscope-intl" in base_url
+
+
+def test_preview_identifier_stays_exclusive_to_the_subscription(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("QWEN_TOKEN_PLAN_KEY", "tp-key")
     monkeypatch.setenv("QWEN_Pay_As_You_Go_PLAN_KEY", "payg-key")
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)

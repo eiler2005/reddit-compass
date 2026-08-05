@@ -4662,6 +4662,32 @@ def _discover_trends_embedding_v2(
     return adapted
 
 
+def _resolve_actor_typing(
+    requested_depth: int,
+    actor_types_path: Any = None,
+) -> tuple[dict[str, tuple[str, str]], int]:
+    """Таблица типов акторов и фактическая глубина схемного ключа.
+
+    Общая для `schema_v2` и `schema_v3`, а не по копии на метод: копия у v3 молчала о
+    падении глубины, и ночной прогон v3 шёл на глубине 2 под именем глубины 3.
+    Прецедент — EMBEDDING FALLBACK: ночной прогон не имеет права публиковать один
+    алгоритм под именем другого, поэтому деградация обязана говорить о себе вслух.
+    """
+    if requested_depth < 3:
+        return {}, requested_depth
+    from .actor_types import load_actor_types, resolve_actor_types_path
+
+    actor_types = load_actor_types(resolve_actor_types_path(actor_types_path))
+    if actor_types:
+        return actor_types, requested_depth
+    logging.getLogger(__name__).warning(
+        "ACTOR TYPING FALLBACK: actor_types.json not found or empty; "
+        "trend_schema_depth downgraded %d -> 2",
+        requested_depth,
+    )
+    return {}, 2
+
+
 def create_trend_release(
     conn: sqlite3.Connection,
     *,
@@ -4684,7 +4710,7 @@ def create_trend_release(
     params = {
         "min_stories": 3,
         "min_dates": 2,
-        "review_model": "qwen3.8-max-preview",
+        "review_model": "qwen3.8-max",
         "review_prompt_version": TREND_REVIEW_PROMPT_VERSION,
         "verified_only": verified_only,
         # Ручка гранулярности схемного слоя. Ключ общий для всех методов, поэтому
@@ -4758,35 +4784,20 @@ def create_trend_release(
     requested_depth = int(params.get("trend_schema_depth", 2))
     effective_depth = requested_depth
     if method == "schema_v2":
-        from .actor_types import load_actor_types, resolve_actor_types_path
-
-        if requested_depth >= 3:
-            actor_types = load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
-            if not actor_types:
-                # Прецедент — EMBEDDING FALLBACK: ночной прогон не имеет права публиковать
-                # один алгоритм под именем другого. Глубина 3 без таблицы типов — это
-                # глубина 2, и релиз обязан говорить об этом вслух.
-                effective_depth = 2
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "ACTOR TYPING FALLBACK: actor_types.json not found or empty; "
-                    "trend_schema_depth downgraded %d -> 2",
-                    requested_depth,
-                )
+        actor_types, effective_depth = _resolve_actor_typing(
+            requested_depth, params.get("actor_types_path")
+        )
         trends = _discover_trends_schema_v2(
             stories,
             params={**params, "trend_schema_depth": effective_depth},
             actor_types=actor_types or None,
         )
     elif method == "schema_v3":
-        from .actor_types import load_actor_types, resolve_actor_types_path
         from .trend_schema_llm import apply_actor_aliases, load_actor_aliases, load_schemas
 
-        if requested_depth >= 3:
-            actor_types = load_actor_types(resolve_actor_types_path(params.get("actor_types_path")))
-            if not actor_types:
-                effective_depth = 2
+        actor_types, effective_depth = _resolve_actor_typing(
+            requested_depth, params.get("actor_types_path")
+        )
         llm_schemas = load_schemas(conn, [str(story.get("title") or "") for story in stories])
         if not llm_schemas:
             # Без кэша извлечения метод не может работать вообще — молча отдавать пустой
@@ -5005,9 +5016,15 @@ def get_trend_release(conn: sqlite3.Connection, trend_release_id: str) -> TrendR
 
 # Ревью видит двадцать сильнейших сюжетов тренда, а не все: у корней бывает сотни
 # членов (замер 5 августа: 277 у крупнейшего), и полный состав давал промпт в 60+ тысяч
-# символов, на котором qwen3.8-max-preview не отвечал ни за 75, ни за 300 секунд.
-# Ревью и так определяет состав подтверждённого тренда через story_ids, поэтому
-# показ выборки — не потеря информации, а её дозирование.
+# символов, на котором qwen3.8-max не отвечал ни за 75, ни за 300 секунд.
+#
+# Выборка ограничивает ТОЛЬКО промпт, но не состав тренда. Вердикт ревью — это суждение
+# о показанных двадцати, и распространять его на непоказанные нельзя: `story_ids` в
+# ответе физически не может содержать того, чего в промпте не было, поэтому фильтрация
+# состава по нему обнуляла бы всё сверх двадцати. Корень на 277 сюжетов превращался в
+# тренд на 20 — с ним падал `story_count` (ключ сортировки на /trends, /today и radar),
+# сюжеты вне выборки теряли привязку к тренду, а пол `trends_max_story_share ≤ 10 %`
+# становился неспособен сработать: 20 из 9 000 — это 0.2 % при любом содержании.
 TREND_REVIEW_MAX_STORIES = 20
 # Скромно, по образцу EXTRACT_CONCURRENCY: одна стадия не должна съедать всю квоту.
 TREND_REVIEW_CONCURRENCY = 6
@@ -5028,7 +5045,7 @@ def prepare_trend_review_jobs(
     trend_release_id: str,
     *,
     limit: int = 50,
-    model: str = "qwen3.8-max-preview",
+    model: str = "qwen3.8-max",
     prompt_version: str = TREND_REVIEW_PROMPT_VERSION,
 ) -> list[dict[str, Any]]:
     release = get_trend_release(conn, trend_release_id)
@@ -5105,7 +5122,7 @@ def store_trend_review_response(
     input_hash: str,
     raw_response: str,
     allowed_story_ids: set[str],
-    model: str = "qwen3.8-max-preview",
+    model: str = "qwen3.8-max",
     prompt_version: str = TREND_REVIEW_PROMPT_VERSION,
 ) -> dict[str, Any]:
     review, errors = validate_trend_review(
@@ -5247,9 +5264,15 @@ def apply_cached_trend_reviews(
             continue
         if review.decision == "reject":
             continue
+        # Ревью судит выборку, а не весь состав: выкидываем только те из показанных,
+        # которые оно не назвало. Непоказанные остаются — модель о них не высказывалась,
+        # и молчание не равно отказу.
+        shown_ids = set(_review_story_ids([(sid, score) for sid, score, _ in memberships]))
         accepted_ids = set(review.story_ids)
         accepted_memberships = [
-            membership for membership in memberships if membership[0] in accepted_ids
+            membership
+            for membership in memberships
+            if membership[0] not in shown_ids or membership[0] in accepted_ids
         ]
         if len(accepted_memberships) < 3:
             continue
@@ -6693,7 +6716,7 @@ async def run_engine_cycle(
     embed_model: str = MODEL2VEC_DEFAULT,
     review_model: str = "qwen3.6-flash",
     review_limit: int = 0,
-    trend_review_model: str = "qwen3.8-max-preview",
+    trend_review_model: str = "qwen3.8-max",
     trend_review_limit: int = 0,
     review_runner: Callable[[str, str], Awaitable[str]] | None = None,
     publish_channel: str | None = None,

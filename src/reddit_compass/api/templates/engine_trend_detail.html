@@ -45,6 +45,39 @@
         </div>
     </section>
 
+    {# Участники события под своими исконными именами. Именно число различных акторов
+       отличает тренд от одной сюжетной линии, поэтому список — не украшение: по нему
+       видно, из чего сложился порог, и заметен промах нормализации. #}
+    {% if trend.distinct_actors %}
+    <section class="section">
+        <h2>Actors</h2>
+        <div class="chip-cloud">
+            {% for actor in trend.distinct_actors %}
+            <span class="chip">{{ actor }}</span>
+            {% endfor %}
+        </div>
+    </section>
+    {% endif %}
+
+    {# Конкретные события рубрики. Собирались в API с самого появления иерархии, но на
+       странице не рисовались, и drill-down существовал только на словах. #}
+    {% if trend.children %}
+    <section class="section">
+        <h2>Key events</h2>
+        <ul class="evidence-list">
+            {% for child in trend.children %}
+            <li>
+                <a href="/trends/{{ child.trend_id }}?{{ analysis_query }}">{{ child.title }}</a>
+                <span>{{ child.story_count }} stories</span>
+                {% if child.distinct_actors %}
+                <span>{{ child.distinct_actors[:4] | join(", ") }}</span>
+                {% endif %}
+            </li>
+            {% endfor %}
+        </ul>
+    </section>
+    {% endif %}
+
     {% if trend.counterpoints %}
     <section class="section">
         <h2>Counterpoints</h2>

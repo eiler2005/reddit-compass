@@ -608,6 +608,66 @@ def test_engine_inspection_endpoints(engine_client: TestClient) -> None:
     assert trend.status_code == 200
 
 
+def test_actors_and_key_events_reach_the_screen(engine_client: TestClient) -> None:
+    """Акторы и дети собираются в API — они обязаны и рисоваться.
+
+    Регрессия целого класса: `distinct_actors` и `children` доезжали до `TrendOut`, но
+    на странице тренда не рендерились вовсе, а акторы — нигде, кроме строки ребёнка.
+    Нормализация акторов отдельным LLM-проходом при этом была видна только метрике.
+    """
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    conn.execute(
+        "UPDATE engine_trends SET distinct_actors = ? WHERE trend_id = 'trend_1'",
+        ('["Bank of England", "LinkedIn", "DeepSeek"]',),
+    )
+    conn.execute(
+        """
+        INSERT INTO engine_trends (
+            trend_release_id, trend_id, name_ru, pattern, domain_ids,
+            confidence, lifecycle, source_scope, first_seen, last_seen,
+            story_count, source_count, project_scores, evidence_story_ids,
+            review_status, counterpoints, parent_trend_id, distinct_actors
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            "trend_test",
+            "trend_child",
+            "model releases in AI",
+            "Дочернее событие",
+            '["world_geopolitics"]',
+            0.8,
+            "growing",
+            "cross_source",
+            "2026-07-20",
+            "2026-07-29",
+            3,
+            3,
+            "{}",
+            "[]",
+            "pending",
+            "[]",
+            "trend_1",
+            '["Mistral", "Qwen"]',
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    listing = engine_client.get("/trends")
+    detail = engine_client.get("/trends/trend_1")
+
+    assert listing.status_code == 200
+    assert "Bank of England" in listing.text
+    assert "model releases in AI" in listing.text
+    assert detail.status_code == 200
+    assert "Bank of England" in detail.text
+    assert "DeepSeek" in detail.text
+    # Drill-down до сих пор существовал только в комментарии к API.
+    assert "Key events" in detail.text
+    assert "model releases in AI" in detail.text
+
+
 def test_engine_ui_and_radar_use_publication(engine_client: TestClient) -> None:
     engine_page = engine_client.get("/engine")
     radar_page = engine_client.get("/runs/2026-07-29/radar")

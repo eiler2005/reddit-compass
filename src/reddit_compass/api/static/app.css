@@ -1002,6 +1002,23 @@ a.story-card {
     color: var(--text-muted);
 }
 
+/* Участники события под исконными именами. Разделитель точкой, а не чипами: акторов
+   до шести, и шесть чипов в строке списка перетягивают внимание с заголовка. */
+.item-row-actors {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: var(--space-1) 0 0;
+    font-size: var(--text-2xs);
+    color: var(--text-secondary);
+}
+
+.item-row-actors span + span::before {
+    content: "·";
+    margin-right: var(--space-2);
+    color: var(--text-muted);
+}
+
 /* Строка сигнала Pulse: та же плотность, но со своей метрикой — полосой
    pulse score, ради которой раздел и существует. */
 .pulse-row {
