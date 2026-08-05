@@ -72,12 +72,34 @@ def test_bulk_last_resort_is_subscription_when_free_exhausted(both_keys, monkeyp
     assert (picked_model, endpoint) == ("qwen3.6-flash", "token-plan")
 
 
-def test_synth_offpeak_uses_discounted_subscription(both_keys) -> None:
+def test_free_grant_beats_the_discount_window(both_keys) -> None:
+    """Ноль дешевле любой скидки, а грант ещё и перегорает — значит он всегда первый.
+
+    Регрессия: окно ставило подписку впереди бесплатного гранта. Это неверно дважды —
+    скидка не бывает дешевле нуля, и подписка возобновляется каждый месяц, тогда как
+    грант сгорает через 90 дней безвозвратно.
+    """
     model, endpoint, why = qwen_policy.pick_model(
         "synth", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
     )
 
-    assert (model, endpoint) == ("qwen3.8-max", "token-plan")
+    assert (model, endpoint) == ("qwen3.8-max", "payg")
+    assert "бесплатная" in why
+
+
+def test_offpeak_prefers_the_subscription_once_the_grant_is_gone(both_keys, monkeypatch) -> None:
+    """Окно решает только то, что брать после гранта."""
+    monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "10")
+    for model in ("qwen3.8-max", "qwen3.7-max", "qwen3.5-plus"):
+        qwen_policy.record_usage(
+            model=model, endpoint="payg", prompt_tokens=10, completion_tokens=10
+        )
+
+    picked, endpoint, why = qwen_policy.pick_model(
+        "synth", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
+    )
+
+    assert (picked, endpoint) == ("qwen3.8-max", "token-plan")
     assert "скидочное" in why
 
 
@@ -103,14 +125,18 @@ def test_synth_peak_uses_subscription_when_free_exhausted(both_keys, monkeypatch
 
 
 def test_pick_endpoint_keeps_the_model_and_moves_only_the_endpoint(both_keys) -> None:
-    """Модель ревью в ключе кэша `llm_reviews`, эндпоинт — нет; значит двигаем эндпоинт."""
+    """Модель ревью в ключе кэша `llm_reviews`, эндпоинт — нет; значит двигаем эндпоинт.
+
+    Пока грант цел, эндпоинт один и тот же в любой час: бесплатное не переигрывается
+    скидкой. Окно вступает в силу только после гранта — это соседний тест.
+    """
     offpeak, why_offpeak = qwen_policy.pick_endpoint(
         "qwen3.8-max", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
     )
     peak, _ = qwen_policy.pick_endpoint("qwen3.8-max", now=datetime(2026, 8, 5, 8, 0, tzinfo=UTC))
 
-    assert (offpeak, peak) == ("token-plan", "payg")
-    assert "скидочное" in why_offpeak
+    assert (offpeak, peak) == ("payg", "payg")
+    assert "бесплатная" in why_offpeak
 
 
 def test_pick_endpoint_falls_back_to_the_subscription_when_the_grant_is_gone(
@@ -121,11 +147,13 @@ def test_pick_endpoint_falls_back_to_the_subscription_when_the_grant_is_gone(
         model="qwen3.8-max", endpoint="payg", prompt_tokens=10, completion_tokens=10
     )
 
-    endpoint, _ = qwen_policy.pick_endpoint(
-        "qwen3.8-max", now=datetime(2026, 8, 5, 8, 0, tzinfo=UTC)
+    peak, _ = qwen_policy.pick_endpoint("qwen3.8-max", now=datetime(2026, 8, 5, 8, 0, tzinfo=UTC))
+    offpeak, why_offpeak = qwen_policy.pick_endpoint(
+        "qwen3.8-max", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
     )
 
-    assert endpoint == "token-plan"
+    assert (peak, offpeak) == ("token-plan", "token-plan")
+    assert "скидочное" in why_offpeak
 
 
 def test_token_plan_quota_is_shared_across_models(both_keys, monkeypatch) -> None:

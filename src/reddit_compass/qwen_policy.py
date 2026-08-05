@@ -253,8 +253,36 @@ def _room_left(
     return used < payg_free_quota()
 
 
+def _free_room_left(
+    candidates: list[tuple[str, str]],
+    totals: dict[tuple[str, str], int],
+    *,
+    grant_expired: bool,
+) -> bool:
+    """Осталось ли хоть где-то место в бесплатном гранте."""
+    return any(
+        _room_left(model, endpoint, totals, grant_expired=grant_expired)
+        for model, endpoint in candidates
+    )
+
+
 def pick_model(task: str, now: datetime | None = None) -> tuple[str, str, str]:
-    """Выбирает (модель, эндпоинт, причина) для задачи ``bulk`` или ``synth``."""
+    """Выбирает (модель, эндпоинт, причина) для задачи ``bulk`` или ``synth``.
+
+    Бесплатный грант идёт впереди подписки **всегда**, включая скидочное окно. Раньше
+    окно ставило подписку первой, и это было неверно дважды. Во-первых, ноль дешевле
+    любой скидки, какой бы она ни была. Во-вторых, грант — ресурс скоропортящийся: он
+    сгорает через 90 дней и не возобновляется, тогда как подписка продлевается каждый
+    месяц, — значит тратить надо сначала то, что иначе пропадёт.
+
+    Окно решает только одно: что брать, когда грант кончился или истёк. Тогда впереди
+    оказывается подписка, потому что в окне она дешевле себя же вне окна.
+
+    Оговорка, важная для будущих правок: *какой* именно канал удешевляет окно
+    14:00–00:00 UTC, официально не подтверждён (см. `docs/QWEN_ROUTING.md`). Порядок
+    выше от этого не зависит — он опирается только на бесплатность гранта и на то, что
+    грант перегорает, а подписка нет.
+    """
     # Расход считаем с начала гранта: чужой, уже истёкший грант не должен закрывать
     # модель в текущем. Дата не задана — меряем по всей истории (см. `payg_grant_start`).
     totals = usage_totals(since=payg_grant_start())
@@ -263,24 +291,20 @@ def pick_model(task: str, now: datetime | None = None) -> tuple[str, str, str]:
     chain = SYNTH_CHAIN if task == "synth" else BULK_CHAIN
 
     def ordered() -> list[tuple[str, str]]:
-        if task == "bulk":
-            return list(BULK_CHAIN)
-        if offpeak:
-            # Скидочное окно: подписка впереди бесплатных.
-            return list(SYNTH_CHAIN)
-        # Вне окна: сперва бесплатные квоты, подписка — резерв.
-        return [c for c in SYNTH_CHAIN if c[1] == "payg"] + [
-            c for c in SYNTH_CHAIN if c[1] == "token-plan"
-        ]
+        payg = [candidate for candidate in chain if candidate[1] == "payg"]
+        subscription = [candidate for candidate in chain if candidate[1] == "token-plan"]
+        if _free_room_left(payg, totals, grant_expired=grant_expired) or not offpeak:
+            return payg + subscription
+        return subscription + payg
 
     for model, endpoint in ordered():
         if not _has_key(endpoint):
             continue
         if _room_left(model, endpoint, totals, grant_expired=grant_expired):
-            if task == "synth" and offpeak and endpoint == "token-plan":
-                why = "скидочное окно подписки"
-            elif endpoint == "payg":
+            if endpoint == "payg":
                 why = "бесплатная квота pay-as-you-go"
+            elif offpeak:
+                why = "скидочное окно подписки"
             else:
                 why = "подписка token-plan"
             return model, endpoint, why
@@ -296,22 +320,27 @@ def pick_endpoint(model: str, now: datetime | None = None) -> tuple[str, str]:
 
     Для ревью модель менять нельзя: она входит в ключ кэша ``llm_reviews``, и её смена
     обнуляет накопленные решения. Эндпоинт в ключ не входит — значит по нему выбор
-    свободен, и одну и ту же модель можно взять там, где сейчас дешевле: в скидочное
-    окно с подписки, вне окна — из бесплатного гранта. Раньше этот выбор не делался
-    вовсе, и ревью всегда шло по эвристике `_get_api_config`.
+    свободен, и одну и ту же модель можно взять там, где сейчас дешевле. Раньше этот
+    выбор не делался вовсе, и ревью всегда шло по эвристике `_get_api_config`.
+
+    Порядок тот же, что у ``pick_model``: сначала бесплатный грант (он перегорает через
+    90 дней), подписка — когда гранта не осталось; в скидочное окно она при этом
+    дешевле себя же вне окна.
 
     Модели нет ни на одном настроенном ключе — возвращаем пустой эндпоинт: пусть
     решает `_get_api_config`, а провайдер скажет о проблеме своим кодом ответа.
     """
     totals = usage_totals(since=payg_grant_start())
     grant_expired = payg_grant_expired(now)
-    order = ["token-plan", "payg"] if in_offpeak(now) else ["payg", "token-plan"]
+    offpeak = in_offpeak(now)
+    free_left = _room_left(model, "payg", totals, grant_expired=grant_expired)
+    order = ["payg", "token-plan"] if (free_left or not offpeak) else ["token-plan", "payg"]
     for endpoint in order:
         if not _has_key(endpoint):
             continue
         if _room_left(model, endpoint, totals, grant_expired=grant_expired):
             if endpoint == "token-plan":
-                why = "скидочное окно подписки" if in_offpeak(now) else "подписка token-plan"
+                why = "скидочное окно подписки" if offpeak else "подписка token-plan"
             else:
                 why = "бесплатная квота pay-as-you-go"
             return endpoint, why
