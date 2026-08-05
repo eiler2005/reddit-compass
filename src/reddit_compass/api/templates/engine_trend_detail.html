@@ -14,7 +14,8 @@
         {% endif %}
         <p class="section-note">
             {{ trend.story_count }} stories · {{ trend.source_count }} source clusters ·
-            {{ "%.0f"|format(trend.confidence * 100) }}% confidence
+            {{ "%.0f"|format(trend.confidence * 100) }}% confidence ·
+            даты: {{ trend.first_seen }} → {{ trend.last_seen }}
         </p>
     </div>
 
@@ -69,6 +70,7 @@
             <li>
                 <a href="/trends/{{ child.trend_id }}?{{ analysis_query }}">{{ child.title }}</a>
                 <span>{{ child.story_count }} stories</span>
+                <span>{{ child.first_seen }} → {{ child.last_seen }}</span>
                 {% if child.distinct_actors %}
                 <span>{{ child.distinct_actors[:4] | join(", ") }}</span>
                 {% endif %}

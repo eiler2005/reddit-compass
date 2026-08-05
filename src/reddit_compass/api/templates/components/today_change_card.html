@@ -20,6 +20,7 @@
     <div class="today-card-footer">
         <span>{{ trend.source_count }} источников</span>
         <span>{{ trend.story_count }} событий</span>
+        {% if trend.last_seen %}<span>{{ trend.first_seen }} → {{ trend.last_seen }}</span>{% endif %}
         <span>Открыть →</span>
     </div>
 </a>

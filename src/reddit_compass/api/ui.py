@@ -116,6 +116,7 @@ def _mainstream_gap_signals(
         "SELECT cs.signal_id, cs.item_id, cs.subreddit, "
         "cs.signal_type, cs.title, cs.discussion_url, "
         "cs.pulse_score, "
+        "COALESCE(ri.published_at, ri.observed_at, ri.snapshot_date, '') AS published_at, "
         "COALESCE(json_extract(ri.raw_engagement, '$.score'), 0) as reddit_score, "
         "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) as reddit_comments, "
         "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) as upvote_ratio "
@@ -127,7 +128,9 @@ def _mainstream_gap_signals(
         "WHERE cs.signal_release_id = ? "
         "AND cs.pulse_score >= 60 "
         "AND cs.mainstream_coverage_count < 2 "
-        "ORDER BY cs.pulse_score DESC LIMIT ?",
+        "ORDER BY cs.pulse_score DESC, "
+        "COALESCE(ri.published_at, ri.observed_at, ri.snapshot_date) DESC, "
+        "cs.signal_id DESC LIMIT ?",
         (signal_release_id, signal_release_id, max(1, limit)),
     ).fetchall()
     return [
@@ -137,6 +140,7 @@ def _mainstream_gap_signals(
             "subreddit": row["subreddit"],
             "signal_type": row["signal_type"],
             "title": row["title"],
+            "published_at": row["published_at"],
             "discussion_url": _safe_url(row["discussion_url"]),
             "pulse_score": row["pulse_score"],
             "reddit_score": row["reddit_score"],
@@ -589,23 +593,24 @@ def _build_today_reading_list(
             }
         )
 
-    def sort_key(item: dict[str, object]) -> tuple[float, str]:
+    def score_key(item: dict[str, object]) -> float:
         score_raw = item.get("score", 0.0)
         score = float(score_raw) if isinstance(score_raw, int | float | str) else 0.0
-        return (-score, str(item.get("title", "")))
+        return score
 
-    candidates.sort(key=sort_key)
+    candidates.sort(
+        key=lambda item: (str(item.get("published_at", "")), str(item.get("title", ""))),
+        reverse=True,
+    )
+    candidates.sort(key=score_key, reverse=True)
     selected: list[dict[str, object]] = []
     seen: set[str] = set()
     provider_counts: dict[str, int] = {}
     domain_counts: dict[str, int] = {}
     reddit_count = 0
-    # A daily reading list is current-day first; a smaller collection falls
-    # back to the rest of the immutable release to retain a useful 20 items.
-    ordered_candidates = [item for item in candidates if bool(item["_is_current_day"])] + [
-        item for item in candidates if not bool(item["_is_current_day"])
-    ]
-    for item in ordered_candidates:
+    # Strength is the primary editorial order. Date is a tie-breaker in
+    # `sort_key`, so a fresher item wins only when its strength is equal.
+    for item in candidates:
         key = str(item["_dedupe_key"])
         provider = str(item["provider"])
         primary_domain = str(item["_primary_domain"])
@@ -707,7 +712,7 @@ def _build_today_reddit_new(
         LEFT JOIN release_items ri
                ON ri.item_id = cs.item_id AND ri.release_id = sr.data_release_id
         WHERE cs.signal_release_id = ?
-        ORDER BY ri.published_at DESC, cs.pulse_score DESC
+        ORDER BY cs.pulse_score DESC, ri.published_at DESC, cs.item_id DESC
         """,
         (signal_release_id,),
     ).fetchall()
@@ -809,14 +814,6 @@ def _load_today_engine_radar(
 
 
 def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, object]]:
-    lifecycle_order = (
-        "growing",
-        "new",
-        "resurfacing",
-        "stable",
-        "insufficient_history",
-        "fading",
-    )
     # Today is an editorial brief, not a diagnostics surface.  An embedding
     # cluster with a token-bag name (for example ``my ai job me``) is useful in
     # the Engine lab but actively misleading in a reader-facing card.  Surface
@@ -824,11 +821,24 @@ def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, 
     # candidates remain available in Trends/Engine for inspection.
     changes = [
         trend
-        for lifecycle in lifecycle_order
-        for trend in radar.shelves.get(lifecycle, [])
+        for trends in radar.shelves.values()
+        for trend in trends
         if str(trend.get("review_status") or "pending") == "confirmed"
         and not is_bad_trend_name(str(trend.get("title") or trend.get("name_ru") or ""))
-    ][:5]
+    ]
+    # Lifecycle explains the change; it is not a proxy for importance.
+    # Strength wins, and newest evidence resolves a strength tie.
+    changes.sort(
+        key=lambda trend: (
+            float(trend.get("confidence") or 0.0),
+            int(trend.get("source_count") or 0),
+            int(trend.get("story_count") or 0),
+            str(trend.get("last_seen") or ""),
+            str(trend.get("trend_id") or ""),
+        ),
+        reverse=True,
+    )
+    changes = changes[:5]
     cards: list[dict[str, object]] = []
     for trend in changes:
         decorated = _decorate_today_trend(dict(trend), analysis_query)
@@ -848,6 +858,8 @@ def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, 
                 "confidence_pct": _as_int(decorated.get("confidence_pct")),
                 "source_count": _as_int(decorated.get("source_count")),
                 "story_count": _as_int(decorated.get("story_count")),
+                "first_seen": str(decorated.get("first_seen") or ""),
+                "last_seen": str(decorated.get("last_seen") or ""),
             }
         )
     return cards

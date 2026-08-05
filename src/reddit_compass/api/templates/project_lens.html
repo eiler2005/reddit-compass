@@ -32,6 +32,7 @@
                     <span class="direction-badge">{{ trend.lifecycle }}</span>
                     <span>score {{ trend.project_scores.get(lens.project_id, 0) }}</span>
                     <span>{{ trend.review_status }}</span>
+                    <span>{{ trend.first_seen }} → {{ trend.last_seen }}</span>
                 </div>
                 <h3><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h3>
                 <p>{{ trend.pattern }}</p>
@@ -51,6 +52,7 @@
                     <span class="direction-badge">{{ story.confidence }}</span>
                     <span>score {{ story.project_scores.get(lens.project_id, 0) }}</span>
                     <span>{{ story.source_count }} sources</span>
+                    <span>{{ story.first_seen }} → {{ story.last_seen }}</span>
                 </div>
                 <h3><a href="/stories/{{ story.story_id }}?{{ analysis_query }}">{{ story.title }}</a></h3>
                 {% if story.evidence_items %}

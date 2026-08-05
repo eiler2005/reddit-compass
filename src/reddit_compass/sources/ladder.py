@@ -6,10 +6,13 @@ Ladder: http://localhost:8080 (на HostKey). Правила: ladder-rules (per-
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime, timedelta
+from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from ..models import PostCard
 
@@ -117,6 +120,112 @@ def _extract_title(html: str) -> str:
 def _extract_description(html: str) -> str:
     m = META_DESC_RE.search(html)
     return m.group(1).strip()[:1000] if m else ""
+
+
+def historical_google_news_url(source: LadderSource, historical_date: str) -> str:
+    """Return a Google News RSS query bounded to one UTC day for one domain."""
+    host = urlsplit(source.base_url).netloc.removeprefix("www.")
+    end = (datetime.strptime(historical_date, "%Y-%m-%d") + timedelta(days=1)).date()
+    params = {
+        "q": f"site:{host} after:{historical_date} before:{end.isoformat()}",
+        "hl": "en-US",
+        "gl": "US",
+        "ceid": "US:en",
+    }
+    return urlunsplit(("https", "news.google.com", "/rss/search", urlencode(params), ""))
+
+
+def historical_google_news_cards(
+    source: LadderSource,
+    xml_text: str,
+    *,
+    snapshot_date: str,
+    historical_date: str,
+) -> list[PostCard]:
+    """Turn one date-bounded Google News feed into explicit historical Ladder facts."""
+    # Google News exposes the publication time in RSS.  Keep the local date filter as
+    # a second guard: query syntax is provider-controlled and must not be trusted alone.
+    from .rss import _published_on_date, parse_feed
+
+    cards: list[PostCard] = []
+    seen_urls: set[str] = set()
+    for item in parse_feed(xml_text, source.name):
+        published = item["published"]
+        if not _published_on_date(published, historical_date):
+            continue
+        url = str(item["url"])
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        cards.append(
+            PostCard(
+                subreddit=source.name,
+                post_id=hashlib.sha256(url.encode()).hexdigest()[:24],
+                title=str(item["title"]),
+                author=source.name,
+                created_utc=published,
+                score=0,
+                upvote_ratio=0.0,
+                num_comments=0,
+                url=url,
+                selftext=str(item["description"]),
+                link_flair_text=source.cluster,
+                is_self=False,
+                permalink=url,
+                monitoring_type="ladder_historical_google_news",
+                snapshot_date=snapshot_date,
+                keyword=source.cluster,
+            )
+        )
+    return cards
+
+
+async def fetch_historical_ladder_google_news(
+    snapshot_date: str,
+    historical_date: str,
+    sources: list[LadderSource] | None = None,
+) -> list[PostCard]:
+    """Recover historic Ladder coverage without relabelling a current listing.
+
+    Ladder itself can only fetch current section listings.  Google News RSS provides
+    a public, date-bounded discovery surface for the same source domains; the output
+    deliberately carries a distinct ``monitoring_type`` so it is auditable downstream.
+    """
+    import aiohttp
+
+    cards: list[PostCard] = []
+    headers = {"User-Agent": "reddit-compass/0.2 (trend monitor)"}
+    async with aiohttp.ClientSession(headers=headers) as session:
+        for source in sources or LADDER_SOURCES:
+            try:
+                async with session.get(
+                    historical_google_news_url(source, historical_date),
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as response:
+                    if response.status != 200:
+                        logger.warning(
+                            "Historical Ladder %s: Google News HTTP %d",
+                            source.name,
+                            response.status,
+                        )
+                        continue
+                    cards.extend(
+                        historical_google_news_cards(
+                            source,
+                            await response.text(),
+                            snapshot_date=snapshot_date,
+                            historical_date=historical_date,
+                        )
+                    )
+            except Exception as exc:
+                logger.warning("Historical Ladder %s failed: %s", source.name, exc)
+    logger.info(
+        "Historical Ladder Google News %s: %d articles from %d sources",
+        historical_date,
+        len(cards),
+        len(sources or LADDER_SOURCES),
+    )
+    return cards
 
 
 # Паттерн для извлечения ссылок на статьи из listing-страниц
@@ -246,8 +355,15 @@ async def fetch_all_ladder(
     snapshot_date: str,
     sources: list[LadderSource] | None = None,
     max_pages: int = 2,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Загружает все Ladder-источники."""
+    if historical_date:
+        return await fetch_historical_ladder_google_news(
+            snapshot_date,
+            historical_date,
+            sources=sources,
+        )
     sources = sources or LADDER_SOURCES
     all_cards: list[PostCard] = []
     for source in sources:

@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 from pathlib import Path
 
 from reddit_compass.collector import (
     SourceResult,
+    collect_sources,
+    collection_coverage,
     finalize_snapshot_collection,
     persist_collection,
+    recover_snapshot_gaps,
 )
 from reddit_compass.config import MonitorConfig
 from reddit_compass.export import write_posts_jsonl
@@ -173,6 +177,124 @@ def test_finalize_snapshot_collection_marks_missing_artifact_pending(tmp_path: P
     assert result.status == "pending"
     assert by_source["reddit"].error_code is None
     assert by_source["hackernews"].error_code == "snapshot_missing"
+
+
+def test_collection_coverage_detects_recoverable_snapshot_gap(tmp_path: Path) -> None:
+    date = "2026-08-04"
+    snapshot_dir = tmp_path / "snapshots" / date
+    for filename in (
+        "posts.jsonl",
+        "hackernews.jsonl",
+        "rss.jsonl",
+        "ladder.jsonl",
+        "producthunt.jsonl",
+    ):
+        write_posts_jsonl([_legacy_card(f"{filename}-post", date)], snapshot_dir / filename)
+    db_path = tmp_path / "compass.db"
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    coverage = collection_coverage(
+        tmp_path / "snapshots",
+        db_path,
+        profile="broad",
+        since=date,
+        until=date,
+    )
+
+    assert coverage == [
+        {
+            "date": date,
+            "run_id": None,
+            "run_status": "missing",
+            "raw_complete": False,
+            "source_health": {
+                "reddit": "missing",
+                "hackernews": "missing",
+                "rss": "missing",
+                "ladder": "missing",
+                "producthunt": "missing",
+            },
+            "artifacts": {
+                "reddit": True,
+                "hackernews": True,
+                "rss": True,
+                "ladder": True,
+                "producthunt": True,
+            },
+            "recoverable_from_snapshots": True,
+        }
+    ]
+
+
+def test_recover_snapshot_gaps_finalizes_only_saved_complete_artifacts(tmp_path: Path) -> None:
+    date = "2026-08-04"
+    snapshot_dir = tmp_path / "snapshots" / date
+    for filename in (
+        "posts.jsonl",
+        "hackernews.jsonl",
+        "rss.jsonl",
+        "ladder.jsonl",
+        "producthunt.jsonl",
+    ):
+        write_posts_jsonl([_legacy_card(f"{filename}-post", date)], snapshot_dir / filename)
+
+    coverage, recovered = recover_snapshot_gaps(
+        MonitorConfig(),
+        tmp_path / "snapshots",
+        tmp_path / "compass.db",
+        profile="broad",
+        since=date,
+        until=date,
+    )
+
+    assert coverage[0]["recoverable_from_snapshots"] is True
+    assert [(result.run_id, result.status) for result in recovered] == [
+        (f"{date}:broad", "complete")
+    ]
+
+    conn = sqlite3.connect(tmp_path / "compass.db")
+    assert conn.execute("SELECT status FROM runs").fetchone()[0] == "complete"
+
+
+def test_historical_collection_passes_target_date_to_each_adapter(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    date = "2026-08-04"
+    calls: list[tuple[str, str | None]] = []
+
+    async def fake_run_source_adapter(
+        source_id: str,
+        config: MonitorConfig,
+        snap_dir: Path,
+        snapshot_date: str,
+        *,
+        historical_date: str | None = None,
+    ) -> SourceResult:
+        del config, snap_dir, snapshot_date
+        calls.append((source_id, historical_date))
+        return SourceResult(source_id=source_id, status="empty")
+
+    monkeypatch.setattr("reddit_compass.collector.run_source_adapter", fake_run_source_adapter)
+
+    result = asyncio.run(
+        collect_sources(
+            MonitorConfig(),
+            tmp_path / "snapshots",
+            tmp_path / "compass.db",
+            sources=["reddit", "hn"],
+            profile="starter",
+            snapshot_date=date,
+            historical_recovery=True,
+        )
+    )
+
+    assert calls == [("reddit", date), ("hackernews", date)]
+    assert result.run_id == f"{date}:starter"
+    assert result.status == "complete"
+    assert all("Historical recovery for 2026-08-04" in row.message for row in result.source_results)
 
 
 def _legacy_card(post_id: str, date: str) -> PostCard:

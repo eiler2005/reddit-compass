@@ -4,6 +4,9 @@
 > Канонические алгоритмические правила Engine — в
 > [`TREND_ENGINE.md`](TREND_ENGINE.md); визуальный поток — в
 > [`DATA_FLOW_DIAGRAMS.md`](DATA_FLOW_DIAGRAMS.md).
+> Пока host-cron приостановлен, точный порядок ручного прогона, recovery сохранённых
+> пропущенных artifacts и production decision описаны в
+> [`MANUAL_RELEASE_RUNBOOK.md`](MANUAL_RELEASE_RUNBOOK.md).
 
 ## Короткий ответ: когда данные действительно готовы
 

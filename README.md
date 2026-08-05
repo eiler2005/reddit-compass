@@ -68,6 +68,13 @@ reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
 # Finalize a run from artifacts that were already collected (no network, no LLM):
 reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date YYYY-MM-DD
 
+# Detect a manual collection gap, then recover only dates whose own JSONL artifacts exist.
+reddit-compass collect --coverage --profile broad --since YYYY-MM-DD --until YYYY-MM-DD
+reddit-compass collect --recover-snapshots --profile broad --since YYYY-MM-DD --until YYYY-MM-DD
+
+# Reconstruct one previous UTC date with date-aware public source queries; observed_at remains now.
+reddit-compass collect --historical-date YYYY-MM-DD --profile broad --sources reddit,hn,rss,ladder,ph
+
 # Engine: repeatable analysis over an immutable copy of that raw run.
 reddit-compass engine release create --run RUN_ID
 reddit-compass engine facets --release RELEASE_ID --profile broad
@@ -148,12 +155,15 @@ public sources
 
 | Need | Canonical reference |
 |---|---|
+| Manual end-to-end collection, recovery of saved missed-day artifacts, Engine/shadow, quality, publication and rollback | [`docs/MANUAL_RELEASE_RUNBOOK.md`](docs/MANUAL_RELEASE_RUNBOOK.md) |
 | Collection handoff, completion stages, `/runs` journal and publish rules | [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md) |
 | End-to-end textual diagrams | [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) |
 | Both SQLite databases, tables and ownership boundary | [`docs/DATABASE_SCHEMA.md`](docs/DATABASE_SCHEMA.md) |
 | Story/trend algorithms, Golden Set, review, quality and rollback | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) |
 | Quality floors and regression gates | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) |
-| Qwen cost routing: free quotas, discount window, usage ledger | [`docs/QWEN_ROUTING.md`](docs/QWEN_ROUTING.md) |
+| Qwen cost routing: pay-as-you-go models, confirmed grants, usage ledger | [`docs/QWEN_ROUTING.md`](docs/QWEN_ROUTING.md) |
+| Architecture handoff and published 2026-08-05 release | [`docs/SESSION_2026-08-05_RELEASE.md`](docs/SESSION_2026-08-05_RELEASE.md) |
+| Prioritized post-release improvements | [`docs/NEXT_IMPROVEMENTS.md`](docs/NEXT_IMPROVEMENTS.md) |
 | Source capability registry and sections | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) |
 
 ## Architecture at a glance
@@ -351,9 +361,9 @@ Engine facets and Qwen-reviewed outputs include:
 
 | Task | Model | Why |
 |---|---|---|
-| **Synthesis + trend review** (themes, coherence over 20 stories) | `qwen3.8-max` | Complex, few calls ($2/$6 per 1M); off-peak discount 17:00–03:00 MSK |
-| **Pair review** («is this the same event?») | `qwen3.6-flash` | Bounded judgement; model is part of the `llm_reviews` cache key |
-| **Bulk extraction / classification** | `qwen3.7-flash` | ~1 020 calls per run; $0.03/$0.13 per 1M — 60× cheaper than max |
+| **Exceptional synthesis / manual escalation** | `qwen3.8-max` | Only when Flash cannot resolve a complex free-form task; ¥14.988/¥44.965 per 1M input/output |
+| **Pair + bounded trend review** | `qwen3.7-flash` | Default structured judgement; ¥0.225/¥0.974 — 67×/46× cheaper than Max |
+| **Bulk extraction / classification** | `qwen3.7-flash` | Same low-cost model for high-volume structured tasks |
 
 ---
 
@@ -492,7 +502,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | Language | Python 3.12, strict mypy |
 | Collection | Playwright, aiohttp, Ladder proxy |
 | Storage | JSONL + SQLite |
-| LLM | Qwen API — pyramid: qwen3.8-max / qwen3.6-flash / qwen3.7-flash |
+| LLM | Qwen API — default `qwen3.7-flash`; `qwen3.8-max` only for manual complex escalation |
 | API | FastAPI + uvicorn + JWT |
 | Deploy | Docker + Caddy + host-cron |
 | Quality | ruff, mypy strict, pytest coverage gate, repo-local secret scan + detect-secrets |

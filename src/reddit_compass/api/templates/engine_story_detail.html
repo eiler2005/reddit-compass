@@ -56,6 +56,7 @@
                     <span class="direction-badge">{{ trend.lifecycle }}</span>
                     <span>{{ trend.review_status }}</span>
                     <span>{{ trend.story_count }} stories</span>
+                    <span>{{ trend.first_seen }} → {{ trend.last_seen }}</span>
                 </div>
                 <h3><a href="/trends/{{ trend.trend_id }}?{{ analysis_query }}">{{ trend.title }}</a></h3>
                 <p>{{ trend.pattern }}</p>

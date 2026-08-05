@@ -215,6 +215,23 @@ def test_data_release_marks_single_cluster_production_corpus_partial(tmp_path: P
     assert release.input_status == "partial"
 
 
+def test_data_release_marks_calendar_gap_partial(tmp_path: Path) -> None:
+    """Seven raw runs with a skipped UTC day are not a valid seven-day release."""
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    _add_required_cluster_coverage(corpus)
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    release = create_data_release(
+        corpus,
+        engine,
+        source_db_path=corpus_path,
+        run_ids=["2026-07-27:broad", "2026-07-29:broad"],
+    )
+
+    assert release.input_status == "partial"
+
+
 def test_data_release_accepts_granular_voice_coverage_over_empty_aggregate(
     tmp_path: Path,
 ) -> None:
@@ -421,6 +438,30 @@ def test_near_duplicate_title_fingerprint_merges_syndicated_headlines() -> None:
     assert candidates[0].reason == "near-duplicate title fingerprint"
     assert "near_duplicate" in candidates[0].features["generated_by"]
     assert candidates[0].features["near_duplicate_simhash_distance"] <= 18
+
+
+def test_same_provider_template_headlines_are_not_auto_merged_by_fingerprint() -> None:
+    """Issuer names are the event anchor; the repeated earnings template is not one story."""
+    items = [
+        _frozen_item(
+            "ft:mplx",
+            "https://ft.example/mplx-results",
+            "MPLX LP Reports Second-Quarter 2026 Financial Results – Company Announcement",
+            "2026-08-04T08:00:00Z",
+        ),
+        _frozen_item(
+            "ft:duke",
+            "https://ft.example/duke-results",
+            "Duke Energy reports second-quarter 2026 financial results – Company Announcement",
+            "2026-08-04T09:00:00Z",
+        ),
+    ]
+
+    candidates = generate_story_candidates(items, {}, params={"near_duplicate_enabled": True})
+
+    assert candidates
+    assert candidates[0].decision != "auto_merge"
+    assert candidates[0].reason != "near-duplicate title fingerprint"
 
 
 def test_semantic_dedup_embedding_needs_provenance_review() -> None:
@@ -2398,7 +2439,7 @@ def test_trend_review_cache_applies_to_release_with_more_stories(tmp_path: Path)
         engine,
         trends=[(trend, memberships)],
         stories=stories,
-        model="qwen3.8-max",
+        model="qwen3.7-flash",
         prompt_version=TREND_REVIEW_PROMPT_VERSION,
     )
 

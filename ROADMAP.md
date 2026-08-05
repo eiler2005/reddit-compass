@@ -65,8 +65,12 @@ reddit-compass растёт от автономного коллектора т�
 - `/engine`, Engine API, publication-backed `/news`, `/stories`, `/trends`, `/projects/{id}`,
   `/radar` и `/today`.
 - Publish/rollback переключают immutable pointer; `lab` остаётся deprecated alias.
-- Следующий gate: continuous Golden Set review, семь successive shadow days и только затем
-  ручное продвижение нового алгоритма в `broad`.
+- 2026-08-05: continuous 7-day Data Release прошёл quality gates и вручную опубликован в
+  `broad`; handoff, IDs и архитектурные решения — в
+  [`docs/SESSION_2026-08-05_RELEASE.md`](docs/SESSION_2026-08-05_RELEASE.md).
+- Следующий приоритет — quality имён Trends, наблюдаемость calendar gaps и единый
+  release-readiness report; acceptance criteria — в
+  [`docs/NEXT_IMPROVEMENTS.md`](docs/NEXT_IMPROVEMENTS.md).
 
 ## Phase 2 — планировщик на VPS (HostKey «Hermes»)
 

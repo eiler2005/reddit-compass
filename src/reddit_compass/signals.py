@@ -34,10 +34,15 @@ _DASHSCOPE_INTL_URL = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
 # мимо бесплатного гранта на подписку, где она стоит денег.
 _TOKEN_PLAN_ONLY_MODELS = frozenset({"qwen3.8-max-preview"})
 
-# Модельная пирамида (цена/качество), цены за 1M токенов, международный регион:
-#   qwen3.8-max   $2.00/$6.00 — синтез и трендовое ревью (сложное, мало вызовов)
-#   qwen3.5-plus  $0.40/$2.40 — средняя сложность
-#   qwen3.7-flash $0.03/$0.13 — массовая классификация и извлечение
+# `qwen3.7-flash` есть на pay-as-you-go, но не на token-plan. Для regular review это
+# не недостаток: даже платный international rate ¥0.225/¥0.974 за 1M input/output
+# намного ниже qwen3.8-max (¥14.988/¥44.965). Не подменяем модель молча, чтобы кэш
+# `llm_reviews` оставался воспроизводимым.
+_PAYG_ONLY_MODELS = frozenset({"qwen3.7-flash"})
+
+# Модельная пирамида (цена/качество), list price за 1M tokens, Singapore/international:
+#   qwen3.8-max   ¥14.988/¥44.965 — свободный сложный синтез, ручная эскалация
+#   qwen3.7-flash ¥0.225/¥0.974 — extraction и bounded JSON review по умолчанию
 _MODEL_SYNTHESIS = "qwen3.8-max"  # сложное → сильная модель
 _MODEL_CLASSIFY = "qwen3.7-flash"  # массовая классификация → самая дешёвая
 _MODEL_CHEAP = "qwen3.7-flash"  # простое → самая дешёвая
@@ -83,9 +88,10 @@ def _get_api_config(
     Маршрутизация по модели и эндпоинту: pay-as-you-go ключ берёт всё, что умеет
     (бесплатные квоты 1M токенов на модель), token-plan — то, чего на pay-as-you-go
     нет (см. ``_TOKEN_PLAN_ONLY_MODELS``). Явный ``endpoint`` (из
-    ``qwen_policy.pick_model`` или ``pick_endpoint``) побеждает эвристику: одна и та же
-    модель живёт на обоих ключах, и выбирать надо тот, где осталась квота. Пирамида
-    моделей одинакова в обеих ветках: классификация=qwen3.7-flash, синтез=qwen3.8-max.
+    ``qwen_policy.pick_model`` или ``pick_endpoint``) побеждает эвристику. У моделей,
+    доступных на обоих ключах, выбирается endpoint с подходящей квотой; `qwen3.7-flash`
+    намеренно закреплена за pay-as-you-go. Пирамида: классификация=qwen3.7-flash,
+    свободный синтез=qwen3.8-max.
     """
     token_plan_key = os.environ.get("QWEN_TOKEN_PLAN_KEY", "")
     payg_key = ""
@@ -96,6 +102,11 @@ def _get_api_config(
         "QWEN_Pay_As_You_Go_PLAN_KEY",
     ):
         payg_key = os.environ.get(var, "") or payg_key
+    if endpoint == "token-plan" and model in _PAYG_ONLY_MODELS:
+        if payg_key:
+            base_url = os.environ.get("DASHSCOPE_BASE_URL", _DASHSCOPE_INTL_URL)
+            return payg_key, base_url, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
+        raise ValueError(f"{model} is available only on the pay-as-you-go Qwen endpoint")
     if endpoint == "token-plan" and token_plan_key:
         return token_plan_key, _TOKEN_PLAN_URL, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
     if endpoint == "payg" and payg_key:

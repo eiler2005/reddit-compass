@@ -7,6 +7,19 @@
 
 ### Added
 
+- **Manual Release Runbook и gap recovery.** `docs/MANUAL_RELEASE_RUNBOOK.md` фиксирует
+  полный ручной путь VPS: пять source adapters и factual finalizer, raw/source-health gate,
+  Engine в shadow, Qwen `qwen3.7-flash` для bounded review и `qwen3.8-max` только для
+  явного сложного synthesis после проверки условий тарифа, quality check, ручной Broad
+  publication и pointer-only rollback. Новые команды
+  `collect --coverage --since … --until …` и `collect --recover-snapshots` находят
+  календарные gaps по raw run, health и artifacts, а затем без сети финализируют только
+  пропущенные даты с полным набором их собственных JSONL. Для отсутствующего artifact
+  `collect --historical-date` запрашивает только date-aware public interfaces (Reddit/HN/RSS/PH),
+  сохраняет фактическое время наблюдения и оставляет Ladder explicit `empty`, поскольку у его
+  listing нет надёжного historical query. Сегодняшняя выборка никогда не выдаётся за
+  пропущенную историческую дату.
+
 - **UI: оригинальные имена трендов, русская подпись ревью, ссылки и кликабельные
   рубрики.** Трендовое ревью больше не переименовывает тренды: `name_ru`/`pattern`
   остаются на языке корпуса, а русское имя из ревью пишется в новую колонку
@@ -17,14 +30,26 @@
 
 - **Стоимостная маршрутизация Qwen (`qwen_policy`, `docs/QWEN_ROUTING.md`).**
   Массовые прогоны (извлечение схем, нормализация акторов, классификация) уходят на
-  pay-as-you-go ключ с бесплатными квотами 1M токенов на модель; подписка token-plan —
-  для семейства `qwen3.8-max` и скидочного окна 17:00–03:00 МСК. Локальный леджер
-  `qwen_usage.db` пишет `usage` каждого вызова; команды `qwen usage` / `qwen pick`
-  показывают остатки квот и текущий выбор роутера. Квоты задаются
-  `RC_QWEN_TOKEN_PLAN_TOKENS` / `RC_QWEN_PAYG_FREE_TOKENS`. Для bulk-вызовов выключен
-  reasoning (`enable_thinking=false`): замер показал ~150 сгоревших reasoning-токенов
-  на тривиальный запрос у qwen3.6-flash. Трендовое ревью остаётся на
-  `qwen3.8-max-preview`: модель входит в ключ кэша `llm_reviews`.
+  pay-as-you-go API на `qwen3.7-flash`; Token Plan — интерактивный продукт и endpoint
+  сервиса им больше не является. Локальный леджер `qwen_usage.db` пишет `usage` каждого
+  вызова; команда `qwen pick` честно показывает list price, пока владелец явно не
+  подтвердит грант через `RC_QWEN_PAYG_FREE_TOKENS`. Для bulk-вызовов выключен reasoning
+  (`enable_thinking=false`): замер показал ~150 сгоревших reasoning-токенов на тривиальный
+  запрос у qwen3.6-flash. Обычные pair и bounded trend review используют
+  `qwen3.7-flash`: international list price ¥0.225/¥0.974 за 1M input/output против
+  ¥14.988/¥44.965 у `qwen3.8-max`. Max остаётся только для согласованной ручной
+  эскалации свободного synthesis после проверки актуальной акции в Model Studio console.
+
+- **Precision-first same-provider guard для Stories.** MinHash/SimHash fingerprint и
+  exact-title merge больше не становятся auto-merge доказательством для двух материалов
+  одного provider без общего event URL. Это разрывает шаблонные Financial Times earnings
+  announcements, повторяющиеся landing pages и похожие Reddit-вопросы до quality gate,
+  сохраняя cross-source syndicated headlines и точные URL-дубли.
+
+- **UI: сила, свежесть и даты во всех читательских слоях.** API и страницы News,
+  Stories, Trends, Today, Pulse, Radar и Project Lens сортируют сначала по измеримой
+  силе (evidence/engagement или confidence/coverage), затем по последней дате; у каждой
+  карточки теперь явно показаны applicable published/first_seen/last_seen даты.
 
 - **Поколение 5 слоя Trends: `schema_v3`** — схему события `(актор, действие, объект,
   ключ)` извлекает LLM вместо лексикона из тринадцати регулярок (замер: recall ≈ 13 %,

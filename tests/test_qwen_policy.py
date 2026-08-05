@@ -1,7 +1,7 @@
-"""Стоимостная маршрутизация: скидки, квоты, леджер — без сети.
+"""Стоимостная маршрутизация pay-as-you-go: квоты и леджер — без сети.
 
-Проверяется то, что решает о деньгах: порядок цепочек, переход на бесплатные квоты
-при исчерпании, скидочное окно подписки и учёт расхода.
+Проверяется то, что решает о деньгах: явность бесплатной квоты, выбор дешёвой модели
+после её исчерпания и учёт расхода.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ def both_keys(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("QWEN_PAY_AS_YOU_GO_PLAN_KEY", "payg-key")
     monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
     monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "usage.db"))
+    monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "1000000")
 
 
 def test_offpeak_window_is_17_00_03_00_msk() -> None:
@@ -35,12 +36,12 @@ def test_bulk_starts_at_the_cheapest_flash_not_the_strongest_model(both_keys) ->
     """Массовая стадия — это разбор одной строки, и модель под неё нужна самая дешёвая.
 
     Регрессия: цепочка открывалась `qwen3-235b-a22b-instruct-2507`, то есть 235B на
-    тысяче вызовов «разбери заголовок» — бесплатный грант выгорал за один прогон.
+    тысяче вызовов «разбери заголовок».
     """
     model, endpoint, why = qwen_policy.pick_model("bulk")
 
     assert (model, endpoint) == ("qwen3.7-flash", "payg")
-    assert "бесплатная" in why
+    assert "подтверждённая" in why
     assert all(
         candidate[0] != "qwen3-235b-a22b-instruct-2507" for candidate in qwen_policy.BULK_CHAIN
     )
@@ -60,7 +61,9 @@ def test_bulk_falls_through_exhausted_free_quotas(both_keys, monkeypatch) -> Non
     assert (model, endpoint) == ("qwen3.6-flash", "payg")
 
 
-def test_bulk_last_resort_is_subscription_when_free_exhausted(both_keys, monkeypatch) -> None:
+def test_bulk_keeps_the_cheapest_flash_when_all_free_quotas_are_exhausted(
+    both_keys, monkeypatch
+) -> None:
     monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "10")
     for model in ("qwen3.7-flash", "qwen3.6-flash", "qwen3.5-flash", "qwen-flash"):
         qwen_policy.record_usage(
@@ -69,7 +72,7 @@ def test_bulk_last_resort_is_subscription_when_free_exhausted(both_keys, monkeyp
 
     picked_model, endpoint, _ = qwen_policy.pick_model("bulk")
 
-    assert (picked_model, endpoint) == ("qwen3.6-flash", "token-plan")
+    assert (picked_model, endpoint) == ("qwen3.7-flash", "payg")
 
 
 def test_free_grant_beats_the_discount_window(both_keys) -> None:
@@ -87,8 +90,7 @@ def test_free_grant_beats_the_discount_window(both_keys) -> None:
     assert "бесплатная" in why
 
 
-def test_offpeak_prefers_the_subscription_once_the_grant_is_gone(both_keys, monkeypatch) -> None:
-    """Окно решает только то, что брать после гранта."""
+def test_synth_keeps_max_on_payg_once_the_grant_is_gone(both_keys, monkeypatch) -> None:
     monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "10")
     for model in ("qwen3.8-max", "qwen3.7-max", "qwen3.5-plus"):
         qwen_policy.record_usage(
@@ -99,18 +101,17 @@ def test_offpeak_prefers_the_subscription_once_the_grant_is_gone(both_keys, monk
         "synth", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
     )
 
-    assert (picked, endpoint) == ("qwen3.8-max", "token-plan")
-    assert "скидочное" in why
+    assert (picked, endpoint) == ("qwen3.8-max", "payg")
+    assert "list price" in why
 
 
-def test_synth_peak_prefers_free_quota_on_the_same_model(both_keys) -> None:
-    """`qwen3.8-max` живёт на обоих ключах: вне окна берём его же, но из гранта."""
+def test_synth_peak_prefers_confirmed_free_quota_on_the_same_model(both_keys) -> None:
     model, endpoint, _ = qwen_policy.pick_model("synth", now=datetime(2026, 8, 5, 8, 0, tzinfo=UTC))
 
     assert (model, endpoint) == ("qwen3.8-max", "payg")
 
 
-def test_synth_peak_uses_subscription_when_free_exhausted(both_keys, monkeypatch) -> None:
+def test_synth_peak_keeps_payg_when_free_quota_is_exhausted(both_keys, monkeypatch) -> None:
     monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "10")
     for model in ("qwen3.8-max", "qwen3.7-max", "qwen3.5-plus"):
         qwen_policy.record_usage(
@@ -121,14 +122,14 @@ def test_synth_peak_uses_subscription_when_free_exhausted(both_keys, monkeypatch
         "synth", now=datetime(2026, 8, 5, 8, 0, tzinfo=UTC)
     )
 
-    assert (picked_model, endpoint) == ("qwen3.8-max", "token-plan")
+    assert (picked_model, endpoint) == ("qwen3.8-max", "payg")
 
 
 def test_pick_endpoint_keeps_the_model_and_moves_only_the_endpoint(both_keys) -> None:
     """Модель ревью в ключе кэша `llm_reviews`, эндпоинт — нет; значит двигаем эндпоинт.
 
-    Пока грант цел, эндпоинт один и тот же в любой час: бесплатное не переигрывается
-    скидкой. Окно вступает в силу только после гранта — это соседний тест.
+    Пока грант цел, endpoint один и тот же в любой час: сервис не переключается на
+    интерактивный Token Plan.
     """
     offpeak, why_offpeak = qwen_policy.pick_endpoint(
         "qwen3.8-max", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
@@ -139,9 +140,7 @@ def test_pick_endpoint_keeps_the_model_and_moves_only_the_endpoint(both_keys) ->
     assert "бесплатная" in why_offpeak
 
 
-def test_pick_endpoint_falls_back_to_the_subscription_when_the_grant_is_gone(
-    both_keys, monkeypatch
-) -> None:
+def test_pick_endpoint_keeps_payg_when_the_grant_is_gone(both_keys, monkeypatch) -> None:
     monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "10")
     qwen_policy.record_usage(
         model="qwen3.8-max", endpoint="payg", prompt_tokens=10, completion_tokens=10
@@ -152,11 +151,28 @@ def test_pick_endpoint_falls_back_to_the_subscription_when_the_grant_is_gone(
         "qwen3.8-max", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
     )
 
-    assert (peak, offpeak) == ("token-plan", "token-plan")
-    assert "скидочное" in why_offpeak
+    assert (peak, offpeak) == ("payg", "payg")
+    assert "list price" in why_offpeak
 
 
-def test_token_plan_quota_is_shared_across_models(both_keys, monkeypatch) -> None:
+def test_flash_review_stays_on_payg_when_its_free_grant_is_gone(both_keys, monkeypatch) -> None:
+    """Сервис не должен уходить на интерактивный Token Plan."""
+    monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "10")
+    qwen_policy.record_usage(
+        model="qwen3.7-flash", endpoint="payg", prompt_tokens=10, completion_tokens=10
+    )
+
+    endpoint, why = qwen_policy.pick_endpoint(
+        "qwen3.7-flash", now=datetime(2026, 8, 5, 18, 0, tzinfo=UTC)
+    )
+
+    assert endpoint == "payg"
+    assert "list price" in why
+
+
+def test_token_plan_quota_is_tracked_but_not_used_for_service_routing(
+    both_keys, monkeypatch
+) -> None:
     monkeypatch.setenv("RC_QWEN_TOKEN_PLAN_TOKENS", "100")
     qwen_policy.record_usage(
         model="qwen3.8-max-preview", endpoint="token-plan", prompt_tokens=60, completion_tokens=60
@@ -172,6 +188,17 @@ def test_ledger_records_and_aggregates(both_keys) -> None:
     qwen_policy.record_usage(model="m", endpoint="payg", prompt_tokens=5, completion_tokens=5)
 
     assert qwen_policy.usage_totals()[("m", "payg")] == 20
+
+
+def test_unconfigured_grant_never_claims_payg_is_free(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("QWEN_PAY_AS_YOU_GO_PLAN_KEY", "payg-key")
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "usage.db"))
+    monkeypatch.delenv("RC_QWEN_PAYG_FREE_TOKENS", raising=False)
+
+    model, endpoint, why = qwen_policy.pick_model("bulk")
+
+    assert (model, endpoint) == ("qwen3.7-flash", "payg")
+    assert "list price" in why
 
 
 def test_usage_before_grant_start_does_not_count(both_keys, monkeypatch) -> None:
@@ -191,11 +218,11 @@ def test_usage_before_grant_start_does_not_count(both_keys, monkeypatch) -> None
 
 
 def test_expired_grant_leaves_no_free_room(both_keys, monkeypatch) -> None:
-    """Истёкший грант — не бесплатное место: роутер обязан уйти на подписку."""
+    """Истёкший грант — не бесплатное место, но модель остаётся на pay-as-you-go."""
     monkeypatch.setenv("RC_QWEN_PAYG_GRANT_START", "2020-01-01")
 
     assert qwen_policy.payg_grant_expired()
-    assert qwen_policy.pick_model("bulk")[:2] == ("qwen3.6-flash", "token-plan")
+    assert qwen_policy.pick_model("bulk")[:2] == ("qwen3.7-flash", "payg")
 
 
 def test_unknown_grant_start_keeps_counting_whole_history(both_keys, monkeypatch) -> None:

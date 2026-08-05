@@ -10,7 +10,10 @@ import logging
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..models import PostCard
 
@@ -272,10 +275,38 @@ def parse_feed(xml_text: str, source_name: str) -> list[dict[str, Any]]:
     return items
 
 
+def _published_on_date(value: str | None, historical_date: str) -> bool:
+    if not value:
+        return False
+    try:
+        parsed = parsedate_to_datetime(value)
+    except (TypeError, ValueError):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC).date().isoformat() == historical_date
+
+
+def _historical_feed_url(feed_url: str, historical_date: str) -> str:
+    """Ask Google News RSS for one UTC day; direct feeds are filtered locally."""
+    parts = urlsplit(feed_url)
+    if parts.netloc != "news.google.com" or not parts.path.endswith("/rss/search"):
+        return feed_url
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query = re.sub(r"(?:\s|\+)when:\d+d\b", "", params.get("q", "")).strip()
+    end = (datetime.strptime(historical_date, "%Y-%m-%d") + timedelta(days=1)).date()
+    params["q"] = f"{query} after:{historical_date} before:{end.isoformat()}".strip()
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+
+
 async def fetch_rss_source(
     source: RSSSource,
     snapshot_date: str,
     max_items_per_feed: int = 20,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Загружает один RSS-источник (все фиды)."""
     import aiohttp
@@ -286,8 +317,14 @@ async def fetch_rss_source(
 
     async with aiohttp.ClientSession(headers=headers) as session:
         for feed_url in source.feeds:
+            request_url = (
+                _historical_feed_url(feed_url, historical_date) if historical_date else feed_url
+            )
             try:
-                async with session.get(feed_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                async with session.get(
+                    request_url,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                ) as resp:
                     if resp.status != 200:
                         logger.warning("RSS %s (%s): HTTP %d", source.name, feed_url, resp.status)
                         continue
@@ -296,6 +333,10 @@ async def fetch_rss_source(
                     section = _section_from_feed_url(feed_url)
 
                     for item in items[:max_items_per_feed]:
+                        if historical_date and not _published_on_date(
+                            item["published"], historical_date
+                        ):
+                            continue
                         url = item["url"]
                         if url in seen_urls:
                             continue
@@ -334,12 +375,18 @@ async def fetch_all_rss(
     snapshot_date: str,
     sources: list[RSSSource] | None = None,
     max_items_per_feed: int = 20,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Загружает все RSS-источники."""
     sources = sources or RSS_SOURCES
     all_cards: list[PostCard] = []
     for source in sources:
-        cards = await fetch_rss_source(source, snapshot_date, max_items_per_feed)
+        cards = await fetch_rss_source(
+            source,
+            snapshot_date,
+            max_items_per_feed,
+            historical_date,
+        )
         all_cards.extend(cards)
     logger.info("RSS total: %d статей из %d источников", len(all_cards), len(sources))
     return all_cards

@@ -108,11 +108,13 @@ Default collection profile: `config/profiles/broad.json`.
 
 ## 4. Поток данных
 
-Collection и analysis являются независимыми jobs. Канонический host-cron сначала записывает
-все snapshot-артефакты, затем запускает `collect --from-snapshots`, а после этого — Engine
-в shadow-канале. Отсутствие LLM не меняет collection status. Pipeline запускается
-**раз в 2 ночи** (нечётные дни, `*/2` в cron) — Engine cycle на VPS занимает 30-60 минут,
-ежедневный прогон избыточен при 7-дневном окне.
+Collection и analysis являются независимыми jobs. Host-cron template сначала записывает все
+snapshot-артефакты, затем запускает `collect --from-snapshots`, а после этого — Engine в
+shadow-канале. Отсутствие LLM не меняет collection status. Сейчас production cron намеренно
+поставлен на паузу: владелец проходит этот же контракт вручную по
+[`docs/MANUAL_RELEASE_RUNBOOK.md`](docs/MANUAL_RELEASE_RUNBOOK.md). При включении cron он
+остаётся version-controlled шаблоном с прежней каденцией раз в две ночи; вручную запускать
+второй collector или Engine поверх активного job запрещено.
 
 ### Текущий production flow
 
@@ -233,6 +235,11 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
   a Reddit post usually has none, so `domain_ids_json` is almost always `other`. Diversity is held
   by quotas — per topic, per subreddit, and a tighter cap on `policy_politics`, which carries the
   highest average pulse and otherwise crowds the block out.
+- **Порядок читательских поверхностей стабилен и объясним.** News сортируется по силе
+  доказательств/engagement, Stories — по числу независимых источников и items, Trends — по
+  confidence и охвату, Pulse — по силе сигнала; при равенстве приоритет получает последняя
+  дата evidence. Карточка показывает applicable `published_at` либо `first_seen → last_seen`,
+  поэтому свежесть проверяется глазами, а не выводится из позиции в списке.
 
 ### Story/Trend Engine contract
 
@@ -256,6 +263,10 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
 - **Сборка групп ограничена медоидом** (`medoid_min_score`, дефолт 0.55): каждый член группы
   обязан иметь прямое ребро к медоиду. Порог — параметр релиза; жёстко зашитое 0.72 лежало
   выше всей серой зоны и обесточивало слой ревью целиком.
+- **Fingerprint и exact-title — доказательство только между независимыми providers.** Внутри
+  одного provider они служат лишь retrieval signal; auto-merge разрешён там только с общим
+  event URL или другим независимым доказательством. Это защищает от шаблонных earnings,
+  landing pages и повторяющихся Reddit-вопросов.
 - **Приоритет источников меток**: `human > claude_review > qwen_review > auto_label`. Авто-метки
   на парах, которые лестница правил уже решила детерминированно, исключаются и из обучения,
   и из оценки: они пересказывают правило, а не судят независимо. Метрики релиза несут
@@ -267,6 +278,10 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
   среди которых есть полы **полноты** — иначе система оптимизируется в вырожденное состояние,
   где не сливается ничего.
 - Publish/rollback атомарно переключают immutable pointer.
+- **Qwen service routing:** Engine использует pay-as-you-go API; `qwen3.7-flash` — для
+  извлечения и bounded JSON-review с выключенным thinking, `qwen3.8-max` — только для
+  явно согласованного сложного synthesis. Роутер не предполагает бесплатный international
+  грант: его размер включается лишь явной конфигурацией после проверки в console.
 - Старый `cluster_lab.db` и `lab` CLI — compatibility alias на один релиз.
 
 Полный контракт: [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md).

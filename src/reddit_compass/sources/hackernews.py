@@ -8,6 +8,7 @@ Query: AI-темы, tags: story, hitsPerPage: 50.
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlencode
 
@@ -43,8 +44,9 @@ async def fetch_hn_stories(
     hits_per_query: int = 20,
     snapshot_date: str = "",
     days_back: int = 7,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
-    """Загружает stories из HN по запросам через Algolia API (последние N дней)."""
+    """Load HN stories from a recent or one exact historical UTC interval."""
     import time as _time
 
     import aiohttp
@@ -53,43 +55,75 @@ async def fetch_hn_stories(
     cards: list[PostCard] = []
     seen_ids: set[str] = set()
 
-    # Фильтр: только последние N дней
-    since_ts = int(_time.time()) - (days_back * 86400)
+    if historical_date:
+        start = datetime.strptime(historical_date, "%Y-%m-%d").replace(tzinfo=UTC)
+        end = start + timedelta(days=1)
+        time_filter = f"created_at_i>={int(start.timestamp())},created_at_i<{int(end.timestamp())}"
+    else:
+        since_ts = int(_time.time()) - (days_back * 86400)
+        time_filter = f"created_at_i>{since_ts}"
 
     headers = {"User-Agent": "reddit-compass/0.2 (trend monitor)"}
 
     async with aiohttp.ClientSession(headers=headers) as session:
-        front_page_specs = [
-            (
-                "front_page",
-                _algolia_url(
-                    "search",
-                    {"tags": "front_page", "hitsPerPage": hits_per_query},
+        front_page_specs = (
+            [
+                (
+                    "historical_date",
+                    _algolia_url(
+                        "search_by_date",
+                        {
+                            "tags": "story",
+                            "hitsPerPage": hits_per_query,
+                            "numericFilters": time_filter,
+                        },
+                    ),
                 ),
-            ),
-            (
-                "new",
-                _algolia_url(
-                    "search_by_date",
-                    {
-                        "tags": "story",
-                        "hitsPerPage": hits_per_query,
-                        "numericFilters": f"created_at_i>{since_ts}",
-                    },
+                (
+                    "historical_top",
+                    _algolia_url(
+                        "search",
+                        {
+                            "tags": "story",
+                            "hitsPerPage": hits_per_query,
+                            "numericFilters": f"{time_filter},points>50",
+                        },
+                    ),
                 ),
-            ),
-            (
-                "weekly_top",
-                _algolia_url(
-                    "search",
-                    {
-                        "tags": "story",
-                        "hitsPerPage": hits_per_query,
-                        "numericFilters": f"created_at_i>{since_ts},points>50",
-                    },
+            ]
+            if historical_date
+            else [
+                (
+                    "front_page",
+                    _algolia_url(
+                        "search",
+                        {"tags": "front_page", "hitsPerPage": hits_per_query},
+                    ),
                 ),
-            ),
-        ]
+                (
+                    "new",
+                    _algolia_url(
+                        "search_by_date",
+                        {
+                            "tags": "story",
+                            "hitsPerPage": hits_per_query,
+                            "numericFilters": time_filter,
+                        },
+                    ),
+                ),
+                (
+                    "weekly_top",
+                    _algolia_url(
+                        "search",
+                        {
+                            "tags": "story",
+                            "hitsPerPage": hits_per_query,
+                            "numericFilters": f"{time_filter},points>50",
+                        },
+                    ),
+                ),
+            ]
+        )
         for label, url in front_page_specs:
             await _fetch_algolia_url(session, url, label, snapshot_date, seen_ids, cards)
 
@@ -100,7 +134,7 @@ async def fetch_hn_stories(
                     "query": query,
                     "tags": "story",
                     "hitsPerPage": hits_per_query,
-                    "numericFilters": f"created_at_i>{since_ts}",
+                    "numericFilters": time_filter,
                 },
             )
             await _fetch_algolia_url(session, url, query, snapshot_date, seen_ids, cards)

@@ -19,8 +19,9 @@ import subprocess
 from collections import Counter, defaultdict
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta
 from email.utils import parsedate_to_datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
@@ -2026,6 +2027,18 @@ def _release_input_status(
     run_complete = all(str(row["status"]) == "complete" for row in run_rows)
     if not run_complete:
         return "partial"
+    # ``window=7`` means seven calendar days, not merely seven arbitrary raw
+    # runs. A manual lapse previously let 28, 29, 30, 31, 01, 03, 05 look like
+    # a complete seven-run release and reach later quality gates. Preserve the
+    # immutable attempt but make the missing calendar coverage non-production.
+    try:
+        snapshot_dates = sorted({date.fromisoformat(str(row["snapshot_date"])) for row in run_rows})
+    except ValueError:
+        return "partial"
+    if len(snapshot_dates) != len(run_rows) or any(
+        later - earlier != timedelta(days=1) for earlier, later in pairwise(snapshot_dates)
+    ):
+        return "partial"
     cluster_counts = Counter(str(payload[2]) for payload in item_payloads)
     expected_voices = _profile_expects_voice_cluster(profile) or any(
         str(payload[3]) == "voices" for payload in health_payloads
@@ -2419,7 +2432,7 @@ DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "dense_review_threshold": 0.72,
     "semantic_dedup_threshold": 0.92,
     "semantic_dedup_max_days": 7,
-    "review_model": "qwen3.6-flash",
+    "review_model": "qwen3.7-flash",
     "review_prompt_version": STORY_REVIEW_PROMPT_VERSION,
     "llm_merge_min_confidence": 0.85,
     "exclude_routine": True,
@@ -3411,7 +3424,7 @@ def prepare_story_review_jobs(
     story_release_id: str,
     *,
     limit: int = 100,
-    model: str = "qwen3.6-flash",
+    model: str = "qwen3.7-flash",
     prompt_version: str = STORY_REVIEW_PROMPT_VERSION,
 ) -> list[dict[str, Any]]:
     """Prepare bounded Qwen jobs for ambiguous pairs in an existing attempt."""
@@ -3475,7 +3488,7 @@ def store_story_review_response(
     input_hash: str,
     raw_response: str,
     allowed_item_ids: set[str],
-    model: str = "qwen3.6-flash",
+    model: str = "qwen3.7-flash",
     prompt_version: str = STORY_REVIEW_PROMPT_VERSION,
 ) -> dict[str, Any]:
     review, errors = validate_story_review(
@@ -3761,6 +3774,11 @@ def _score_story_pair(
     )
     near_duplicate_title_match = bool(
         near_duplicate_features
+        # Fingerprint is a retrieval signal, not proof that two items emitted by the
+        # same provider describe one event. Financial-results headlines and Reddit job
+        # questions share a template far more often than an event. Exact event URLs
+        # were handled above and remain the safe same-provider provenance.
+        and source_independent
         and date_distance <= 7
         and near_duplicate_features["near_duplicate_simhash_distance"]
         <= int(params.get("near_duplicate_simhash_distance", 18))
@@ -3817,14 +3835,9 @@ def _score_story_pair(
         )
     )
     exact_title_event_match = bool(
-        title_score >= 0.98
-        and token_jaccard >= 0.72
-        and date_distance <= 3
-        and (
-            source_independent
-            or left.source_section != right.source_section
-            or left.canonical_url != right.canonical_url
-        )
+        # Same-provider identical titles can be recurring landing pages or a template;
+        # without an event URL they are not sufficient immutable evidence of one story.
+        source_independent and title_score >= 0.98 and token_jaccard >= 0.72 and date_distance <= 3
     )
     event_action_tokens = {
         "acquire",
@@ -4710,7 +4723,7 @@ def create_trend_release(
     params = {
         "min_stories": 3,
         "min_dates": 2,
-        "review_model": "qwen3.8-max",
+        "review_model": "qwen3.7-flash",
         "review_prompt_version": TREND_REVIEW_PROMPT_VERSION,
         "verified_only": verified_only,
         # Ручка гранулярности схемного слоя. Ключ общий для всех методов, поэтому
@@ -5016,7 +5029,7 @@ def get_trend_release(conn: sqlite3.Connection, trend_release_id: str) -> TrendR
 
 # Ревью видит двадцать сильнейших сюжетов тренда, а не все: у корней бывает сотни
 # членов (замер 5 августа: 277 у крупнейшего), и полный состав давал промпт в 60+ тысяч
-# символов, на котором qwen3.8-max не отвечал ни за 75, ни за 300 секунд.
+# символов, на котором предшествующая max-модель не отвечала ни за 75, ни за 300 секунд.
 #
 # Выборка ограничивает ТОЛЬКО промпт, но не состав тренда. Вердикт ревью — это суждение
 # о показанных двадцати, и распространять его на непоказанные нельзя: `story_ids` в
@@ -5045,7 +5058,7 @@ def prepare_trend_review_jobs(
     trend_release_id: str,
     *,
     limit: int = 50,
-    model: str = "qwen3.8-max",
+    model: str = "qwen3.7-flash",
     prompt_version: str = TREND_REVIEW_PROMPT_VERSION,
 ) -> list[dict[str, Any]]:
     release = get_trend_release(conn, trend_release_id)
@@ -5122,7 +5135,7 @@ def store_trend_review_response(
     input_hash: str,
     raw_response: str,
     allowed_story_ids: set[str],
-    model: str = "qwen3.8-max",
+    model: str = "qwen3.7-flash",
     prompt_version: str = TREND_REVIEW_PROMPT_VERSION,
 ) -> dict[str, Any]:
     review, errors = validate_trend_review(
@@ -6714,9 +6727,9 @@ async def run_engine_cycle(
     trend_method: str = "embedding_v2",
     trend_depth: int = 2,
     embed_model: str = MODEL2VEC_DEFAULT,
-    review_model: str = "qwen3.6-flash",
+    review_model: str = "qwen3.7-flash",
     review_limit: int = 0,
-    trend_review_model: str = "qwen3.8-max",
+    trend_review_model: str = "qwen3.7-flash",
     trend_review_limit: int = 0,
     review_runner: Callable[[str, str], Awaitable[str]] | None = None,
     publish_channel: str | None = None,

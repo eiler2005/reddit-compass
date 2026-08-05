@@ -23,6 +23,7 @@
         </form>
         <p class="section-note">
             {{ trends.total }} trends · history {{ trends.history_status }} · {% if trends.publication_id %}publication {{ trends.publication_id }} · {% endif %}trend release {{ trends.trend_release_id }}
+            · порядок: confidence → охват → свежесть
         </p>
     </section>
 
@@ -42,7 +43,8 @@
                 row_meta=[
                     trend.story_count ~ " событий",
                     trend.source_count ~ " акторов",
-                    trend.review_status
+                    trend.review_status,
+                    "даты: " ~ trend.first_seen ~ " → " ~ trend.last_seen
                 ],
                 row_children=trend.children,
                 row_actors=trend.distinct_actors,

@@ -199,6 +199,12 @@ class NewsItemOut(BaseModel):
     story_id: str = ""
     story_title: str = ""
     membership_reason: str = ""
+    # Сила материала должна быть видна и машине, и интерфейсу: для News
+    # первичны охват сюжета и engagement, свежесть — следующий критерий.
+    story_source_count: int = 0
+    story_item_count: int = 0
+    raw_score: int = 0
+    raw_comments: int = 0
 
 
 class PaginatedNews(BaseModel):
@@ -502,6 +508,7 @@ def _published_news_rows(
             i.observed_at,
             i.snapshot_date,
             i.content_scope,
+            i.raw_engagement,
             i.domain_ids AS item_domain_ids,
             f.domain_ids AS facet_domain_ids,
             f.theme_ids,
@@ -509,7 +516,9 @@ def _published_news_rows(
             f.summary_ru AS facet_summary_ru,
             COALESCE(si.story_id, '') AS story_id,
             COALESCE(si.membership_reason, '') AS membership_reason,
-            COALESCE(s.title, '') AS story_title
+            COALESCE(s.title, '') AS story_title,
+            COALESCE(s.source_count, 0) AS story_source_count,
+            COALESCE(s.item_count, 0) AS story_item_count
         FROM release_items AS i
         LEFT JOIN item_facets AS f
           ON f.facet_release_id = ?
@@ -532,6 +541,7 @@ def _news_item_out(row: sqlite3.Row) -> NewsItemOut:
         _row_value(row, "facet_domain_ids", "") or _row_value(row, "item_domain_ids", ""),
         fallback=["other"],
     )
+    raw_engagement = _json_int_dict(_row_value(row, "raw_engagement", ""))
     return NewsItemOut(
         item_id=str(row["item_id"]),
         provider=str(row["provider"] or ""),
@@ -553,6 +563,10 @@ def _news_item_out(row: sqlite3.Row) -> NewsItemOut:
         story_id=str(_row_value(row, "story_id", "")),
         story_title=str(_row_value(row, "story_title", "")),
         membership_reason=str(_row_value(row, "membership_reason", "")),
+        story_source_count=int(_row_value(row, "story_source_count", 0) or 0),
+        story_item_count=int(_row_value(row, "story_item_count", 0) or 0),
+        raw_score=raw_engagement.get("score", raw_engagement.get("points", 0)),
+        raw_comments=raw_engagement.get("comments", raw_engagement.get("comment_count", 0)),
     )
 
 
@@ -621,6 +635,22 @@ def _engine_news(
         source_cluster=source_cluster,
         q=q,
     )
+
+    # News остаётся сырой лентой, но сырость не означает хронологический шум:
+    # сначала показываем самый сильный подтверждённый сюжет и реакцию на материал,
+    # затем более свежую запись.  Один устойчивый порядок действует и в API, и в UI.
+    def news_strength(row: sqlite3.Row) -> tuple[int, int, int, int, str, str]:
+        raw = _json_int_dict(_row_value(row, "raw_engagement", ""))
+        return (
+            int(_row_value(row, "story_source_count", 0) or 0),
+            int(_row_value(row, "story_item_count", 0) or 0),
+            raw.get("score", raw.get("points", 0)),
+            raw.get("comments", raw.get("comment_count", 0)),
+            str(row["published_at"] or row["observed_at"] or row["snapshot_date"] or ""),
+            str(row["item_id"]),
+        )
+
+    filtered.sort(key=news_strength, reverse=True)
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
     return PaginatedNews(
@@ -792,11 +822,13 @@ def _engine_stories(
     if project_id:
         filtered.sort(
             key=lambda row: (
-                -_json_int_dict(row["project_scores"]).get(project_id, 0),
-                -int(row["source_count"] or 0),
-                -int(row["item_count"] or 0),
+                _json_int_dict(row["project_scores"]).get(project_id, 0),
+                int(row["source_count"] or 0),
+                int(row["item_count"] or 0),
+                str(row["last_seen"] or ""),
                 str(row["story_id"]),
-            )
+            ),
+            reverse=True,
         )
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
@@ -1001,7 +1033,7 @@ def _engine_trends(
         SELECT *
         FROM engine_trends
         WHERE trend_release_id = ?
-        ORDER BY confidence DESC, story_count DESC, source_count DESC, trend_id
+        ORDER BY confidence DESC, source_count DESC, story_count DESC, last_seen DESC, trend_id
         """,
         (trend_release.trend_release_id,),
     ).fetchall()
@@ -1036,11 +1068,14 @@ def _engine_trends(
     if project_id:
         filtered.sort(
             key=lambda row: (
-                -_json_int_dict(row["project_scores"]).get(project_id, 0),
-                -float(row["confidence"] or 0.0),
-                -int(row["story_count"] or 0),
+                _json_int_dict(row["project_scores"]).get(project_id, 0),
+                float(row["confidence"] or 0.0),
+                int(row["source_count"] or 0),
+                int(row["story_count"] or 0),
+                str(row["last_seen"] or ""),
                 str(row["trend_id"]),
-            )
+            ),
+            reverse=True,
         )
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
@@ -1243,7 +1278,10 @@ def _engine_trend_detail(
     child_rows = [
         child
         for child in conn.execute(
-            "SELECT * FROM engine_trends WHERE trend_release_id = ? ORDER BY story_count DESC",
+            """SELECT * FROM engine_trends
+            WHERE trend_release_id = ?
+            ORDER BY confidence DESC, source_count DESC, story_count DESC,
+                     last_seen DESC, trend_id""",
             (trend_release.trend_release_id,),
         ).fetchall()
         if str(_row_value(child, "parent_trend_id", "") or "") == trend_id
@@ -1289,7 +1327,7 @@ def _engine_radar(
         SELECT *
         FROM engine_trends
         WHERE trend_release_id = ?
-        ORDER BY confidence DESC, story_count DESC, trend_id
+        ORDER BY confidence DESC, source_count DESC, story_count DESC, last_seen DESC, trend_id
         """,
         (trend_release.trend_release_id,),
     ).fetchall()
@@ -2085,6 +2123,7 @@ class PulseSignalOut(BaseModel):
     subreddit: str
     signal_type: str
     title: str
+    published_at: str = ""
     discussion_url: str = ""
     target_url: str = ""
     pulse_score: float = 0
@@ -2182,7 +2221,13 @@ def _engine_pulse_signals(
         "velocity": "cs.comment_velocity DESC",
         "ratio": "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) DESC",
     }
-    order_by = sort_map.get(sort, "cs.pulse_score DESC")
+    # При равной силе сигнала не оставляем порядок БД случайным: свежий пост
+    # идёт выше.  Явный пользовательский sort сохраняет приоритет, но тоже
+    # получает этот одинаковый tie-breaker.
+    order_by = (
+        f"{sort_map.get(sort, 'cs.pulse_score DESC')}, "
+        "COALESCE(ri.published_at, ri.observed_at, ri.snapshot_date) DESC, cs.signal_id DESC"
+    )
 
     select_cols = (
         "cs.signal_id, cs.item_id, cs.subreddit, cs.signal_type, cs.title, "
@@ -2195,7 +2240,8 @@ def _engine_pulse_signals(
         "COALESCE(json_extract(ri.raw_engagement, '$.comments'), 0) as reddit_comments, "
         "COALESCE(json_extract(ri.raw_engagement, '$.upvote_ratio'), 0) as upvote_ratio, "
         "COALESCE(json_extract(ri.metadata, '$.is_self'), 0) as is_self, "
-        "COALESCE(json_extract(ri.metadata, '$.link_flair_text'), '') as link_flair_text"
+        "COALESCE(json_extract(ri.metadata, '$.link_flair_text'), '') as link_flair_text, "
+        "COALESCE(ri.published_at, ri.observed_at, ri.snapshot_date, '') as published_at"
     )
 
     try:
@@ -2216,6 +2262,7 @@ def _engine_pulse_signals(
                 "subreddit": r["subreddit"],
                 "signal_type": r["signal_type"],
                 "title": r["title"],
+                "published_at": r["published_at"],
                 "discussion_url": _safe_url(r["discussion_url"]),
                 "target_url": _safe_url(r["target_url"]),
                 "pulse_score": r["pulse_score"],

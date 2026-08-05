@@ -511,6 +511,9 @@ async def _execute_collection(args: argparse.Namespace) -> object:
         sources = [s.strip() for s in args.sources.split(",")]
     profile = getattr(args, "profile", DEFAULT_PROFILE)
     snapshot_date = getattr(args, "date", None)
+    historical_date = getattr(args, "historical_date", "")
+    if historical_date and getattr(args, "from_snapshots", False):
+        raise SystemExit("--historical-date cannot be combined with --from-snapshots")
     if getattr(args, "from_snapshots", False):
         print(
             "📦 Finalize snapshot collection: "
@@ -524,13 +527,21 @@ async def _execute_collection(args: argparse.Namespace) -> object:
             profile=profile,
             snapshot_date=snapshot_date,
         )
-    print(f"🔄 Collect: sources={sources or 'all'}, profile={profile}")
+    if historical_date:
+        print(
+            "🕰️ Historical recovery: "
+            f"sources={sources or 'all'}, profile={profile}, date={historical_date}"
+        )
+    else:
+        print(f"🔄 Collect: sources={sources or 'all'}, profile={profile}")
     return await collect_sources(
         config=config,
         snapshots_dir=snapshots_dir,
         db_path=db_path,
         sources=sources,
         profile=profile,
+        snapshot_date=historical_date or None,
+        historical_recovery=bool(historical_date),
     )
 
 
@@ -583,9 +594,72 @@ def _record_corpus_version(result: object) -> None:
 
 async def _cmd_collect(args: argparse.Namespace) -> None:
     """Collection-only process: network + raw corpus persistence."""
-    result = await _execute_collection(args)
-    _record_corpus_version(result)
-    _print_collection_result(result)
+    if args.coverage or args.recover_snapshots:
+        from .collector import collection_coverage, recover_snapshot_gaps
+
+        if args.from_snapshots:
+            raise SystemExit(
+                "--coverage/--recover-snapshots cannot be combined with --from-snapshots"
+            )
+        if args.historical_date:
+            raise SystemExit(
+                "--coverage/--recover-snapshots cannot be combined with --historical-date"
+            )
+        if args.sources:
+            raise SystemExit(
+                "coverage always checks the full production source set; omit --sources"
+            )
+        if not args.since or not args.until:
+            raise SystemExit("--coverage/--recover-snapshots require both --since and --until")
+        config = _load_config(args)
+        snapshots_dir = _snapshots_dir(args)
+        db_path = DEFAULT_SNAPSHOTS_DIR.parent / "compass.db"
+        if args.recover_snapshots:
+            coverage, recovered = recover_snapshot_gaps(
+                config,
+                snapshots_dir,
+                db_path,
+                profile=args.profile,
+                since=args.since,
+                until=args.until,
+            )
+            for recovered_result in recovered:
+                _record_corpus_version(recovered_result)
+            print(
+                json.dumps(
+                    {
+                        "coverage_before_recovery": coverage,
+                        "recovered": [
+                            {
+                                "run_id": recovered_result.run_id,
+                                "status": recovered_result.status,
+                                "items": len(recovered_result.items),
+                            }
+                            for recovered_result in recovered
+                        ],
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return
+        print(
+            json.dumps(
+                collection_coverage(
+                    snapshots_dir,
+                    db_path,
+                    profile=args.profile,
+                    since=args.since,
+                    until=args.until,
+                ),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        return
+    collection_result = await _execute_collection(args)
+    _record_corpus_version(collection_result)
+    _print_collection_result(collection_result)
 
 
 async def _cmd_run(args: argparse.Namespace) -> None:
@@ -1112,6 +1186,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     raw_response = await call_qwen_json(
                         str(job["prompt"]),
                         model=args.model,
+                        think=False,
                     )
                     results.append(
                         store_story_review_response(
@@ -1369,6 +1444,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         model=model,
                         endpoint=review_endpoint or None,
                         timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS,
+                        think=False,
                     ),
                     store_response=lambda **kwargs: store_trend_review_response(
                         engine_conn, **kwargs
@@ -1864,6 +1940,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         model=model,
                         endpoint=cycle_endpoint or None,
                         timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS,
+                        think=False,
                     )
                 )
                 if _engine_review_requested(args)
@@ -2278,6 +2355,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Дата snapshot для --from-snapshots (YYYY-MM-DD; по умолчанию UTC today)",
     )
+    collect_p.add_argument(
+        "--coverage",
+        action="store_true",
+        help="Read-only coverage report: raw runs, adapter health and saved snapshot artifacts.",
+    )
+    collect_p.add_argument(
+        "--recover-snapshots",
+        action="store_true",
+        help="Finalize only missed dates that already have all dated JSONL artifacts; no network.",
+    )
+    collect_p.add_argument(
+        "--since",
+        default="",
+        help="First UTC date for --coverage/--recover-snapshots (YYYY-MM-DD).",
+    )
+    collect_p.add_argument(
+        "--until",
+        default="",
+        help="Last UTC date for --coverage/--recover-snapshots (YYYY-MM-DD).",
+    )
+    collect_p.add_argument(
+        "--historical-date",
+        default="",
+        help=(
+            "Recover one prior UTC date through date-aware public source queries; "
+            "the observed_at timestamp remains current."
+        ),
+    )
 
     engine_p = sub.add_parser(
         "engine",
@@ -2574,7 +2679,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_stories_review.add_argument("--story-release", required=True)
     engine_stories_review.add_argument("--limit", type=int, default=100)
-    engine_stories_review.add_argument("--model", default="qwen3.6-flash")
+    engine_stories_review.add_argument("--model", default="qwen3.7-flash")
 
     # Типизация акторов разнесена на два шага, потому что цикл идёт на VPS, а
     # опциональная зависимость [actors] в прод-образ намеренно не входит: VPS отдаёт
@@ -2696,7 +2801,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_trends_review.add_argument("--trend-release", required=True)
     engine_trends_review.add_argument("--limit", type=int, default=50)
-    engine_trends_review.add_argument("--model", default="qwen3.8-max")
+    engine_trends_review.add_argument("--model", default="qwen3.7-flash")
 
     engine_pulse = engine_sub.add_parser("reddit-pulse", help="Reddit Pulse signal operations")
     engine_pulse_sub = engine_pulse.add_subparsers(dest="pulse_action", required=True)
@@ -2786,7 +2891,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="minishlab/potion-base-8M",
         help="Embedding model for embedding_v2 (model2vec, torch-free). Empty = no embeddings.",
     )
-    engine_cycle.add_argument("--review-model", default="qwen3.6-flash")
+    engine_cycle.add_argument("--review-model", default="qwen3.7-flash")
     engine_cycle.add_argument(
         "--cross-encoder",
         action="store_true",
@@ -2816,8 +2921,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     engine_cycle.add_argument(
         "--trend-review-model",
-        default="qwen3.8-max",
-        help="Qwen model for final bounded trend review.",
+        default="qwen3.7-flash",
+        help="Cost-efficient Qwen model for final bounded JSON trend review.",
     )
     engine_cycle.add_argument(
         "--publish-channel",

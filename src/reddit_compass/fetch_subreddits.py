@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import UTC, datetime
 from html import unescape
 from typing import TYPE_CHECKING, Any
 
@@ -98,13 +99,16 @@ async def fetch_subreddit_posts(
     config: MonitorConfig,
     snapshot_date: str,
     modes: list[str] | None = None,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Собирает посты из одного сабреддита: hot + top.
 
     Комментарии загружаются только для top-N постов по score (comments_for_top_n),
     что сокращает объём запросов в ~5 раз.
     """
-    if modes is None:
+    if historical_date:
+        modes = ["new", "top"]
+    elif modes is None:
         modes = ["hot", "top"]
 
     settings = config.settings
@@ -124,6 +128,8 @@ async def fetch_subreddit_posts(
             url = (
                 f"https://www.reddit.com/r/{subreddit_name}/top.json?t={time_filter}&limit={limit}"
             )
+        elif mode == "new":
+            url = f"https://www.reddit.com/r/{subreddit_name}/new.json?limit={limit}"
         elif mode == "rising":
             url = f"https://www.reddit.com/r/{subreddit_name}/rising.json?limit={limit}"
         else:
@@ -136,6 +142,8 @@ async def fetch_subreddit_posts(
             pid = post["post_id"]
             if pid in seen_ids or post.get("stickied"):
                 continue
+            if historical_date and not _post_created_on_date(post, historical_date):
+                continue
             seen_ids.add(pid)
             card = _json_to_card(post, mode, snapshot_date)
             cards.append(card)
@@ -143,7 +151,7 @@ async def fetch_subreddit_posts(
         await rate_limit_pause(stealth)
 
     # Комментарии — только для top-N по score (экономия запросов)
-    if comment_limit > 0 and comments_top_n > 0 and cards:
+    if not historical_date and comment_limit > 0 and comments_top_n > 0 and cards:
         ranked = sorted(cards, key=lambda c: c.score, reverse=True)
         for card in ranked[:comments_top_n]:
             card.top_comments = await _fetch_comments(engine, card.permalink, comment_limit)
@@ -153,10 +161,19 @@ async def fetch_subreddit_posts(
     return cards
 
 
+def _post_created_on_date(post: dict[str, Any], historical_date: str) -> bool:
+    """Keep only posts whose source timestamp belongs to the target UTC date."""
+    created = post.get("created_utc")
+    if not isinstance(created, int | float):
+        return False
+    return datetime.fromtimestamp(created, tz=UTC).date().isoformat() == historical_date
+
+
 async def fetch_all_subreddits(
     config: MonitorConfig,
     snapshot_date: str,
     modes: list[str] | None = None,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Собирает посты из всех сабреддитов (aiohttp → Playwright → RSS)."""
     stealth = config.settings.stealth
@@ -165,7 +182,14 @@ async def fetch_all_subreddits(
     all_cards: list[PostCard] = []
     try:
         for name in config.all_subreddits:
-            cards = await fetch_subreddit_posts(engine, name, config, snapshot_date, modes)
+            cards = await fetch_subreddit_posts(
+                engine,
+                name,
+                config,
+                snapshot_date,
+                modes,
+                historical_date=historical_date,
+            )
             all_cards.extend(cards)
             await rate_limit_pause(stealth)
     finally:
@@ -174,7 +198,11 @@ async def fetch_all_subreddits(
     # Если aiohttp+Playwright не дали данных — RSS fallback
     if not all_cards:
         logger.warning("JSON API недоступен — fallback на RSS")
-        return await _fetch_all_subreddits_rss(config, snapshot_date)
+        return await _fetch_all_subreddits_rss(
+            config,
+            snapshot_date,
+            historical_date=historical_date,
+        )
 
     return all_cards
 
@@ -192,6 +220,8 @@ def _strip_html(html: str) -> str:
 async def _fetch_all_subreddits_rss(
     config: MonitorConfig,
     snapshot_date: str,
+    *,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Fallback: RSS hot (без score/комментариев)."""
     all_cards: list[PostCard] = []
@@ -200,6 +230,8 @@ async def _fetch_all_subreddits_rss(
         url = f"https://www.reddit.com/r/{name}/hot/.rss?limit={limit}"
         entries = await fetch_rss_aiohttp(url, name)
         for e in entries:
+            if historical_date and not (e.created_utc or "").startswith(historical_date):
+                continue
             all_cards.append(
                 PostCard(
                     subreddit=e.subreddit,

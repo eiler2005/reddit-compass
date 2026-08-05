@@ -21,6 +21,7 @@
         </form>
         <p class="section-note">
             {{ stories.total }} stories · {% if stories.publication_id %}publication {{ stories.publication_id }} · {% endif %}story release {{ stories.story_release_id }}
+            · порядок: охват источников → объём доказательств → свежесть
         </p>
     </section>
 
@@ -36,7 +37,7 @@
                 row_meta=[
                     story.source_count ~ " кластеров источников",
                     story.item_count ~ " материалов",
-                    story.first_seen ~ " → " ~ story.last_seen
+                    "даты: " ~ story.first_seen ~ " → " ~ story.last_seen
                 ],
                 domain_ids=story.domain_ids,
                 project_scores=story.project_scores,

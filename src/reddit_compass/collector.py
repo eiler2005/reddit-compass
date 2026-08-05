@@ -10,8 +10,8 @@ import json
 import logging
 import sqlite3
 import time
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import cast
 
@@ -63,6 +63,145 @@ class CollectionResult:
     finished_at: str = ""
 
 
+def _parse_snapshot_date(snapshot_date: str) -> datetime:
+    """Validate a calendar date used as an immutable snapshot identity."""
+    try:
+        return datetime.strptime(snapshot_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise ValueError("snapshot_date must use YYYY-MM-DD") from exc
+
+
+def collection_coverage(
+    snapshots_dir: Path,
+    db_path: Path,
+    *,
+    profile: str = DEFAULT_PROFILE,
+    since: str,
+    until: str,
+    sources: list[str] | None = None,
+) -> list[dict[str, object]]:
+    """Return an honest per-day view of raw-run and snapshot-artifact coverage.
+
+    This is intentionally read-only.  A direct, reddit-only ``collect`` may have
+    created a row called ``complete`` before the other adapters arrive, therefore
+    the report also requires a healthy adapter-level row for every requested
+    source.  Artifact presence is reported separately so operators can safely
+    recover a missed finalizer without re-fetching or relabelling fresh data.
+    """
+    start = _parse_snapshot_date(since).date()
+    end = _parse_snapshot_date(until).date()
+    if end < start:
+        raise ValueError("until must be on or after since")
+
+    selected = [
+        _ALIASES.get(source.strip(), source.strip()) for source in (sources or DEFAULT_SOURCES)
+    ]
+    if len(set(selected)) != len(selected):
+        raise ValueError("sources must not contain duplicate aliases")
+
+    runs_by_date: dict[str, str] = {}
+    health_by_date: dict[str, dict[str, str]] = {}
+    if db_path.exists():
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+        try:
+            run_rows = conn.execute(
+                """SELECT snapshot_date, run_id, status
+                   FROM runs
+                   WHERE profile = ? AND snapshot_date BETWEEN ? AND ?""",
+                (profile, since, until),
+            ).fetchall()
+            for snapshot_date, run_id, status in run_rows:
+                runs_by_date[str(snapshot_date)] = f"{run_id}\t{status}"
+            health_rows = conn.execute(
+                """SELECT r.snapshot_date, sh.source_id, sh.status
+                   FROM source_health sh
+                   JOIN runs r ON r.run_id = sh.run_id
+                   WHERE r.profile = ? AND r.snapshot_date BETWEEN ? AND ?""",
+                (profile, since, until),
+            ).fetchall()
+            for snapshot_date, source_id, status in health_rows:
+                health_by_date.setdefault(str(snapshot_date), {})[str(source_id)] = str(status)
+        except sqlite3.OperationalError:
+            # A new corpus file has no intelligence schema yet.  It is simply
+            # equivalent to no finalized raw runs, not an error in a coverage check.
+            pass
+        finally:
+            conn.close()
+
+    result: list[dict[str, object]] = []
+    current = start
+    healthy_statuses = {"ok", "empty"}
+    while current <= end:
+        snapshot_date = current.isoformat()
+        run_value = runs_by_date.get(snapshot_date, "")
+        run_id, _, run_status = run_value.partition("\t")
+        source_health = health_by_date.get(snapshot_date, {})
+        artifacts = {
+            source_id: (snapshots_dir / snapshot_date / _FILE_MAP[source_id]).is_file()
+            for source_id in selected
+        }
+        source_states = {
+            source_id: source_health.get(source_id, "missing") for source_id in selected
+        }
+        raw_complete = run_status == "complete" and all(
+            state in healthy_statuses for state in source_states.values()
+        )
+        artifacts_complete = all(artifacts.values())
+        result.append(
+            {
+                "date": snapshot_date,
+                "run_id": run_id or None,
+                "run_status": run_status or "missing",
+                "raw_complete": raw_complete,
+                "source_health": source_states,
+                "artifacts": artifacts,
+                # Recovery is intentionally limited to artifacts that were observed
+                # on the date itself.  It never asks live adapters for old data.
+                "recoverable_from_snapshots": not raw_complete and artifacts_complete,
+            }
+        )
+        current += timedelta(days=1)
+    return result
+
+
+def recover_snapshot_gaps(
+    config: MonitorConfig,
+    snapshots_dir: Path,
+    db_path: Path,
+    *,
+    profile: str = DEFAULT_PROFILE,
+    since: str,
+    until: str,
+) -> tuple[list[dict[str, object]], list[CollectionResult]]:
+    """Finalize every recoverable gap from its existing dated JSONL artifacts.
+
+    No adapter or LLM is invoked.  A date without its complete artifact set stays
+    visible in the returned coverage report; treating a later live fetch as that
+    date would corrupt the corpus chronology.
+    """
+    coverage = collection_coverage(
+        snapshots_dir,
+        db_path,
+        profile=profile,
+        since=since,
+        until=until,
+    )
+    recovered: list[CollectionResult] = []
+    for day in coverage:
+        if not bool(day["recoverable_from_snapshots"]):
+            continue
+        recovered.append(
+            finalize_snapshot_collection(
+                config=config,
+                snapshots_dir=snapshots_dir,
+                db_path=db_path,
+                profile=profile,
+                snapshot_date=str(day["date"]),
+            )
+        )
+    return coverage, recovered
+
+
 def now_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
@@ -73,21 +212,30 @@ async def collect_sources(
     db_path: Path,
     sources: list[str] | None = None,
     profile: str = DEFAULT_PROFILE,
+    snapshot_date: str | None = None,
+    historical_recovery: bool = False,
 ) -> CollectionResult:
     """Collect and persist raw corpus facts without derived intelligence."""
     from .db import get_db
 
-    snapshot_date = datetime.now(UTC).strftime("%Y-%m-%d")
-    run_id = f"{snapshot_date}:{profile}"
+    today = datetime.now(UTC).date()
+    date = snapshot_date or today.isoformat()
+    _parse_snapshot_date(date)
+    if historical_recovery and date >= today.isoformat():
+        raise ValueError("historical recovery date must be before current UTC date")
+    if snapshot_date and not historical_recovery and date != today.isoformat():
+        raise ValueError("only historical recovery may collect a non-current snapshot date")
+
+    run_id = f"{date}:{profile}"
     started_at = now_iso()
-    snap_dir = snapshots_dir / snapshot_date
+    snap_dir = snapshots_dir / date
     snap_dir.mkdir(parents=True, exist_ok=True)
     conn = get_db(db_path)
     migrate(conn)
     upsert_run(
         conn,
         run_id=run_id,
-        snapshot_date=snapshot_date,
+        snapshot_date=date,
         profile=profile,
         status="running",
         started_at=started_at,
@@ -98,7 +246,21 @@ async def collect_sources(
     all_items: list[ContentItem] = []
     for requested_id in sources or DEFAULT_SOURCES:
         source_id = _ALIASES.get(requested_id, requested_id)
-        result = await run_source_adapter(source_id, config, snap_dir, snapshot_date)
+        result = await run_source_adapter(
+            source_id,
+            config,
+            snap_dir,
+            date,
+            historical_date=date if historical_recovery else None,
+        )
+        if historical_recovery:
+            result = replace(
+                result,
+                message=(
+                    f"Historical recovery for {date}; observed after the original day. "
+                    f"{result.message}"
+                ).strip(),
+            )
         source_results.append(result)
         if result.status not in {"ok", "empty"}:
             continue
@@ -121,7 +283,7 @@ async def collect_sources(
     persist_collection(
         conn,
         run_id=run_id,
-        snapshot_date=snapshot_date,
+        snapshot_date=date,
         profile=profile,
         status=status,
         started_at=started_at,
@@ -132,7 +294,7 @@ async def collect_sources(
     conn.close()
     return CollectionResult(
         run_id=run_id,
-        date=snapshot_date,
+        date=date,
         profile=profile,
         status=status,
         source_results=source_results,
@@ -163,10 +325,7 @@ def finalize_snapshot_collection(
 
     del config  # Kept in the public signature alongside ``collect_sources``.
     date = snapshot_date or datetime.now(UTC).strftime("%Y-%m-%d")
-    try:
-        datetime.strptime(date, "%Y-%m-%d")
-    except ValueError as exc:
-        raise ValueError("snapshot_date must use YYYY-MM-DD") from exc
+    _parse_snapshot_date(date)
     run_id = f"{date}:{profile}"
     started_at = now_iso()
     snap_dir = snapshots_dir / date
@@ -395,12 +554,24 @@ async def run_source_adapter(
     config: MonitorConfig,
     snap_dir: Path,
     snapshot_date: str,
+    *,
+    historical_date: str | None = None,
 ) -> SourceResult:
     """Run one read-only source adapter."""
     source_id = _ALIASES.get(source_id, source_id)
     started = time.monotonic()
     try:
-        cards = await _fetch_source_cards(source_id, config, snapshot_date)
+        cards = await _fetch_source_cards(
+            source_id,
+            config,
+            snapshot_date,
+            historical_date=historical_date,
+        )
+        message = (
+            "Historical Ladder recovery through date-filtered Google News discovery"
+            if source_id == "ladder" and historical_date
+            else ""
+        )
         if cards is None:
             return SourceResult(
                 source_id=source_id,
@@ -415,6 +586,7 @@ async def run_source_adapter(
             status="ok" if cards else "empty",
             count=len(cards),
             duration_sec=round(time.monotonic() - started, 1),
+            message=message,
         )
     except Exception as exc:
         logger.exception("Source %s failed", source_id)
@@ -431,25 +603,53 @@ async def _fetch_source_cards(
     source_id: str,
     config: MonitorConfig,
     snapshot_date: str,
+    *,
+    historical_date: str | None = None,
 ) -> list[PostCard] | None:
     if source_id == "reddit":
         from .fetch_subreddits import fetch_all_subreddits
 
-        return list(await fetch_all_subreddits(config, snapshot_date))
+        return list(
+            await fetch_all_subreddits(
+                config,
+                snapshot_date,
+                historical_date=historical_date,
+            )
+        )
     if source_id == "hackernews":
         from .sources.hackernews import fetch_hn_stories
 
-        return list(await fetch_hn_stories(snapshot_date=snapshot_date))
+        return list(
+            await fetch_hn_stories(
+                snapshot_date=snapshot_date,
+                historical_date=historical_date,
+            )
+        )
     if source_id == "rss":
         from .sources.rss import fetch_all_rss
 
-        return list(await fetch_all_rss(snapshot_date=snapshot_date))
+        return list(
+            await fetch_all_rss(
+                snapshot_date=snapshot_date,
+                historical_date=historical_date,
+            )
+        )
     if source_id == "ladder":
         from .sources.ladder import fetch_all_ladder
 
-        return list(await fetch_all_ladder(snapshot_date=snapshot_date))
+        return list(
+            await fetch_all_ladder(
+                snapshot_date=snapshot_date,
+                historical_date=historical_date,
+            )
+        )
     if source_id == "producthunt":
         from .sources.producthunt import fetch_producthunt
 
-        return list(await fetch_producthunt(snapshot_date=snapshot_date))
+        return list(
+            await fetch_producthunt(
+                snapshot_date=snapshot_date,
+                historical_date=historical_date,
+            )
+        )
     return None

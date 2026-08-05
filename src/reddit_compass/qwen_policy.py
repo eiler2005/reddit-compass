@@ -1,18 +1,13 @@
-"""Стоимостная маршрутизация Qwen-вызовов: скидки, подписка, бесплатные квоты.
+"""Стоимостная маршрутизация Qwen-вызовов через pay-as-you-go API.
 
 Провайдер не отдаёт остаток квот через API (в ответе только ``usage`` конкретного
 вызова), поэтому «сколько осталось» считается локальным леджером: каждый успешный
 вызов пишет токены в ``qwen_usage.db``, а размеры квот задаются конфигурацией.
 
-Порядок предпочтения (см. ``pick_model``):
-
-* **скидочное окно подписки** (17:00–03:00 МСК) — token-plan в это время дешевле,
-  поэтому синтез/ревью идут туда;
-* **бесплатные квоты pay-as-you-go** — 1M токенов на модель в течение 90 дней после
-  активации; массовые прогоны (извлечение, классификация, нормализация) жгут их;
-* **подписка вне окна** — только когда бесплатных квот не осталось;
-* **последний резерв** — первая модель цепочки без проверки квоты, чтобы прогон не
-  падал из-за конфигурации.
+Если владелец *явно* подтвердил бесплатный грант через
+``RC_QWEN_PAYG_FREE_TOKENS``, он расходуется первым. Без этой конфигурации сервис
+никогда не называет pay-as-you-go бесплатным и остаётся на его обычном list price.
+Token Plan не является endpoint'ом сервиса: это отдельный интерактивный продукт.
 
 Явно запрошенная модель (``--model``) всегда побеждает роутер.
 """
@@ -31,8 +26,10 @@ from .config import DEFAULT_DATA_DIR
 _OFFPEAK_START_UTC = time(14, 0)
 _OFFPEAK_END_UTC = time(0, 0)
 
-# Бесплатный грант pay-as-you-go: 1M токенов на модель, 90 дней после активации.
-DEFAULT_PAYG_FREE_TOKENS = 1_000_000
+# Международный прайс не обещает бесплатный грант. Его можно включить только явной
+# конфигурацией после проверки в Model Studio console; нельзя превращать предположение
+# в финансовое решение по умолчанию.
+DEFAULT_PAYG_FREE_TOKENS = 0
 PAYG_GRANT_DAYS = 90
 # Ждать освобождения леджера, а не падать: конкурент по записи — норма, а не сбой.
 _LEDGER_BUSY_TIMEOUT_SECONDS = 30.0
@@ -55,23 +52,21 @@ _LEDGER_BUSY_TIMEOUT_SECONDS = 30.0
 # 235B на тысяче вызовов «разбери заголовок» — ровно та инверсия, из-за которой
 # бесплатный грант выгорал за один ночной прогон.
 #
-# Цены на 1M токенов (международный регион, август 2026): qwen3.7-flash $0.03/$0.13,
-# qwen3.5-flash $0.10/$0.40, qwen3.8-max $2/$6. То есть флеш-тир дешевле max примерно
-# в шестьдесят раз на входе — на массовой стадии это и есть вся экономика.
+# Актуальные list prices Model Studio для Singapore/international (5 августа 2026),
+# за 1M input/output: qwen3.7-flash ¥0.225/¥0.974, qwen3.8-max ¥14.988/¥44.965.
+# То есть Flash дешевле Max примерно в 67× по input и 46× по output. Даже когда
+# бесплатный грант исчерпан, regular bounded JSON review экономичнее держать на Flash.
 BULK_CHAIN: tuple[tuple[str, str], ...] = (
     ("qwen3.7-flash", "payg"),
     ("qwen3.6-flash", "payg"),
     ("qwen3.5-flash", "payg"),
     ("qwen-flash", "payg"),
-    # Резерв: подписка. Единственный флеш, который на ней есть.
-    ("qwen3.6-flash", "token-plan"),
 )
-# synth — сложный синтез и трендовое ревью: мало вызовов, большие промпты, качество
-# решает. `qwen3.8-max` вышел из превью 3 августа 2026 и стоит $2/$6 против $2.50/$7.50
-# у прежнего флагмана `qwen3.7-max` — дешевле и сильнее, поэтому он первый везде.
-# В скидочное окно идёт подписка, вне окна — бесплатный грант payg.
+# synth — только действительно свободный сложный синтез: мало вызовов, большие промпты,
+# где качество решает. Обычные pair/trend review теперь не относятся к этому классу.
+# Обычная цена Max применяется только к единичному synthesis; массовые review сюда не
+# относятся. Внешние скидки проверяются в консоли, но не меняют service routing.
 SYNTH_CHAIN: tuple[tuple[str, str], ...] = (
-    ("qwen3.8-max", "token-plan"),
     ("qwen3.8-max", "payg"),
     ("qwen3.7-max", "payg"),
     ("qwen3.5-plus", "payg"),
@@ -253,65 +248,28 @@ def _room_left(
     return used < payg_free_quota()
 
 
-def _free_room_left(
-    candidates: list[tuple[str, str]],
-    totals: dict[tuple[str, str], int],
-    *,
-    grant_expired: bool,
-) -> bool:
-    """Осталось ли хоть где-то место в бесплатном гранте."""
-    return any(
-        _room_left(model, endpoint, totals, grant_expired=grant_expired)
-        for model, endpoint in candidates
-    )
-
-
 def pick_model(task: str, now: datetime | None = None) -> tuple[str, str, str]:
-    """Выбирает (модель, эндпоинт, причина) для задачи ``bulk`` или ``synth``.
+    """Выбирает (модель, endpoint, причина) для задачи ``bulk`` или ``synth``.
 
-    Бесплатный грант идёт впереди подписки **всегда**, включая скидочное окно. Раньше
-    окно ставило подписку первой, и это было неверно дважды. Во-первых, ноль дешевле
-    любой скидки, какой бы она ни была. Во-вторых, грант — ресурс скоропортящийся: он
-    сгорает через 90 дней и не возобновляется, тогда как подписка продлевается каждый
-    месяц, — значит тратить надо сначала то, что иначе пропадёт.
-
-    Окно решает только одно: что брать, когда грант кончился или истёк. Тогда впереди
-    оказывается подписка, потому что в окне она дешевле себя же вне окна.
-
-    Оговорка, важная для будущих правок: *какой* именно канал удешевляет окно
-    14:00–00:00 UTC, официально не подтверждён (см. `docs/QWEN_ROUTING.md`). Порядок
-    выше от этого не зависит — он опирается только на бесплатность гранта и на то, что
-    грант перегорает, а подписка нет.
+    Сначала выбирается любая явно настроенная бесплатная квота. Когда её нет или она
+    исчерпана, остаёмся на первой (самой дешёвой/подходящей) модели pay-as-you-go, а
+    не уходим на Token Plan с другой моделью и другой моделью биллинга.
     """
     # Расход считаем с начала гранта: чужой, уже истёкший грант не должен закрывать
     # модель в текущем. Дата не задана — меряем по всей истории (см. `payg_grant_start`).
     totals = usage_totals(since=payg_grant_start())
     grant_expired = payg_grant_expired(now)
-    offpeak = in_offpeak(now)
     chain = SYNTH_CHAIN if task == "synth" else BULK_CHAIN
-
-    def ordered() -> list[tuple[str, str]]:
-        payg = [candidate for candidate in chain if candidate[1] == "payg"]
-        subscription = [candidate for candidate in chain if candidate[1] == "token-plan"]
-        if _free_room_left(payg, totals, grant_expired=grant_expired) or not offpeak:
-            return payg + subscription
-        return subscription + payg
-
-    for model, endpoint in ordered():
+    for model, endpoint in chain:
         if not _has_key(endpoint):
             continue
         if _room_left(model, endpoint, totals, grant_expired=grant_expired):
-            if endpoint == "payg":
-                why = "бесплатная квота pay-as-you-go"
-            elif offpeak:
-                why = "скидочное окно подписки"
-            else:
-                why = "подписка token-plan"
-            return model, endpoint, why
-    # Резерв: первая доступная по ключам модель цепочки без проверки квоты.
+            return model, endpoint, "подтверждённая бесплатная квота pay-as-you-go"
+    # Нет подтверждённого бесплатного места: держим модель класса задачи на её обычном
+    # API-тарифе. Это предсказуемее и дешевле, чем неявно подменять её Token Plan.
     for model, endpoint in chain:
         if _has_key(endpoint):
-            return model, endpoint, "резерв: квоты исчерпаны или неизвестны"
+            return model, endpoint, "pay-as-you-go list price (free grant unavailable)"
     raise ValueError("Нет ни одного ключа Qwen для маршрутизации")
 
 
@@ -323,28 +281,16 @@ def pick_endpoint(model: str, now: datetime | None = None) -> tuple[str, str]:
     свободен, и одну и ту же модель можно взять там, где сейчас дешевле. Раньше этот
     выбор не делался вовсе, и ревью всегда шло по эвристике `_get_api_config`.
 
-    Порядок тот же, что у ``pick_model``: сначала бесплатный грант (он перегорает через
-    90 дней), подписка — когда гранта не осталось; в скидочное окно она при этом
-    дешевле себя же вне окна.
+    Для сервиса endpoint всегда pay-as-you-go. Сначала отмечаем явно настроенный
+    бесплатный грант; иначе возвращаем тот же endpoint с честной причиной list price.
 
     Модели нет ни на одном настроенном ключе — возвращаем пустой эндпоинт: пусть
     решает `_get_api_config`, а провайдер скажет о проблеме своим кодом ответа.
     """
     totals = usage_totals(since=payg_grant_start())
     grant_expired = payg_grant_expired(now)
-    offpeak = in_offpeak(now)
-    free_left = _room_left(model, "payg", totals, grant_expired=grant_expired)
-    order = ["payg", "token-plan"] if (free_left or not offpeak) else ["token-plan", "payg"]
-    for endpoint in order:
-        if not _has_key(endpoint):
-            continue
-        if _room_left(model, endpoint, totals, grant_expired=grant_expired):
-            if endpoint == "token-plan":
-                why = "скидочное окно подписки" if offpeak else "подписка token-plan"
-            else:
-                why = "бесплатная квота pay-as-you-go"
-            return endpoint, why
-    for endpoint in order:
-        if _has_key(endpoint):
-            return endpoint, "резерв: квоты исчерпаны или неизвестны"
+    if _has_key("payg"):
+        if _room_left(model, "payg", totals, grant_expired=grant_expired):
+            return "payg", "подтверждённая бесплатная квота pay-as-you-go"
+        return "payg", "pay-as-you-go list price (free grant unavailable)"
     return "", "ключей Qwen нет"

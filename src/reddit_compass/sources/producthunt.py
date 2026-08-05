@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import re
 import xml.etree.ElementTree as ET
+from datetime import UTC, datetime
 
 from ..models import PostCard
 
@@ -26,6 +27,7 @@ def _strip_html(html: str) -> str:
 async def fetch_producthunt(
     snapshot_date: str,
     limit: int = 30,
+    historical_date: str | None = None,
 ) -> list[PostCard]:
     """Загружает топ продуктов из ProductHunt RSS-фида."""
     import aiohttp
@@ -63,6 +65,8 @@ async def fetch_producthunt(
 
             pub_el = entry.find("atom:published", ns)
             pub_date = pub_el.text.strip() if pub_el is not None and pub_el.text else None
+            if historical_date and not _published_on_date(pub_date, historical_date):
+                continue
 
             # Извлекаем ID из Atom id (tag:www.producthunt.com,2005:Post/1202630)
             id_el = entry.find("atom:id", ns)
@@ -102,3 +106,15 @@ async def fetch_producthunt(
 
     logger.info("ProductHunt: %d продуктов", len(cards))
     return cards
+
+
+def _published_on_date(value: str | None, historical_date: str) -> bool:
+    if not value:
+        return False
+    try:
+        published = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if published.tzinfo is None:
+        published = published.replace(tzinfo=UTC)
+    return published.astimezone(UTC).date().isoformat() == historical_date

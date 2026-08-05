@@ -561,6 +561,68 @@ def test_today_hides_unreviewed_or_unusable_trend_candidates() -> None:
     assert cards[0]["url"] == "/trends/confirmed_good?channel=broad"
 
 
+def test_today_changes_sort_by_strength_then_last_evidence_date() -> None:
+    radar = SimpleNamespace(
+        shelves={
+            "new": [
+                {
+                    "trend_id": "weaker_newer",
+                    "title": "Более слабый, но новый",
+                    "review_status": "confirmed",
+                    "confidence": 0.80,
+                    "source_count": 2,
+                    "story_count": 2,
+                    "first_seen": "2026-08-04",
+                    "last_seen": "2026-08-05",
+                },
+                {
+                    "trend_id": "tie_older",
+                    "title": "Равный, старое доказательство",
+                    "review_status": "confirmed",
+                    "confidence": 0.90,
+                    "source_count": 3,
+                    "story_count": 4,
+                    "first_seen": "2026-08-01",
+                    "last_seen": "2026-08-03",
+                },
+            ],
+            "stable": [
+                {
+                    "trend_id": "strong_older",
+                    "title": "Сильный и подтверждённый",
+                    "review_status": "confirmed",
+                    "confidence": 0.98,
+                    "source_count": 5,
+                    "story_count": 6,
+                    "first_seen": "2026-07-29",
+                    "last_seen": "2026-08-02",
+                },
+                {
+                    "trend_id": "tie_newer",
+                    "title": "Равный, свежее доказательство",
+                    "review_status": "confirmed",
+                    "confidence": 0.90,
+                    "source_count": 3,
+                    "story_count": 4,
+                    "first_seen": "2026-08-01",
+                    "last_seen": "2026-08-05",
+                },
+            ],
+        }
+    )
+
+    cards = _today_change_candidates(radar, "channel=broad")
+
+    assert [card["title"] for card in cards] == [
+        "Сильный и подтверждённый",
+        "Равный, свежее доказательство",
+        "Равный, старое доказательство",
+        "Более слабый, но новый",
+    ]
+    assert cards[1]["first_seen"] == "2026-08-01"
+    assert cards[1]["last_seen"] == "2026-08-05"
+
+
 def test_today_reading_list_prefers_article_and_dedupes_story(
     engine_client: TestClient,
 ) -> None:
@@ -842,7 +904,7 @@ def test_published_news_stories_trends_and_project_lens_are_separate(
     assert stories.status_code == 200
     assert trends.status_code == 200
     assert lens.status_code == 200
-    assert news.json()["items"][0]["item_id"] == "rss:1"
+    assert news.json()["items"][0]["item_id"] == "zreddit:1"
     assert news.json()["items"][0]["story_id"] == "story_1"
     assert stories.json()["items"][0]["story_id"] == "story_1"
     assert stories.json()["items"][0]["evidence_items"][0]["provider"] == "reuters"
@@ -850,6 +912,345 @@ def test_published_news_stories_trends_and_project_lens_are_separate(
     assert trends.json()["items"][0]["stories"][0]["story_id"] == "story_1"
     assert lens.json()["trends"][0]["project_scores"]["rbc"] == 92
     assert lens.json()["stories"][0]["project_scores"]["rbc"] == 88
+
+
+def test_published_lists_rank_strength_before_freshness_and_expose_dates(
+    engine_client: TestClient,
+) -> None:
+    engine_path = Path(os.environ["RC_ENGINE_DB_PATH"])
+    conn = engine_db(engine_path)
+    try:
+        created_at = "2026-08-05T10:00:00Z"
+        conn.execute(
+            """
+            INSERT INTO data_releases (
+                release_id, profile, dates_json, run_ids_json, source_db_path,
+                source_db_checksum, input_checksum, input_status, source_coverage_json,
+                item_count, observation_count, status, created_at, finalized_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "data_sort",
+                "broad",
+                '["2026-08-02", "2026-08-05"]',
+                '["run_sort"]',
+                str(engine_path),
+                "source-checksum-sort",
+                "input-checksum-sort",
+                "complete",
+                '{"rss:world": 2, "reddit:all": 1}',
+                3,
+                3,
+                "building",
+                created_at,
+                "",
+            ),
+        )
+        conn.executemany(
+            """
+            INSERT INTO release_items (
+                release_id, item_id, provider, source_cluster, external_id,
+                canonical_url, title, snapshot_date, published_at, source_section,
+                domain_ids, raw_engagement, row_checksum
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "data_sort",
+                    "news:strong-old",
+                    "reuters",
+                    "mainstream",
+                    "strong-old",
+                    "https://example.com/strong-old",
+                    "Сильная, но более ранняя новость",
+                    "2026-08-02",
+                    "2026-08-02T09:00:00Z",
+                    "world",
+                    '["world_geopolitics"]',
+                    '{"score": 3, "comments": 1}',
+                    "strong-old-checksum",
+                ),
+                (
+                    "data_sort",
+                    "news:weak-new",
+                    "reuters",
+                    "mainstream",
+                    "weak-new",
+                    "https://example.com/weak-new",
+                    "Слабая, но свежая новость",
+                    "2026-08-05",
+                    "2026-08-05T09:00:00Z",
+                    "world",
+                    '["world_geopolitics"]',
+                    '{"score": 999, "comments": 999}',
+                    "weak-new-checksum",
+                ),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO release_items (
+                release_id, item_id, provider, source_cluster, external_id,
+                canonical_url, title, snapshot_date, published_at, source_section,
+                domain_ids, raw_engagement, row_checksum
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "data_sort",
+                "pulse:sort",
+                "reddit",
+                "voices",
+                "pulse-sort",
+                "https://reddit.example/pulse-sort",
+                "Reddit signal with an explicit date",
+                "2026-08-05",
+                "2026-08-05T11:00:00Z",
+                "news",
+                '["world_geopolitics"]',
+                '{"score": 100, "comments": 40}',
+                "pulse-sort-checksum",
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO facet_releases (
+                facet_release_id, data_release_id, method, params_hash,
+                status, metrics_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("facet_sort", "data_sort", "test", "params", "evaluated", "{}", created_at),
+        )
+        conn.execute(
+            """
+            INSERT INTO story_releases (
+                story_release_id, facet_release_id, method, params_hash,
+                status, metrics_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            ("story_sort", "facet_sort", "hybrid_test", "params", "published", "{}", created_at),
+        )
+        conn.executemany(
+            """
+            INSERT INTO engine_stories (
+                story_release_id, story_id, canonical_key, title, domain_ids,
+                project_scores, first_seen, last_seen, confidence, source_count, item_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "story_sort",
+                    "story_strong_old",
+                    "strong-old",
+                    "Сильный, но более ранний сюжет",
+                    '["world_geopolitics"]',
+                    '{"rbc": 80}',
+                    "2026-07-30",
+                    "2026-08-02",
+                    "high",
+                    5,
+                    5,
+                ),
+                (
+                    "story_sort",
+                    "story_weak_new",
+                    "weak-new",
+                    "Слабый, но свежий сюжет",
+                    '["world_geopolitics"]',
+                    '{"rbc": 70}',
+                    "2026-08-04",
+                    "2026-08-05",
+                    "high",
+                    4,
+                    100,
+                ),
+            ],
+        )
+        conn.executemany(
+            """
+            INSERT INTO engine_story_items (
+                story_release_id, story_id, item_id, membership_score, membership_reason
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                ("story_sort", "story_strong_old", "news:strong-old", 1.0, "exact_url"),
+                ("story_sort", "story_weak_new", "news:weak-new", 1.0, "exact_url"),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO trend_releases (
+                trend_release_id, story_release_id, window, method, params_hash,
+                status, history_status, metrics_json, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "trend_sort",
+                "story_sort",
+                "7d",
+                "story_graph_test",
+                "params",
+                "published",
+                "ready",
+                "{}",
+                created_at,
+            ),
+        )
+        conn.executemany(
+            """
+            INSERT INTO engine_trends (
+                trend_release_id, trend_id, name_ru, pattern, domain_ids,
+                confidence, lifecycle, source_scope, first_seen, last_seen,
+                story_count, source_count, project_scores, evidence_story_ids, review_status
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "trend_sort",
+                    "trend_strong_old",
+                    "Сильный, но ранний тренд",
+                    "Проверяемый паттерн",
+                    '["world_geopolitics"]',
+                    0.99,
+                    "stable",
+                    "cross_source",
+                    "2026-07-30",
+                    "2026-08-02",
+                    6,
+                    5,
+                    '{"rbc": 90}',
+                    "[]",
+                    "confirmed",
+                ),
+                (
+                    "trend_sort",
+                    "trend_tie_new",
+                    "Равный, но свежий тренд",
+                    "Проверяемый паттерн",
+                    '["world_geopolitics"]',
+                    0.91,
+                    "stable",
+                    "cross_source",
+                    "2026-08-01",
+                    "2026-08-05",
+                    3,
+                    4,
+                    '{"rbc": 85}',
+                    "[]",
+                    "confirmed",
+                ),
+                (
+                    "trend_sort",
+                    "trend_tie_old",
+                    "Равный, но старый тренд",
+                    "Проверяемый паттерн",
+                    '["world_geopolitics"]',
+                    0.91,
+                    "stable",
+                    "cross_source",
+                    "2026-08-01",
+                    "2026-08-03",
+                    3,
+                    4,
+                    '{"rbc": 85}',
+                    "[]",
+                    "confirmed",
+                ),
+            ],
+        )
+        conn.execute(
+            """
+            INSERT INTO signal_releases (
+                signal_release_id, data_release_id, facet_release_id, story_release_id,
+                date, method, params_hash, metrics_json, git_sha, status,
+                signal_count, created_at, finalized_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "signals_sort",
+                "data_sort",
+                "facet_sort",
+                "story_sort",
+                "2026-08-05",
+                "reddit_pulse_v2",
+                "params",
+                "{}",
+                "test-sha",
+                "finalized",
+                1,
+                created_at,
+                created_at,
+            ),
+        )
+        conn.execute(
+            """
+            INSERT INTO community_signals (
+                signal_release_id, signal_id, item_id, subreddit, signal_type,
+                title, discussion_url, pulse_score, domain_ids_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "signals_sort",
+                "pulse_sort",
+                "pulse:sort",
+                "news",
+                "policy_politics",
+                "Reddit signal with an explicit date",
+                "https://reddit.example/pulse-sort",
+                77.0,
+                '["world_geopolitics"]',
+            ),
+        )
+        conn.execute(
+            "UPDATE data_releases SET status = 'finalized', finalized_at = ? "
+            "WHERE release_id = 'data_sort'",
+            (created_at,),
+        )
+        conn.execute(
+            """
+            INSERT INTO radar_publications (
+                publication_id, channel, data_release_id, story_release_id,
+                trend_release_id, input_status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "publication_sort",
+                "broad",
+                "data_sort",
+                "story_sort",
+                "trend_sort",
+                "complete",
+                created_at,
+            ),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    publication = "channel=broad&publication_id=publication_sort"
+    news = engine_client.get(f"/api/v2/news?{publication}&page_size=10").json()["items"]
+    stories = engine_client.get(f"/api/v2/engine/stories?{publication}&page_size=10").json()[
+        "items"
+    ]
+    trends = engine_client.get(f"/api/v2/engine/trends?{publication}&page_size=10").json()["items"]
+    pulse = engine_client.get("/api/v2/reddit-pulse?data_release=data_sort&date=2026-08-05").json()
+    news_page = engine_client.get(f"/news?{publication}")
+    trends_page = engine_client.get(f"/trends?{publication}")
+
+    assert news[0]["item_id"] == "news:strong-old"
+    assert news[0]["published_at"] == "2026-08-02T09:00:00Z"
+    assert news[0]["story_source_count"] == 5
+    assert [story["story_id"] for story in stories[:2]] == [
+        "story_strong_old",
+        "story_weak_new",
+    ]
+    assert [trend["trend_id"] for trend in trends[:2]] == [
+        "trend_strong_old",
+        "trend_tie_new",
+    ]
+    assert trends[1]["last_seen"] == "2026-08-05"
+    assert pulse["items"][0]["published_at"] == "2026-08-05T11:00:00Z"
+    assert "2026-08-02T09:00:00Z" in news_page.text
+    assert "даты: 2026-08-01 → 2026-08-05" in trends_page.text
 
 
 def test_published_story_and_trend_detail_endpoints(engine_client: TestClient) -> None:

@@ -30,6 +30,7 @@
         </form>
         <p class="section-note">
             {{ news.total }} материалов · {% if news.publication_id %}publication {{ news.publication_id }} · {% endif %}data {{ news.data_release_id }}
+            · порядок: сила доказательств → engagement → свежесть
         </p>
     </section>
 
@@ -45,7 +46,12 @@
                 row_title=item.title,
                 row_summary=item.summary_ru or item.excerpt,
                 row_badges=[("direction-badge", item.provider)],
-                row_meta=[item.source_cluster, item.source_section, item.snapshot_date],
+                row_meta=[
+                    item.story_source_count ~ " кластеров в сюжете" if item.story_id else "один источник",
+                    "▲ " ~ item.raw_score if item.raw_score else "",
+                    "💬 " ~ item.raw_comments if item.raw_comments else "",
+                    item.published_at or item.observed_at or item.snapshot_date
+                ],
                 domain_ids=item.domain_ids,
                 row_pains=item.pain_points,
                 row_link_url=("/stories/" ~ item.story_id ~ "?" ~ analysis_query) if item.story_id else "",

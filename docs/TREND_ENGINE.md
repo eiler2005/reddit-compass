@@ -118,7 +118,8 @@ Cluster construction is constrained agglomeration:
 - numbers, people and geography cannot have hard conflicts;
 - a transitive bridge cannot merge two groups if members fail the medoid threshold;
 - large same-provider groups without shared event URLs are blocked to avoid single-provider
-  semantic overmerge;
+  semantic overmerge; MinHash/SimHash fingerprints and exact-title matches are provenance only
+  across independent providers (within one provider they are a retrieval hint, not a merge proof);
 - story IDs are reconciled with the previous accepted attempt by item overlap;
 - merge/split redirects retain provenance.
 
