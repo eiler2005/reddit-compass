@@ -209,13 +209,19 @@ class NewsItemOut(BaseModel):
 
 class PaginatedNews(BaseModel):
     items: list[NewsItemOut]
+    # ``total`` is the number of entries in the selected view.  In the
+    # default story view it is intentionally smaller than ``item_total``:
+    # several raw materials may be evidence for the same Story.
     total: int
+    item_total: int = 0
     page: int
     page_size: int
     publication_id: str
     data_release_id: str
     story_release_id: str
     trend_release_id: str
+    sort: str = "strength"
+    view: str = "stories"
     preview: bool = False
 
 
@@ -256,6 +262,7 @@ class PaginatedPublishedStories(BaseModel):
     publication_id: str
     data_release_id: str
     story_release_id: str
+    sort: str = "strength"
     preview: bool = False
 
 
@@ -310,6 +317,7 @@ class PaginatedTrends(BaseModel):
     story_release_id: str
     trend_release_id: str
     history_status: str
+    sort: str = "strength"
     preview: bool = False
 
 
@@ -603,6 +611,164 @@ def _filter_news_rows(
     return filtered
 
 
+_NEWS_SORTS = frozenset({"strength", "fresh", "engagement", "oldest"})
+_STORY_SORTS = frozenset({"strength", "fresh", "volume", "oldest"})
+_TREND_SORTS = frozenset({"strength", "fresh", "coverage", "oldest"})
+
+
+def _safe_sort(value: str, allowed: frozenset[str], *, default: str = "strength") -> str:
+    """Return a supported sort token without exposing a free-form SQL order."""
+    return value if value in allowed else default
+
+
+def _news_date(row: sqlite3.Row) -> str:
+    return str(row["published_at"] or row["observed_at"] or row["snapshot_date"] or "")
+
+
+def _news_strength(row: sqlite3.Row) -> tuple[int, int, int, int, str, str]:
+    raw = _json_int_dict(_row_value(row, "raw_engagement", ""))
+    return (
+        int(_row_value(row, "story_source_count", 0) or 0),
+        int(_row_value(row, "story_item_count", 0) or 0),
+        raw.get("score", raw.get("points", 0)),
+        raw.get("comments", raw.get("comment_count", 0)),
+        _news_date(row),
+        str(row["item_id"]),
+    )
+
+
+def _sort_news_rows(rows: list[sqlite3.Row], *, sort: str) -> list[sqlite3.Row]:
+    """Sort a read-only News projection before selecting Story representatives."""
+    selected_sort = _safe_sort(sort, _NEWS_SORTS)
+    if selected_sort == "oldest":
+        return sorted(rows, key=lambda row: (_news_date(row), str(row["item_id"])))
+    if selected_sort == "fresh":
+        return sorted(
+            rows,
+            key=lambda row: (_news_date(row), _news_strength(row), str(row["item_id"])),
+            reverse=True,
+        )
+    if selected_sort == "engagement":
+
+        def engagement(row: sqlite3.Row) -> tuple[int, int, int, int, str, str]:
+            raw = _json_int_dict(_row_value(row, "raw_engagement", ""))
+            return (
+                raw.get("score", raw.get("points", 0)),
+                raw.get("comments", raw.get("comment_count", 0)),
+                int(_row_value(row, "story_source_count", 0) or 0),
+                int(_row_value(row, "story_item_count", 0) or 0),
+                _news_date(row),
+                str(row["item_id"]),
+            )
+
+        return sorted(rows, key=engagement, reverse=True)
+    return sorted(rows, key=_news_strength, reverse=True)
+
+
+def _collapse_news_stories(rows: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    """Keep the first (already ranked) material for every linked Story.
+
+    News is still based on the immutable raw release.  This only changes the
+    reader-facing projection: unlinked material remains visible and the API
+    can expose every raw item with ``view=items``.
+    """
+    collapsed: list[sqlite3.Row] = []
+    seen_stories: set[str] = set()
+    for row in rows:
+        story_id = str(_row_value(row, "story_id", ""))
+        if story_id and story_id in seen_stories:
+            continue
+        if story_id:
+            seen_stories.add(story_id)
+        collapsed.append(row)
+    return collapsed
+
+
+def _sort_story_rows(rows: list[sqlite3.Row], *, sort: str) -> list[sqlite3.Row]:
+    selected_sort = _safe_sort(sort, _STORY_SORTS)
+    if selected_sort == "oldest":
+        return sorted(
+            rows,
+            key=lambda row: (str(row["first_seen"] or ""), str(row["story_id"])),
+        )
+    if selected_sort == "fresh":
+        return sorted(
+            rows,
+            key=lambda row: (
+                str(row["last_seen"] or ""),
+                int(row["source_count"] or 0),
+                int(row["item_count"] or 0),
+                str(row["story_id"]),
+            ),
+            reverse=True,
+        )
+    if selected_sort == "volume":
+        return sorted(
+            rows,
+            key=lambda row: (
+                int(row["item_count"] or 0),
+                int(row["source_count"] or 0),
+                str(row["last_seen"] or ""),
+                str(row["story_id"]),
+            ),
+            reverse=True,
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            int(row["source_count"] or 0),
+            int(row["item_count"] or 0),
+            str(row["last_seen"] or ""),
+            str(row["story_id"]),
+        ),
+        reverse=True,
+    )
+
+
+def _sort_trend_rows(rows: list[sqlite3.Row], *, sort: str) -> list[sqlite3.Row]:
+    selected_sort = _safe_sort(sort, _TREND_SORTS)
+    if selected_sort == "oldest":
+        return sorted(
+            rows,
+            key=lambda row: (str(row["first_seen"] or ""), str(row["trend_id"])),
+        )
+    if selected_sort == "fresh":
+        return sorted(
+            rows,
+            key=lambda row: (
+                str(row["last_seen"] or ""),
+                float(row["confidence"] or 0.0),
+                int(row["source_count"] or 0),
+                int(row["story_count"] or 0),
+                str(row["trend_id"]),
+            ),
+            reverse=True,
+        )
+    if selected_sort == "coverage":
+        return sorted(
+            rows,
+            key=lambda row: (
+                int(row["source_count"] or 0),
+                int(row["story_count"] or 0),
+                float(row["confidence"] or 0.0),
+                str(row["last_seen"] or ""),
+                str(row["trend_id"]),
+            ),
+            reverse=True,
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            float(row["confidence"] or 0.0),
+            int(row["source_count"] or 0),
+            int(row["story_count"] or 0),
+            str(row["last_seen"] or ""),
+            str(row["trend_id"]),
+        ),
+        reverse=True,
+    )
+
+
 def _engine_news(
     conn: sqlite3.Connection,
     *,
@@ -613,6 +779,8 @@ def _engine_news(
     provider: str | None = None,
     source_cluster: str | None = None,
     q: str | None = None,
+    sort: str = "strength",
+    view: str = "stories",
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedNews:
@@ -635,33 +803,29 @@ def _engine_news(
         source_cluster=source_cluster,
         q=q,
     )
-
-    # News остаётся сырой лентой, но сырость не означает хронологический шум:
-    # сначала показываем самый сильный подтверждённый сюжет и реакцию на материал,
-    # затем более свежую запись.  Один устойчивый порядок действует и в API, и в UI.
-    def news_strength(row: sqlite3.Row) -> tuple[int, int, int, int, str, str]:
-        raw = _json_int_dict(_row_value(row, "raw_engagement", ""))
-        return (
-            int(_row_value(row, "story_source_count", 0) or 0),
-            int(_row_value(row, "story_item_count", 0) or 0),
-            raw.get("score", raw.get("points", 0)),
-            raw.get("comments", raw.get("comment_count", 0)),
-            str(row["published_at"] or row["observed_at"] or row["snapshot_date"] or ""),
-            str(row["item_id"]),
-        )
-
-    filtered.sort(key=news_strength, reverse=True)
+    selected_sort = _safe_sort(sort, _NEWS_SORTS)
+    selected_view = view if view in {"stories", "items"} else "stories"
+    item_total = len(filtered)
+    ordered = _sort_news_rows(filtered, sort=selected_sort)
+    # Default to one representative piece of evidence per already-linked
+    # Story. This removes the visible copy/paste effect without mutating the
+    # DataRelease or hiding unlinked incoming evidence.
+    if selected_view == "stories":
+        ordered = _collapse_news_stories(ordered)
     start = (page - 1) * page_size
-    page_rows = filtered[start : start + page_size]
+    page_rows = ordered[start : start + page_size]
     return PaginatedNews(
         items=[_news_item_out(row) for row in page_rows],
-        total=len(filtered),
+        total=len(ordered),
+        item_total=item_total,
         page=page,
         page_size=page_size,
         publication_id=publication.publication_id,
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
+        sort=selected_sort,
+        view=selected_view,
         preview=preview,
     )
 
@@ -787,6 +951,7 @@ def _engine_stories(
     q: str | None = None,
     project_id: str | None = None,
     include_items: bool = True,
+    sort: str = "strength",
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedPublishedStories:
@@ -819,7 +984,10 @@ def _engine_stories(
             if q.lower() not in haystack:
                 continue
         filtered.append(row)
-    if project_id:
+    selected_sort = _safe_sort(sort, _STORY_SORTS)
+    # A project lens has an explicit relevance contract. Keep that primary
+    # default, while every user-selected sort remains authoritative.
+    if project_id and selected_sort == "strength":
         filtered.sort(
             key=lambda row: (
                 _json_int_dict(row["project_scores"]).get(project_id, 0),
@@ -830,6 +998,8 @@ def _engine_stories(
             ),
             reverse=True,
         )
+    else:
+        filtered = _sort_story_rows(filtered, sort=selected_sort)
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
     clusters_by_story = _story_source_clusters(
@@ -866,6 +1036,7 @@ def _engine_stories(
         publication_id=publication.publication_id,
         data_release_id=data_release.release_id,
         story_release_id=story_release.story_release_id,
+        sort=selected_sort,
         preview=preview,
     )
 
@@ -1020,6 +1191,7 @@ def _engine_trends(
     project_id: str | None = None,
     q: str | None = None,
     include_stories: bool = True,
+    sort: str = "strength",
     page: int = 1,
     page_size: int = 50,
 ) -> PaginatedTrends:
@@ -1065,7 +1237,10 @@ def _engine_trends(
             if q.lower() not in haystack:
                 continue
         filtered.append(row)
-    if project_id:
+    selected_sort = _safe_sort(sort, _TREND_SORTS)
+    # Project relevance is the default ordering only inside a Project Lens;
+    # explicit user choices such as "fresh" must still take effect.
+    if project_id and selected_sort == "strength":
         filtered.sort(
             key=lambda row: (
                 _json_int_dict(row["project_scores"]).get(project_id, 0),
@@ -1077,6 +1252,10 @@ def _engine_trends(
             ),
             reverse=True,
         )
+    else:
+        filtered = _sort_trend_rows(filtered, sort=selected_sort)
+    for children in children_by_parent.values():
+        children[:] = _sort_trend_rows(children, sort=selected_sort)
     start = (page - 1) * page_size
     page_rows = filtered[start : start + page_size]
     clusters_by_trend = _trend_source_clusters(
@@ -1118,6 +1297,7 @@ def _engine_trends(
         story_release_id=story_release.story_release_id,
         trend_release_id=trend_release.trend_release_id,
         history_status=trend_release.history_status,
+        sort=selected_sort,
         preview=preview,
     )
 
@@ -1853,13 +2033,15 @@ def list_published_news(
     provider: str | None = None,
     source_cluster: str | None = None,
     q: str | None = None,
+    sort: str = "strength",
+    view: str = "stories",
     channel: str = "broad",
     publication_id: str | None = None,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=10, le=100),
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
 ) -> PaginatedNews:
-    """Raw published corpus items: news/inbox layer, not stories or trends."""
+    """Published News projection; ``view=items`` exposes every raw material."""
     return _engine_news(
         _require_engine(engine_conn),
         channel=channel,
@@ -1869,6 +2051,8 @@ def list_published_news(
         provider=provider,
         source_cluster=source_cluster,
         q=q,
+        sort=sort,
+        view=view,
         page=page,
         page_size=page_size,
     )
@@ -1882,6 +2066,7 @@ def list_published_engine_stories(
     channel: str = "broad",
     publication_id: str | None = None,
     include_items: bool = True,
+    sort: str = "strength",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=10, le=100),
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
@@ -1895,6 +2080,7 @@ def list_published_engine_stories(
         q=q,
         project_id=project_id,
         include_items=include_items,
+        sort=sort,
         page=page,
         page_size=page_size,
     )
@@ -1925,6 +2111,7 @@ def list_published_engine_trends(
     channel: str = "broad",
     publication_id: str | None = None,
     include_stories: bool = True,
+    sort: str = "strength",
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=10, le=100),
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
@@ -1939,6 +2126,7 @@ def list_published_engine_trends(
         review_status=review_status,
         project_id=project_id,
         include_stories=include_stories,
+        sort=sort,
         page=page,
         page_size=page_size,
     )

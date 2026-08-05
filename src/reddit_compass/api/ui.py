@@ -296,6 +296,7 @@ templates.env.globals["signal_type_label"] = signal_type_label
 _NEW_REDDIT_PER_TYPE = 3
 _NEW_REDDIT_PER_SUBREDDIT = 2
 _NEW_REDDIT_POLITICS_CAP = 3
+_TODAY_SORTS = frozenset({"strength", "fresh"})
 
 _READING_CLUSTER_WEIGHTS = {
     "business": 8.0,
@@ -378,6 +379,11 @@ def _normalized_reading_key(title: str, primary_url: str, secondary_url: str) ->
         parsed = urlsplit(url)
         return f"{parsed.netloc.lower()}{parsed.path.rstrip('/').lower()}"
     return " ".join(title.lower().split())[:120]
+
+
+def _safe_today_sort(value: str) -> str:
+    """Normalise the small reader-facing Today sort contract."""
+    return value if value in _TODAY_SORTS else "strength"
 
 
 def _numeric_dict_value(raw: dict[str, Any], key: str) -> float:
@@ -469,7 +475,11 @@ def _item_reading_score(
 
 
 def _build_today_reading_list(
-    conn: sqlite3.Connection, radar: dict[str, object], *, limit: int = 20
+    conn: sqlite3.Connection,
+    radar: dict[str, object],
+    *,
+    limit: int = 20,
+    sort: str = "strength",
 ) -> list[dict[str, object]]:
     data_release_id = str(radar.get("data_release_id") or "")
     story_release_id = str(radar.get("story_release_id") or "")
@@ -598,18 +608,32 @@ def _build_today_reading_list(
         score = float(score_raw) if isinstance(score_raw, int | float | str) else 0.0
         return score
 
-    candidates.sort(
-        key=lambda item: (str(item.get("published_at", "")), str(item.get("title", ""))),
-        reverse=True,
-    )
-    candidates.sort(key=score_key, reverse=True)
+    selected_sort = _safe_today_sort(sort)
+    if selected_sort == "fresh":
+        candidates.sort(
+            key=lambda item: (
+                str(item.get("published_at", "")),
+                score_key(item),
+                str(item.get("title", "")),
+            ),
+            reverse=True,
+        )
+    else:
+        candidates.sort(
+            key=lambda item: (
+                score_key(item),
+                str(item.get("published_at", "")),
+                str(item.get("title", "")),
+            ),
+            reverse=True,
+        )
     selected: list[dict[str, object]] = []
     seen: set[str] = set()
     provider_counts: dict[str, int] = {}
     domain_counts: dict[str, int] = {}
     reddit_count = 0
-    # Strength is the primary editorial order. Date is a tie-breaker in
-    # `sort_key`, so a fresher item wins only when its strength is equal.
+    # Collapse already-linked materials after ordering: the representative is
+    # strongest by default or newest under the explicit freshness setting.
     for item in candidates:
         key = str(item["_dedupe_key"])
         provider = str(item["provider"])
@@ -689,6 +713,7 @@ def _build_today_reddit_new(
     exclude_item_ids: set[str],
     signal_type: str | None = None,
     limit: int = 20,
+    sort: str = "strength",
 ) -> list[dict[str, object]]:
     """Свежие Reddit-посты, которых ещё не было на странице.
 
@@ -716,6 +741,18 @@ def _build_today_reddit_new(
         """,
         (signal_release_id,),
     ).fetchall()
+
+    selected_sort = _safe_today_sort(sort)
+    if selected_sort == "fresh":
+        rows = sorted(
+            rows,
+            key=lambda row: (
+                str(row["published_at"] or ""),
+                float(row["pulse_score"] or 0.0),
+                str(row["item_id"]),
+            ),
+            reverse=True,
+        )
 
     selected: list[dict[str, object]] = []
     per_type: dict[str, int] = {}
@@ -768,6 +805,7 @@ def _cached_today_reading_list(
     story_release_id: str,
     date: str,
     profile: str,
+    sort: str,
 ) -> tuple[dict[str, object], ...]:
     """Compute the compact reading queue once per immutable publication.
 
@@ -782,7 +820,14 @@ def _cached_today_reading_list(
         radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
         if radar is None:
             return ()
-        return tuple(_build_today_reading_list(engine_conn, radar.model_dump(), limit=20))
+        return tuple(
+            _build_today_reading_list(
+                engine_conn,
+                radar.model_dump(),
+                limit=20,
+                sort=_safe_today_sort(sort),
+            )
+        )
     finally:
         engine_conn.close()
 
@@ -813,7 +858,9 @@ def _load_today_engine_radar(
     )
 
 
-def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, object]]:
+def _today_change_candidates(
+    radar: Any, analysis_query: str, *, sort: str = "strength"
+) -> list[dict[str, object]]:
     # Today is an editorial brief, not a diagnostics surface.  An embedding
     # cluster with a token-bag name (for example ``my ai job me``) is useful in
     # the Engine lab but actively misleading in a reader-facing card.  Surface
@@ -826,18 +873,30 @@ def _today_change_candidates(radar: Any, analysis_query: str) -> list[dict[str, 
         if str(trend.get("review_status") or "pending") == "confirmed"
         and not is_bad_trend_name(str(trend.get("title") or trend.get("name_ru") or ""))
     ]
-    # Lifecycle explains the change; it is not a proxy for importance.
-    # Strength wins, and newest evidence resolves a strength tie.
-    changes.sort(
-        key=lambda trend: (
-            float(trend.get("confidence") or 0.0),
-            int(trend.get("source_count") or 0),
-            int(trend.get("story_count") or 0),
-            str(trend.get("last_seen") or ""),
-            str(trend.get("trend_id") or ""),
-        ),
-        reverse=True,
-    )
+    if _safe_today_sort(sort) == "fresh":
+        changes.sort(
+            key=lambda trend: (
+                str(trend.get("last_seen") or ""),
+                float(trend.get("confidence") or 0.0),
+                int(trend.get("source_count") or 0),
+                int(trend.get("story_count") or 0),
+                str(trend.get("trend_id") or ""),
+            ),
+            reverse=True,
+        )
+    else:
+        # Lifecycle explains the change; it is not a proxy for importance.
+        # Strength wins, and newest evidence resolves a strength tie.
+        changes.sort(
+            key=lambda trend: (
+                float(trend.get("confidence") or 0.0),
+                int(trend.get("source_count") or 0),
+                int(trend.get("story_count") or 0),
+                str(trend.get("last_seen") or ""),
+                str(trend.get("trend_id") or ""),
+            ),
+            reverse=True,
+        )
     changes = changes[:5]
     cards: list[dict[str, object]] = []
     for trend in changes:
@@ -986,9 +1045,12 @@ async def today_page(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
     reddit_type: str | None = None,
+    sort: str = "strength",
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
+    del conn
+    selected_sort = _safe_today_sort(sort)
     engine_path = _engine_path()
     if engine_path.exists():
         engine_conn = open_engine_readonly(engine_path)
@@ -1000,7 +1062,11 @@ async def today_page(
         if published_radar is not None:
             analysis_query = _analysis_query("broad", None)
             radar_payload = published_radar.model_dump()
-            decorated_changes = _today_change_candidates(published_radar, analysis_query)
+            decorated_changes = _today_change_candidates(
+                published_radar,
+                analysis_query,
+                sort=selected_sort,
+            )
             # Render the first page on the server.  The browser may then append
             # the remaining ten records, but a cached/failed static JavaScript
             # asset can never leave the primary daily reading list as a
@@ -1014,6 +1080,7 @@ async def today_page(
                         story_release_id=str(radar_payload.get("story_release_id") or ""),
                         date=str(radar_payload["date"]),
                         profile=profile,
+                        sort=selected_sort,
                     )[:10]
                 )
             except (HTTPException, OSError, sqlite3.Error):
@@ -1044,6 +1111,7 @@ async def today_page(
                         sig_id,
                         exclude_item_ids=already_shown,
                         signal_type=reddit_type or None,
+                        sort=selected_sort,
                     )
                     reddit_types = [
                         {
@@ -1067,6 +1135,7 @@ async def today_page(
                     "reddit_new": reddit_new,
                     "reddit_types": reddit_types,
                     "reddit_type": reddit_type or "",
+                    "sort": selected_sort,
                     "reddit_quotas": {
                         "per_type": _NEW_REDDIT_PER_TYPE,
                         "per_subreddit": _NEW_REDDIT_PER_SUBREDDIT,
@@ -1079,11 +1148,29 @@ async def today_page(
                     ),
                     "initial_reading": initial_reading,
                     "reading_endpoint": "/ui/today-reading?"
-                    + urlencode({"date": radar_payload["date"], "profile": profile}),
+                    + urlencode(
+                        {
+                            "date": radar_payload["date"],
+                            "profile": profile,
+                            "sort": selected_sort,
+                        }
+                    ),
                     "changes_endpoint": "/ui/today-changes?"
-                    + urlencode({"date": radar_payload["date"], "profile": profile}),
+                    + urlencode(
+                        {
+                            "date": radar_payload["date"],
+                            "profile": profile,
+                            "sort": selected_sort,
+                        }
+                    ),
                     "reddit_endpoint": "/ui/today-reddit?"
-                    + urlencode({"date": radar_payload["date"], "profile": profile}),
+                    + urlencode(
+                        {
+                            "date": radar_payload["date"],
+                            "profile": profile,
+                            "sort": selected_sort,
+                        }
+                    ),
                     "analysis_query": analysis_query,
                 },
             )
@@ -1115,6 +1202,7 @@ def _render_fragment(name: str, context: dict[str, object]) -> HTMLResponse:
 def today_changes_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
+    sort: str = "strength",
 ) -> HTMLResponse:
     """HTML-фрагмент с карточками верхних trend-кандидатов."""
     engine_path = _engine_path()
@@ -1125,7 +1213,11 @@ def today_changes_feed(
         radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
         if radar is None:
             return HTMLResponse("")
-        cards = _today_change_candidates(radar, _analysis_query("broad", None))
+        cards = _today_change_candidates(
+            radar,
+            _analysis_query("broad", None),
+            sort=_safe_today_sort(sort),
+        )
         return HTMLResponse(
             "".join(
                 templates.get_template("components/today_change_card.html").render(trend=trend)
@@ -1143,6 +1235,7 @@ def today_reddit_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
     reddit_type: str | None = None,
+    sort: str = "strength",
 ) -> HTMLResponse:
     """HTML-фрагмент блока «Новое на Reddit» под выбранную тематику.
 
@@ -1177,6 +1270,7 @@ def today_reddit_feed(
                 story_release_id=str(payload.get("story_release_id") or ""),
                 date=str(payload["date"]),
                 profile=profile,
+                sort=_safe_today_sort(sort),
             )[:10]
             if item.get("item_id")
         }
@@ -1185,6 +1279,7 @@ def today_reddit_feed(
             sig_id,
             exclude_item_ids=already_shown,
             signal_type=reddit_type or None,
+            sort=_safe_today_sort(sort),
         )
         return _render_fragment("components/reddit_new_list.html", {"reddit_new": posts})
     except (HTTPException, OSError, sqlite3.Error):
@@ -1197,6 +1292,7 @@ def today_reddit_feed(
 def today_reading_feed(
     date: str | None = None,
     profile: str = DEFAULT_PROFILE,
+    sort: str = "strength",
     offset: int = 0,
     limit: int = 10,
 ) -> HTMLResponse:
@@ -1221,6 +1317,7 @@ def today_reading_feed(
             story_release_id=str(radar_payload.get("story_release_id") or ""),
             date=str(radar_payload["date"]),
             profile=profile,
+            sort=_safe_today_sort(sort),
         )
         template = templates.get_template("components/today_reading_item.html")
         return HTMLResponse(
@@ -1246,6 +1343,8 @@ async def news_page(
     provider: str | None = None,
     source_cluster: str | None = None,
     q: str | None = None,
+    sort: str = "strength",
+    view: str = "stories",
     channel: str = "broad",
     publication_id: str | None = None,
     page: int = 1,
@@ -1272,6 +1371,8 @@ async def news_page(
             provider=provider,
             source_cluster=source_cluster,
             q=q,
+            sort=sort,
+            view=view,
             page=max(page, 1),
             page_size=50,
         )
@@ -1295,10 +1396,24 @@ async def news_page(
                 "provider": provider or "",
                 "source_cluster": source_cluster or "",
                 "q": q or "",
+                "sort": news.sort,
+                "view": news.view,
             },
             "channel": channel,
             "publication_id": publication_id or "",
             "analysis_query": _analysis_query(channel, publication_id),
+            "page_url": _page_url(
+                "/news",
+                channel=channel,
+                publication_id=publication_id,
+                date=date,
+                domain=domain,
+                provider=provider,
+                source_cluster=source_cluster,
+                q=q,
+                sort=news.sort,
+                view=news.view,
+            ),
         },
     )
 
@@ -1309,6 +1424,7 @@ async def stories_page(
     domain: str | None = None,
     q: str | None = None,
     project_id: str | None = None,
+    sort: str = "strength",
     channel: str = "broad",
     publication_id: str | None = None,
     page: int = 1,
@@ -1333,6 +1449,7 @@ async def stories_page(
             domain=domain,
             q=q,
             project_id=project_id,
+            sort=sort,
             page=max(page, 1),
             page_size=50,
         )
@@ -1350,7 +1467,12 @@ async def stories_page(
         name="engine_stories.html",
         context={
             "stories": stories.model_dump(),
-            "filters": {"domain": domain or "", "q": q or "", "project_id": project_id or ""},
+            "filters": {
+                "domain": domain or "",
+                "q": q or "",
+                "project_id": project_id or "",
+                "sort": stories.sort,
+            },
             "channel": channel,
             "publication_id": publication_id or "",
             "analysis_query": _analysis_query(channel, publication_id),
@@ -1361,6 +1483,7 @@ async def stories_page(
                 domain=domain,
                 q=q,
                 project_id=project_id,
+                sort=stories.sort,
             ),
         },
     )
@@ -1374,6 +1497,7 @@ async def trends_page(
     review_status: str | None = None,
     project_id: str | None = None,
     q: str | None = None,
+    sort: str = "strength",
     channel: str = "broad",
     publication_id: str | None = None,
     page: int = 1,
@@ -1400,6 +1524,7 @@ async def trends_page(
             review_status=review_status,
             project_id=project_id,
             q=q,
+            sort=sort,
             page=max(page, 1),
             page_size=50,
         )
@@ -1423,6 +1548,7 @@ async def trends_page(
                 "review_status": review_status or "",
                 "project_id": project_id or "",
                 "q": q or "",
+                "sort": trends.sort,
             },
             "channel": channel,
             "publication_id": publication_id or "",
@@ -1436,6 +1562,7 @@ async def trends_page(
                 review_status=review_status,
                 project_id=project_id,
                 q=q,
+                sort=trends.sort,
             ),
         },
     )
@@ -2212,6 +2339,7 @@ def _digest_material(
                 story_release_id=str(payload.get("story_release_id") or ""),
                 date=str(payload["date"]),
                 profile=profile,
+                sort="strength",
             )
         )
 

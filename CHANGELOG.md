@@ -46,10 +46,13 @@
   announcements, повторяющиеся landing pages и похожие Reddit-вопросы до quality gate,
   сохраняя cross-source syndicated headlines и точные URL-дубли.
 
-- **UI: сила, свежесть и даты во всех читательских слоях.** API и страницы News,
-  Stories, Trends, Today, Pulse, Radar и Project Lens сортируют сначала по измеримой
-  силе (evidence/engagement или confidence/coverage), затем по последней дате; у каждой
-  карточки теперь явно показаны applicable published/first_seen/last_seen даты.
+- **UI: управляемый порядок и доказательные дубли.** News по умолчанию показывает один
+  ранжированный материал на уже связанный Story, а `view=items` сохраняет полный raw-inbox для
+  аудита; immutable Data Release не меняется. News, Stories и Trends получили allow-listed
+  серверные сортировки (сила/свежесть плюс engagement, объём evidence или охват), а Today
+  согласованно ранжирует changes, reading и Reddit shelf по силе либо свежести. Параметры
+  сохраняются в UI-пагинации и API, даты остаются на карточках. Pulse сознательно сохраняет
+  свой signal-ranking: несколько community posts — отдельные сигналы, а не копии одной статьи.
 
 - **Поколение 5 слоя Trends: `schema_v3`** — схему события `(актор, действие, объект,
   ключ)` извлекает LLM вместо лексикона из тринадцати регулярок (замер: recall ≈ 13 %,

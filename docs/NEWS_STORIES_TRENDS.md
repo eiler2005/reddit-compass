@@ -18,7 +18,11 @@ Project Lens
 
 ### News
 
-News is the raw published corpus from an immutable `DataRelease`.
+News is the raw published corpus from an immutable `DataRelease`. Its default reader view is a
+**representative projection**: one already-ranked material per linked Story, plus every material
+that is not linked to a Story. This avoids showing a Reddit repost, an RSS copy and another
+headline as three separate discoveries when the Story layer has already established that they are
+one event. It does not edit, delete or merge rows in the Data Release.
 
 It answers:
 
@@ -34,6 +38,28 @@ Public surfaces:
 - UI: `/news`
 - UI shadow/preview: `/news?channel=shadow`
 - API: `GET /api/v2/news`
+
+`/news` and `GET /api/v2/news` accept `view=stories` (default) or `view=items` (every raw
+material). The latter is the audit/evidence mode. `total` is the number of entries in the selected
+view and `item_total` reports the filtered raw-material count, so the UI can make the projection
+visible rather than quietly hiding evidence.
+
+### Ordering and duplicate boundary
+
+All list sort tokens are allow-listed server-side and are carried through UI pagination/API URLs:
+
+| Surface | Default | Other choices |
+|---|---|---|
+| News | `strength` (Story coverage → evidence count → engagement → date) | `fresh`, `engagement`, `oldest` |
+| Stories | `strength` (independent sources → evidence count → date) | `fresh`, `volume`, `oldest` |
+| Trends | `strength` (confidence → source/story coverage → date) | `fresh`, `coverage`, `oldest` |
+| Today | `strength` across changes, reading and the Reddit shelf | `fresh` across the same three shelves |
+
+`Stories` and `Trends` are already entity layers and therefore do not repeat a linked raw item as
+separate top-level cards. Their detail pages deliberately retain full evidence: a reader must be
+able to audit why a Story was formed. Reddit Pulse is left on its own signal ranking because
+multiple community posts are evidence of separate community response, not copies of one newsroom
+article.
 
 ### Stories
 

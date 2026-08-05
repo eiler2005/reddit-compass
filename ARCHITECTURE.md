@@ -235,11 +235,15 @@ rollback: [`docs/COLLECTION_LIFECYCLE.md`](docs/COLLECTION_LIFECYCLE.md).
   a Reddit post usually has none, so `domain_ids_json` is almost always `other`. Diversity is held
   by quotas — per topic, per subreddit, and a tighter cap on `policy_politics`, which carries the
   highest average pulse and otherwise crowds the block out.
-- **Порядок читательских поверхностей стабилен и объясним.** News сортируется по силе
-  доказательств/engagement, Stories — по числу независимых источников и items, Trends — по
-  confidence и охвату, Pulse — по силе сигнала; при равенстве приоритет получает последняя
-  дата evidence. Карточка показывает applicable `published_at` либо `first_seen → last_seen`,
-  поэтому свежесть проверяется глазами, а не выводится из позиции в списке.
+- **Published read models не меняют Data Release.** News по умолчанию проецирует один
+  ранжированный материал на уже связанный Story, а unlinked items оставляет отдельными; режим
+  `view=items` возвращает полный raw-inbox. Поэтому видимые повторы не маскируются удалением
+  доказательств, а Story detail по-прежнему хранит их все.
+- **Порядок читательских поверхностей выбирается и объясним.** News, Stories и Trends имеют
+  allow-listed server-side сортировки по силе/свежести и своему дополнительному критерию
+  (engagement, объём evidence, охват); Today переключает силу/свежесть согласованно для трёх
+  shelves. Параметры сохраняются в API и пагинации. Карточка показывает `published_at` либо
+  `first_seen → last_seen`, поэтому свежесть проверяется глазами, а не выводится из позиции.
 
 ### Story/Trend Engine contract
 

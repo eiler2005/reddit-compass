@@ -6,7 +6,7 @@
 <div class="container">
     {% with active_layer="news" %}{% include "components/layer_nav.html" %}{% endwith %}
 
-    {% with page_title="News", page_note="Всё, что собрано за выпуск, без группировки и оценок. Это входящий поток и хранилище доказательств, а не тренды.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
+    {% with page_title="News", page_note="Материалы опубликованного выпуска. По умолчанию один представитель на уже связанный сюжет; полный raw-инбокс остаётся доступен переключателем.", page_help=true %}{% include "components/page_header.html" %}{% endwith %}
 
     {% if news.preview %}
     <section class="section">
@@ -26,11 +26,25 @@
             <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
             <input type="text" name="provider" value="{{ filters.provider }}" placeholder="provider">
             <input type="text" name="source_cluster" value="{{ filters.source_cluster }}" placeholder="source cluster">
+            <select name="view" aria-label="Представление News">
+                <option value="stories"{% if filters.view == "stories" %} selected{% endif %}>По сюжетам</option>
+                <option value="items"{% if filters.view == "items" %} selected{% endif %}>Все материалы</option>
+            </select>
+            <select name="sort" aria-label="Сортировка News">
+                <option value="strength"{% if filters.sort == "strength" %} selected{% endif %}>По силе сюжета</option>
+                <option value="fresh"{% if filters.sort == "fresh" %} selected{% endif %}>Сначала свежее</option>
+                <option value="engagement"{% if filters.sort == "engagement" %} selected{% endif %}>По вовлечённости</option>
+                <option value="oldest"{% if filters.sort == "oldest" %} selected{% endif %}>Сначала раннее</option>
+            </select>
             <button class="btn-primary" type="submit">Фильтр</button>
         </form>
         <p class="section-note">
-            {{ news.total }} материалов · {% if news.publication_id %}publication {{ news.publication_id }} · {% endif %}data {{ news.data_release_id }}
-            · порядок: сила доказательств → engagement → свежесть
+            {% if news.view == "stories" %}
+            {{ news.total }} сюжетных карточек из {{ news.item_total }} материалов · один представитель на Story
+            {% else %}
+            {{ news.total }} материалов · полный raw-инбокс
+            {% endif %}
+            · {% if news.publication_id %}publication {{ news.publication_id }} · {% endif %}data {{ news.data_release_id }}
         </p>
     </section>
 
@@ -47,7 +61,7 @@
                 row_summary=item.summary_ru or item.excerpt,
                 row_badges=[("direction-badge", item.provider)],
                 row_meta=[
-                    item.story_source_count ~ " кластеров в сюжете" if item.story_id else "один источник",
+                    item.story_source_count ~ " кластеров · " ~ item.story_item_count ~ " материалов в сюжете" if item.story_id else "один источник",
                     "▲ " ~ item.raw_score if item.raw_score else "",
                     "💬 " ~ item.raw_comments if item.raw_comments else "",
                     item.published_at or item.observed_at or item.snapshot_date
@@ -62,6 +76,7 @@
             <p class="section-note">Материалы не найдены.</p>
             {% endfor %}
         </div>
+        {% with total=news.total, page=news.page, page_size=news.page_size %}{% include "components/pagination.html" %}{% endwith %}
     </section>
 </div>
 {% endblock %}

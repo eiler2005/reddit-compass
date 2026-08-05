@@ -336,6 +336,11 @@ docker compose run --rm reddit-compass engine quality check \
   30 дней для meta-trends);
 - shadow inspected: evidence links открываются, имена не generic/duplicate, Radar не выдаёт
   pending candidate за confirmed editorial conclusion.
+- UI smoke check: `/news` в режиме «По сюжетам» не повторяет несколько привязанных материалов
+  одной карточкой (счётчик сообщает число raw materials); «Все материалы» возвращает их для
+  аудита. Проверьте `fresh` и `strength` на News, Stories, Trends и Today: даты на карточках
+  должны соответствовать выбранному порядку. Stories/Trend detail обязан по-прежнему показывать
+  полный evidence — это не UI-дубликат, а проверяемая причина группировки.
 
 Только после явного решения оператора публикация в production меняет pointer:
 

@@ -34,6 +34,19 @@
         <code class="release-id">{{ radar.trend_release_id }}</code>
     </div>
 
+    <form class="filters" method="get" action="/today" aria-label="Сортировка brief">
+        {% if radar.date %}<input type="hidden" name="date" value="{{ radar.date }}">{% endif %}
+        <input type="hidden" name="profile" value="{{ radar.profile or 'broad' }}">
+        {% if reddit_type %}<input type="hidden" name="reddit_type" value="{{ reddit_type }}">{% endif %}
+        <label for="today-sort">Порядок brief</label>
+        <select id="today-sort" name="sort">
+            <option value="strength"{% if sort == "strength" %} selected{% endif %}>Сильные сигналы выше</option>
+            <option value="fresh"{% if sort == "fresh" %} selected{% endif %}>Свежее выше</option>
+        </select>
+        <button class="btn-secondary" type="submit">Применить</button>
+    </form>
+    <p class="section-note">Выбор применяется к изменениям, ленте чтения и блоку «Новое на Reddit»; квоты разнообразия сохраняются.</p>
+
     <section class="section today-overview">
         {# Вместо пяти KPI-плиток — связная строка. Ни одно из тех чисел
            (материалов, trend-кандидатов, cross-source, source feeds,
@@ -123,10 +136,10 @@
         <div class="reddit-type-filters" data-reddit-filters
              data-reddit-endpoint="{{ reddit_endpoint }}">
             <a class="reddit-type-chip{% if not reddit_type %} reddit-type-chip-active{% endif %}"
-               href="/today" data-reddit-type="">Все темы</a>
+               href="/today?sort={{ sort }}" data-reddit-type="">Все темы</a>
             {% for rt in reddit_types %}
             <a class="reddit-type-chip{% if reddit_type == rt.signal_type %} reddit-type-chip-active{% endif %}"
-               href="/today?reddit_type={{ rt.signal_type }}"
+               href="/today?reddit_type={{ rt.signal_type }}&amp;sort={{ sort }}"
                data-reddit-type="{{ rt.signal_type }}">{{ rt.label }} <span class="reddit-type-count">{{ rt.total }}</span></a>
             {% endfor %}
         </div>

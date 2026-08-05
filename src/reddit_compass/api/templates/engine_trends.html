@@ -19,11 +19,16 @@
             <input type="text" name="lifecycle" value="{{ filters.lifecycle }}" placeholder="new, growing, fading">
             <input type="text" name="review_status" value="{{ filters.review_status }}" placeholder="pending или confirmed">
             <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="book или rbc">
+            <select name="sort" aria-label="Сортировка Trends">
+                <option value="strength"{% if filters.sort == "strength" %} selected{% endif %}>По уверенности</option>
+                <option value="fresh"{% if filters.sort == "fresh" %} selected{% endif %}>Сначала свежее</option>
+                <option value="coverage"{% if filters.sort == "coverage" %} selected{% endif %}>По охвату</option>
+                <option value="oldest"{% if filters.sort == "oldest" %} selected{% endif %}>Сначала раннее</option>
+            </select>
             <button class="btn-primary" type="submit">Фильтр</button>
         </form>
         <p class="section-note">
             {{ trends.total }} trends · history {{ trends.history_status }} · {% if trends.publication_id %}publication {{ trends.publication_id }} · {% endif %}trend release {{ trends.trend_release_id }}
-            · порядок: confidence → охват → свежесть
         </p>
     </section>
 

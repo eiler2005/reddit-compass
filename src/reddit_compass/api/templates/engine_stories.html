@@ -17,11 +17,16 @@
             <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по story">
             <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
             <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="book или rbc">
+            <select name="sort" aria-label="Сортировка Stories">
+                <option value="strength"{% if filters.sort == "strength" %} selected{% endif %}>По силе и охвату</option>
+                <option value="fresh"{% if filters.sort == "fresh" %} selected{% endif %}>Сначала свежее</option>
+                <option value="volume"{% if filters.sort == "volume" %} selected{% endif %}>По объёму evidence</option>
+                <option value="oldest"{% if filters.sort == "oldest" %} selected{% endif %}>Сначала раннее</option>
+            </select>
             <button class="btn-primary" type="submit">Фильтр</button>
         </form>
         <p class="section-note">
             {{ stories.total }} stories · {% if stories.publication_id %}publication {{ stories.publication_id }} · {% endif %}story release {{ stories.story_release_id }}
-            · порядок: охват источников → объём доказательств → свежесть
         </p>
     </section>
 

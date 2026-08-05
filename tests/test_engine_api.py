@@ -493,10 +493,12 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     engine_client: TestClient,
 ) -> None:
     response = engine_client.get("/today")
+    fresh_response = engine_client.get("/today?sort=fresh")
     reading_response = engine_client.get("/ui/today-reading?date=2026-07-29")
     changes_response = engine_client.get("/ui/today-changes?date=2026-07-29")
 
     assert response.status_code == 200
+    assert fresh_response.status_code == 200
     assert reading_response.status_code == 200
     assert changes_response.status_code == 200
     # Вверху /today стоит связная строка, а не пять KPI-плиток: ни материалов,
@@ -515,6 +517,9 @@ def test_engine_today_dashboard_is_clickable_and_informative(
     assert 'src="/static/today_reading.js?v=' in response.text
     assert 'data-server-rendered="true"' in response.text
     assert "data-reading-item" in response.text
+    assert "Порядок brief" in fresh_response.text
+    assert "Свежее выше" in fresh_response.text
+    assert "sort=fresh" in fresh_response.text
     assert 'href="https://example.com/story"' in response.text
     # Ленты отдают готовую разметку, а не JSON: карточка описана только в Jinja.
     assert 'href="https://example.com/story"' in reading_response.text
@@ -985,6 +990,21 @@ def test_published_lists_rank_strength_before_freshness_and_expose_dates(
                     '{"score": 999, "comments": 999}',
                     "weak-new-checksum",
                 ),
+                (
+                    "data_sort",
+                    "news:strong-copy",
+                    "reuters",
+                    "mainstream",
+                    "strong-copy",
+                    "https://example.com/strong-copy",
+                    "Ещё один материал того же сильного сюжета",
+                    "2026-08-03",
+                    "2026-08-03T09:00:00Z",
+                    "world",
+                    '["world_geopolitics"]',
+                    '{"score": 2, "comments": 0}',
+                    "strong-copy-checksum",
+                ),
             ],
         )
         conn.execute(
@@ -1073,6 +1093,7 @@ def test_published_lists_rank_strength_before_freshness_and_expose_dates(
             """,
             [
                 ("story_sort", "story_strong_old", "news:strong-old", 1.0, "exact_url"),
+                ("story_sort", "story_strong_old", "news:strong-copy", 0.9, "semantic"),
                 ("story_sort", "story_weak_new", "news:weak-new", 1.0, "exact_url"),
             ],
         )
@@ -1228,10 +1249,21 @@ def test_published_lists_rank_strength_before_freshness_and_expose_dates(
 
     publication = "channel=broad&publication_id=publication_sort"
     news = engine_client.get(f"/api/v2/news?{publication}&page_size=10").json()["items"]
+    news_projection = engine_client.get(f"/api/v2/news?{publication}&page_size=10").json()
+    all_news = engine_client.get(f"/api/v2/news?{publication}&page_size=10&view=items").json()
+    fresh_news = engine_client.get(
+        f"/api/v2/news?{publication}&page_size=10&provider=reuters&sort=fresh"
+    ).json()["items"]
     stories = engine_client.get(f"/api/v2/engine/stories?{publication}&page_size=10").json()[
         "items"
     ]
+    fresh_stories = engine_client.get(
+        f"/api/v2/engine/stories?{publication}&page_size=10&sort=fresh"
+    ).json()["items"]
     trends = engine_client.get(f"/api/v2/engine/trends?{publication}&page_size=10").json()["items"]
+    fresh_trends = engine_client.get(
+        f"/api/v2/engine/trends?{publication}&page_size=10&sort=fresh"
+    ).json()["items"]
     pulse = engine_client.get("/api/v2/reddit-pulse?data_release=data_sort&date=2026-08-05").json()
     news_page = engine_client.get(f"/news?{publication}")
     trends_page = engine_client.get(f"/trends?{publication}")
@@ -1239,17 +1271,32 @@ def test_published_lists_rank_strength_before_freshness_and_expose_dates(
     assert news[0]["item_id"] == "news:strong-old"
     assert news[0]["published_at"] == "2026-08-02T09:00:00Z"
     assert news[0]["story_source_count"] == 5
+    assert news_projection["view"] == "stories"
+    assert news_projection["total"] == 3
+    assert news_projection["item_total"] == 4
+    assert all_news["view"] == "items"
+    assert all_news["total"] == 4
+    assert {item["item_id"] for item in all_news["items"]} >= {
+        "news:strong-old",
+        "news:strong-copy",
+    }
+    assert fresh_news[0]["item_id"] == "news:weak-new"
     assert [story["story_id"] for story in stories[:2]] == [
         "story_strong_old",
         "story_weak_new",
     ]
+    assert fresh_stories[0]["story_id"] == "story_weak_new"
     assert [trend["trend_id"] for trend in trends[:2]] == [
         "trend_strong_old",
         "trend_tie_new",
     ]
     assert trends[1]["last_seen"] == "2026-08-05"
+    assert fresh_trends[0]["trend_id"] == "trend_tie_new"
     assert pulse["items"][0]["published_at"] == "2026-08-05T11:00:00Z"
     assert "2026-08-02T09:00:00Z" in news_page.text
+    assert "По сюжетам" in news_page.text
+    assert "Все материалы" in news_page.text
+    assert "Сначала свежее" in news_page.text
     assert "даты: 2026-08-01 → 2026-08-05" in trends_page.text
 
 
@@ -1326,7 +1373,7 @@ def test_published_layer_ui_pages_render(engine_client: TestClient) -> None:
     trend_detail = engine_client.get("/trends/trend_1")
 
     assert news.status_code == 200
-    assert "хранилище доказательств" in news.text
+    assert "один представитель на уже связанный сюжет" in news.text
     assert "A verified story" in news.text
     assert stories.status_code == 200
     assert "Конкретные события" in stories.text
