@@ -842,6 +842,14 @@ _GOOD_TREND_NAMES = (
     "leadership changes in business",
     "outages in ai_technology",
     "Паттерн: acquisitions in business",
+    # Реальные имена schema_v3 из боевого прогона 2026-08-06. Домен «security and
+    # privacy» ловился на слове `privacy` из списка вёрстки — классификатор отвергал
+    # четыре совершенно нормальных имени.
+    "new regulation in security and privacy",
+    "breaches and intrusions in security and privacy",
+    "investigations in security and privacy",
+    "product launches in security and privacy",
+    "earnings and results in business",
     "OpenAI quantum agent platform",
     "Amazon warehouse tracking penalty",
 )

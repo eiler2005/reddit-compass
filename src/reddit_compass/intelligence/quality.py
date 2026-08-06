@@ -234,8 +234,15 @@ _NEUTRAL_WORDS = frozenset(
 )
 
 # Токены, по которым имя опознаётся как мусор вёрстки, а не как событие.
+#
+# `privacy` отсюда убран: боевой прогон 6 августа показал, что он ловит законный домен
+# «security and privacy» — четыре нормальных имени schema_v3 (`new regulation in
+# security and privacy`, `breaches and intrusions in security and privacy`) были
+# отвергнуты как вёрстка. Слово становится мусором только в связке («privacy policy»),
+# а в одиночку это обычная тема. Остальные токены однозначны: `sitemap` или `subscribe`
+# в имени события не появляются ни при каком домене.
 _BOILERPLATE_TOKENS = frozenset(
-    {"sitemap", "rss", "subscribe", "newsletter", "cookie", "privacy", "advertisement"}
+    {"sitemap", "rss", "subscribe", "newsletter", "cookie", "advertisement"}
 )
 
 
