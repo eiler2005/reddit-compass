@@ -1,0 +1,42 @@
+{# Календарное покрытие: пропущенный день видно до запуска Engine, а не при разборе
+   странного релиза. Состояния — те же слова, что печатает `collect --coverage`. #}
+{% if coverage.days %}
+<div class="coverage-strip-block">
+    <h2>Покрытие по дням</h2>
+    <p class="section-note">
+        {{ coverage.summary.days_complete }} из {{ coverage.summary.days_total }} дней собраны полностью.
+        {% if coverage.summary.gap_count %}
+        Требуют внимания: {{ coverage.summary.gap_count }}.
+        {% else %}
+        Пропусков нет.
+        {% endif %}
+    </p>
+    <ol class="coverage-strip" aria-label="Календарное покрытие сбора">
+        {% for day in coverage.days %}
+        <li class="coverage-day coverage-day-{{ day.state }}"
+            title="{{ day.date }} — {{ {
+                'complete': 'собран полностью',
+                'recover_snapshots': 'артефакты есть, нужен collect --recover-snapshots',
+                'historical_recovery': 'артефактов нет, нужен collect --historical-date',
+                'pending': 'текущий день, сбор ещё не завершён',
+                'gap': 'пропуск'
+            }.get(day.state, day.state) }}">
+            <span class="coverage-day-label">{{ day.date[8:10] }}</span>
+        </li>
+        {% endfor %}
+    </ol>
+    {% if coverage.summary.gaps %}
+    <ul class="coverage-actions">
+        {% for gap in coverage.summary.gaps if gap.recommended_action != "pending" %}
+        <li><code>{{ gap.date }}</code> — {{ gap.reason }};
+            {% if gap.recommended_action == "recover_snapshots" %}
+            финализируется <code>collect --recover-snapshots</code> без сети
+            {% else %}
+            нужен <code>collect --historical-date</code> по date-aware интерфейсам
+            {% endif %}
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+</div>
+{% endif %}

@@ -2733,3 +2733,65 @@ a.story-card {
     font-size: var(--text-2xs);
     color: var(--text-muted);
 }
+
+/* ── Календарная полоса покрытия ─────────────────────────────────────────────
+   Пропущенный день должен быть виден до запуска Engine, а не при разборе
+   странного релиза. Цвет несёт смысл, но не единственный: у каждого дня есть
+   подпись с числом и title с тем же текстом, что печатает `collect --coverage`,
+   поэтому полоса читается и без различения цветов. */
+.coverage-strip-block {
+    margin: var(--space-4) 0;
+}
+
+.coverage-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    list-style: none;
+    margin: var(--space-2) 0;
+    padding: 0;
+}
+
+.coverage-day {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--text-num);
+    padding: var(--space-1);
+    border-radius: var(--radius-sm);
+    border: 1px solid transparent;
+    font-family: var(--font-mono);
+    font-size: var(--text-2xs);
+}
+
+.coverage-day-complete {
+    background: var(--success-dim);
+    color: var(--success);
+    border-color: var(--success);
+}
+
+.coverage-day-recover_snapshots {
+    background: var(--warning-dim);
+    color: var(--warning);
+    border-color: var(--warning);
+}
+
+.coverage-day-historical_recovery,
+.coverage-day-gap {
+    background: var(--error-dim);
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.coverage-day-pending {
+    background: transparent;
+    color: var(--text-muted);
+    border-style: dashed;
+    border-color: currentColor;
+}
+
+.coverage-actions {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-4);
+    font-size: var(--text-sm);
+}

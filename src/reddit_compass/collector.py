@@ -206,6 +206,53 @@ def collection_coverage(
     return result
 
 
+def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
+    """Вердикт по календарному покрытию: что именно пропущено и чем это чинится.
+
+    Оператор до сих пор читал по-дневный JSON глазами. Для алерта нужен ответ, а не
+    таблица, причём ответ обязан предлагать **только безопасное** действие:
+
+    ``recover_snapshots``  — артефакты за день сохранены, не отработал финалайзер.
+                             Сети не требует и данные не выдумывает.
+    ``historical_recovery`` — артефактов нет, но дата в прошлом: date-aware публичные
+                             интерфейсы вернут материал именно за неё.
+    ``pending``            — это сегодня, сбор ещё может пройти. Не gap.
+    ``unresolved``         — день в прошлом, артефактов нет и часть источников не имеет
+                             исторического интерфейса. Честно называем неразрешённым,
+                             а не предлагаем подставить сегодняшнюю выборку.
+    """
+    today = _utc_today()
+    gaps: list[dict[str, str]] = []
+    complete = 0
+    for day in coverage:
+        date = str(day["date"])
+        if bool(day["raw_complete"]):
+            complete += 1
+            continue
+        if date >= today:
+            action = "pending"
+            reason = "текущий UTC-день, сбор ещё не завершён"
+        elif bool(day["recoverable_from_snapshots"]):
+            action = "recover_snapshots"
+            reason = "артефакты сохранены, не отработал финалайзер"
+        else:
+            artifacts = cast(dict[str, bool], day.get("artifacts") or {})
+            present = sum(1 for ok in artifacts.values() if ok)
+            action = "historical_recovery"
+            reason = f"артефакты неполны ({present} из {len(artifacts)})"
+        gaps.append({"date": date, "reason": reason, "recommended_action": action})
+    # `pending` — не пропуск: сегодняшний день ещё собирается, и поднимать по нему
+    # тревогу значило бы будить оператора каждую ночь.
+    actionable = [gap for gap in gaps if gap["recommended_action"] != "pending"]
+    return {
+        "days_total": len(coverage),
+        "days_complete": complete,
+        "gap_count": len(actionable),
+        "gaps": gaps,
+        "actions": sorted({gap["recommended_action"] for gap in actionable}),
+    }
+
+
 def recover_snapshot_gaps(
     config: MonitorConfig,
     snapshots_dir: Path,

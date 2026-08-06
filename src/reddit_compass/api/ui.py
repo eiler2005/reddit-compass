@@ -11,6 +11,7 @@ import secrets
 import sqlite3
 from collections.abc import Generator
 from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
 from math import log1p
 from pathlib import Path
@@ -1872,6 +1873,45 @@ async def story_page(
     )
 
 
+def _calendar_coverage(days: int = 14) -> dict[str, object]:
+    """Календарная полоса покрытия для операционных страниц.
+
+    Пропуск дня было видно только через ручной `collect --coverage` или живой SQL — то
+    есть узнавали о нём уже при разборе странного релиза. Полоса показывает то же, что
+    и CLI, и теми же словами: собран, восстановим из артефактов, нужен исторический
+    сбор, ещё идёт.
+    """
+    from ..collector import collection_coverage, coverage_summary
+
+    db_path = Path(os.environ.get("RC_DB_PATH", "data/compass.db"))
+    snapshots_dir = db_path.parent / "snapshots"
+    end = datetime.now(UTC).date()
+    start = end - timedelta(days=days - 1)
+    try:
+        rows = collection_coverage(
+            snapshots_dir,
+            db_path,
+            profile=DEFAULT_PROFILE,
+            since=start.isoformat(),
+            until=end.isoformat(),
+        )
+    except (OSError, sqlite3.Error, ValueError):
+        # Операционная страница не обязана падать из-за диагностики: пустая полоса
+        # честнее пятисотки, а сама проблема всё равно видна по остальным блокам.
+        return {"days": [], "summary": {"gap_count": 0, "days_total": 0, "days_complete": 0}}
+    summary = coverage_summary(rows)
+    gaps = cast(list[dict[str, str]], summary["gaps"])
+    actions = {gap["date"]: gap["recommended_action"] for gap in gaps}
+    strip = [
+        {
+            "date": str(row["date"]),
+            "state": "complete" if row["raw_complete"] else actions.get(str(row["date"]), "gap"),
+        }
+        for row in rows
+    ]
+    return {"days": strip, "summary": summary}
+
+
 @router.get("/runs", response_class=HTMLResponse)
 def runs_page(
     request: Request,
@@ -2197,7 +2237,7 @@ def runs_page(
     return templates.TemplateResponse(
         request=request,
         name="runs.html",
-        context={"runs": runs},
+        context={"runs": runs, "coverage": _calendar_coverage()},
     )
 
 

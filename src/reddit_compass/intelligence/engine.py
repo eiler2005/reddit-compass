@@ -5998,6 +5998,9 @@ def publish_radar(
     # Гейт был пропущен только если он вообще применялся: на shadow его нет, и там
     # `force` ничего не обходит. Отмечаем именно факт обхода, а не переданный флаг.
     gate_bypassed = bool(force) and channel in {"broad", "ai-native"}
+    _refuse_stale_publication(
+        conn, channel=channel, data_release_id=data_release.release_id, force=force
+    )
     current = get_current_publication(conn, channel)
     previous_id = current.publication_id if current else ""
     created_at = now_iso()
@@ -8387,3 +8390,199 @@ def _numeric_delta(left: Any, right: Any) -> float | None:
     if isinstance(left, int | float) and isinstance(right, int | float):
         return round(float(right) - float(left), 4)
     return None
+
+
+def _refuse_stale_publication(
+    conn: sqlite3.Connection,
+    *,
+    channel: str,
+    data_release_id: str,
+    force: bool,
+) -> None:
+    """Не давать отложенной задаче перезаписать указатель более свежим релизом.
+
+    Указатель канала переписывается безусловно, поэтому задача, зависшая на час и
+    догнавшая своё выполнение после следующего цикла, откатывала канал на устаревший
+    релиз — молча и без единого следа, кроме времени публикации. Для cron это не
+    гипотеза, а обычный режим: именно поэтому возврат расписания и был отложен.
+
+    Сравниваем по времени создания Data Release, а не публикации: публикация может
+    быть новее, обслуживая при этом более старые данные. ``force`` оставляет
+    возможность осознанного отката — он для этого и существует.
+    """
+    current = get_current_publication(conn, channel)
+    if current is None or force:
+        return
+    row = conn.execute(
+        """SELECT
+             (SELECT created_at FROM data_releases WHERE release_id = ?) AS incoming,
+             (SELECT created_at FROM data_releases WHERE release_id = ?) AS published""",
+        (data_release_id, current.data_release_id),
+    ).fetchone()
+    if row is None:
+        return
+    incoming, published = str(row["incoming"] or ""), str(row["published"] or "")
+    if incoming and published and incoming < published:
+        raise ValueError(
+            f"Канал {channel} уже обслуживает более свежий Data Release "
+            f"{current.data_release_id} ({published}); публикация {data_release_id} "
+            f"({incoming}) откатила бы его назад. Для намеренного отката используйте "
+            f"`engine rollback` либо --force."
+        )
+
+
+def release_readiness(
+    conn: sqlite3.Connection,
+    *,
+    data_release_id: str,
+    channels: Sequence[str] = ("shadow", "broad"),
+) -> dict[str, Any]:
+    """Один read-only снимок готовности релиза к публикации.
+
+    Собирает то, что оператор до сих пор склеивал вручную из ``/runs``, живого SQL,
+    ``quality report``, списка публикаций и выборки UI: checksum данных, статус входа,
+    ID Story/Trend/Signal, результат гейтов, текущие указатели каналов и цель отката.
+
+    Ничего не мутирует и не имеет флага публикации — это принципиально. Команда, которая
+    одновременно оценивает готовность и умеет публиковать, рано или поздно опубликует по
+    ошибке; здесь такой возможности нет по построению.
+    """
+    data_release = get_data_release(conn, data_release_id)
+    if data_release is None:
+        raise ValueError(f"Data release not found: {data_release_id}")
+
+    report: dict[str, Any] = {
+        "generated_at": now_iso(),
+        "data_release": {
+            "release_id": data_release.release_id,
+            "profile": data_release.profile,
+            "dates": list(data_release.dates),
+            "input_status": data_release.input_status,
+            "item_count": data_release.item_count,
+            "observation_count": data_release.observation_count,
+            "status": data_release.status,
+            # Проверка контрольной суммы — не формальность: релиз immutable, и
+            # расхождение означает, что читаемые данные уже не те, на которых считались
+            # метрики.
+            "checksum_verified": verify_data_release(conn, data_release.release_id),
+        },
+    }
+
+    quality_row = conn.execute(
+        """SELECT story_release_id, trend_release_id, signal_release_id,
+                  metrics_json, floors_json, passed, created_at
+           FROM engine_quality_reports
+           WHERE data_release_id = ?
+           ORDER BY created_at DESC LIMIT 1""",
+        (data_release_id,),
+    ).fetchone()
+    if quality_row is None:
+        report["quality"] = {"present": False}
+    else:
+        floors = _json_list_any(quality_row["floors_json"])
+        failed = [
+            floor
+            for floor in floors
+            if isinstance(floor, dict) and not bool(floor.get("passed", True))
+        ]
+        report["quality"] = {
+            "present": True,
+            "passed": bool(quality_row["passed"]),
+            "created_at": str(quality_row["created_at"]),
+            "story_release_id": str(quality_row["story_release_id"]),
+            "trend_release_id": str(quality_row["trend_release_id"]),
+            "signal_release_id": str(quality_row["signal_release_id"] or ""),
+            # Ключ — `metric`: у `FloorResult` нет поля `name`, и `.get("name", "")`
+            # молча давал список пустых строк, то есть отчёт сообщал «полы не взяты»,
+            # не называя ни одного.
+            "failed_floors": [
+                f"{floor.get('metric', '?')}={floor.get('value')} "
+                f"(нужно {floor.get('op', '')}{floor.get('floor')})"
+                for floor in failed
+            ],
+            "metrics": _json_dict(quality_row["metrics_json"]),
+        }
+
+    pointers: dict[str, Any] = {}
+    for channel in channels:
+        current = get_current_publication(conn, channel)
+        if current is None:
+            pointers[channel] = {"published": False}
+            continue
+        previous = (
+            get_publication(conn, current.previous_publication_id)
+            if current.previous_publication_id
+            else None
+        )
+        pointers[channel] = {
+            "published": True,
+            "publication_id": current.publication_id,
+            "data_release_id": current.data_release_id,
+            "story_release_id": current.story_release_id,
+            "trend_release_id": current.trend_release_id,
+            "input_status": current.input_status,
+            "created_at": current.created_at,
+            "serves_this_release": current.data_release_id == data_release_id,
+            # Цель отката обязана быть видна до публикации, а не искаться в спешке после.
+            "rollback_target": previous.publication_id if previous else "",
+        }
+    report["pointers"] = pointers
+
+    blockers: list[str] = []
+    if not report["data_release"]["checksum_verified"]:
+        blockers.append("checksum данных не сходится")
+    if data_release.input_status != "complete":
+        blockers.append(f"input_status={data_release.input_status}, а не complete")
+    if not report["quality"].get("present"):
+        blockers.append("нет quality-отчёта для этого релиза")
+    elif not report["quality"].get("passed"):
+        failed_names = ", ".join(report["quality"].get("failed_floors") or []) or "неизвестно"
+        blockers.append(f"не взяты полы качества: {failed_names}")
+    report["blockers"] = blockers
+    report["ready_for_broad"] = not blockers
+    return report
+
+
+def _json_list_any(raw: Any) -> list[Any]:
+    try:
+        value = json.loads(str(raw or "[]"))
+    except json.JSONDecodeError:
+        return []
+    return value if isinstance(value, list) else []
+
+
+def format_release_readiness(report: dict[str, Any]) -> str:
+    """Короткий Markdown для оператора рядом с JSON для журнала."""
+    data = report["data_release"]
+    lines = [
+        f"# Release readiness · {data['release_id']}",
+        "",
+        f"- профиль: {data['profile']}, дней: {len(data['dates'])}",
+        f"- материалов: {data['item_count']}, наблюдений: {data['observation_count']}",
+        f"- input_status: **{data['input_status']}**",
+        f"- checksum: {'сходится' if data['checksum_verified'] else '**не сходится**'}",
+    ]
+    quality = report["quality"]
+    if quality.get("present"):
+        verdict = "пройдены" if quality["passed"] else "**не пройдены**"
+        lines.append(f"- полы качества: {verdict} ({quality['created_at']})")
+        if quality.get("failed_floors"):
+            lines.append(f"  - провалены: {', '.join(quality['failed_floors'])}")
+    else:
+        lines.append("- полы качества: **отчёта нет**")
+    lines.append("")
+    lines.append("## Указатели каналов")
+    for channel, pointer in report["pointers"].items():
+        if not pointer.get("published"):
+            lines.append(f"- {channel}: не опубликован")
+            continue
+        mark = " ← этот релиз" if pointer["serves_this_release"] else ""
+        lines.append(f"- {channel}: `{pointer['publication_id']}`{mark}")
+        lines.append(f"  - откат на: `{pointer['rollback_target'] or 'нет предыдущей'}`")
+    lines.append("")
+    if report["ready_for_broad"]:
+        lines.append("**Готов к broad.** Публикация остаётся отдельной ручной командой.")
+    else:
+        lines.append("**Не готов к broad:**")
+        lines.extend(f"- {blocker}" for blocker in report["blockers"])
+    return "\n".join(lines)

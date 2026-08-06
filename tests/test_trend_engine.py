@@ -2700,3 +2700,115 @@ def test_forced_production_publish_leaves_an_audit_trace(tmp_path: Path) -> None
         ).fetchone()["action"]
         == "publish_forced"
     )
+
+
+def test_publish_refuses_to_move_a_channel_pointer_backwards(tmp_path: Path) -> None:
+    """Отложенная задача не имеет права откатить канал на устаревший релиз.
+
+    Указатель переписывался безусловно, поэтому cron-задача, зависшая на час и
+    догнавшая выполнение после следующего цикла, молча возвращала канал к старым
+    данным. Для расписания это обычный режим, а не гипотеза — и одна из причин, по
+    которым возврат cron был отложен.
+    """
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    # Релизы immutable (триггер запрещает UPDATE), поэтому порядок задаём созданием:
+    # `older` создаётся первым и получает более раннее `created_at`.
+    older = create_data_release(
+        corpus, engine, source_db_path=corpus_path, run_ids=["2026-07-27:broad"]
+    )
+    newer = create_data_release(corpus, engine, source_db_path=corpus_path, run_ids=_run_ids())
+    assert older.created_at < newer.created_at
+
+    def releases_for(data_release_id: str) -> tuple[str, str]:
+        facets = create_facet_release(engine, data_release_id=data_release_id)
+        stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+        trends = create_trend_release(engine, story_release_id=stories.story_release_id)
+        return stories.story_release_id, trends.trend_release_id
+
+    older_stories, older_trends = releases_for(older.release_id)
+    newer_stories, newer_trends = releases_for(newer.release_id)
+
+    publish_radar(
+        engine,
+        story_release_id=newer_stories,
+        trend_release_id=newer_trends,
+        channel="shadow",
+        allow_partial=True,
+    )
+
+    with pytest.raises(ValueError, match="более свежий Data Release"):
+        publish_radar(
+            engine,
+            story_release_id=older_stories,
+            trend_release_id=older_trends,
+            channel="shadow",
+            allow_partial=True,
+        )
+
+    # Осознанный откат остаётся возможным — для этого `force` и существует.
+    forced = publish_radar(
+        engine,
+        story_release_id=older_stories,
+        trend_release_id=older_trends,
+        channel="shadow",
+        allow_partial=True,
+        force=True,
+    )
+    assert forced.data_release_id == older.release_id
+
+
+def test_release_readiness_names_every_blocker_and_never_publishes(tmp_path: Path) -> None:
+    """Один read-only снимок вместо ручной склейки /runs, SQL, quality и указателей.
+
+    Команда намеренно не умеет публиковать: та, что одновременно оценивает готовность и
+    может опубликовать, рано или поздно опубликует по ошибке.
+    """
+    from reddit_compass.intelligence.engine import format_release_readiness, release_readiness
+
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    release = create_data_release(corpus, engine, source_db_path=corpus_path, run_ids=_run_ids())
+    facets = create_facet_release(engine, data_release_id=release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    trends = create_trend_release(engine, story_release_id=stories.story_release_id)
+
+    before = engine.execute("SELECT COUNT(*) FROM radar_publications").fetchone()[0]
+    report = release_readiness(engine, data_release_id=release.release_id)
+    after = engine.execute("SELECT COUNT(*) FROM radar_publications").fetchone()[0]
+
+    assert after == before
+    assert report["data_release"]["checksum_verified"] is True
+    assert report["ready_for_broad"] is False
+    # Каждый блокер назван словами, а не выведен из отсутствия полей.
+    assert any("input_status" in blocker for blocker in report["blockers"])
+    assert any("quality" in blocker or "полы" in blocker for blocker in report["blockers"])
+    assert report["pointers"]["broad"] == {"published": False}
+
+    publish_radar(
+        engine,
+        story_release_id=stories.story_release_id,
+        trend_release_id=trends.trend_release_id,
+        channel="shadow",
+        allow_partial=True,
+    )
+    after_publish = release_readiness(engine, data_release_id=release.release_id)
+    assert after_publish["pointers"]["shadow"]["serves_this_release"] is True
+    # Цель отката видна до публикации, а не ищется в спешке после.
+    assert "rollback_target" in after_publish["pointers"]["shadow"]
+
+    markdown = format_release_readiness(after_publish)
+    assert "Release readiness" in markdown
+    assert "Не готов к broad" in markdown
+
+
+def test_release_readiness_rejects_an_unknown_release(tmp_path: Path) -> None:
+    from reddit_compass.intelligence.engine import release_readiness
+
+    engine = engine_db(tmp_path / "trend_engine.db")
+
+    with pytest.raises(ValueError, match="not found"):
+        release_readiness(engine, data_release_id="no-such-release")

@@ -332,3 +332,73 @@ def test_free_quota_is_an_account_pool_unless_confirmed_per_model(monkeypatch, t
     per_model, _, per_model_reason = qwen_policy.pick_model("bulk")
     assert per_model == "qwen3.6-flash"
     assert "бесплатн" in per_model_reason
+
+
+def test_cost_report_prices_by_stage_and_keeps_unpriced_separate(monkeypatch, tmp_path) -> None:
+    """Отчёт считает по list price и не выдаёт неизвестную цену за ноль.
+
+    Складывать вызовы без цены с нулевой стоимостью значило бы занизить расход именно
+    там, где он не проверен.
+    """
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    qwen_policy.record_usage(
+        model="qwen3.7-flash",
+        endpoint="payg",
+        prompt_tokens=1_200_000,
+        completion_tokens=300_000,
+        stage="schema_extract",
+    )
+    qwen_policy.record_usage(
+        model="qwen-unknown",
+        endpoint="payg",
+        prompt_tokens=1000,
+        completion_tokens=500,
+        stage="classify",
+    )
+
+    report = qwen_policy.cost_report()
+
+    by_stage = {row["stage"]: row for row in report["rows"]}
+    # 1.2M × 0.225/1M + 0.3M × 0.974/1M = 0.27 + 0.2922
+    assert by_stage["schema_extract"]["cost_cny"] == 0.5622
+    assert by_stage["classify"]["cost_cny"] is None
+    assert report["total_cny"] == 0.5622
+    assert report["unpriced_calls"] == 1
+    assert report["price_source_date"] == qwen_policy.LIST_PRICES_SOURCE_DATE
+
+
+def test_unlabelled_usage_is_reported_separately_not_dissolved(monkeypatch, tmp_path) -> None:
+    """Записи без стадии (леджеры до этой версии) обязаны быть видны отдельной строкой."""
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    qwen_policy.record_usage(
+        model="qwen3.7-flash", endpoint="payg", prompt_tokens=100, completion_tokens=100
+    )
+
+    stages = {row["stage"] for row in qwen_policy.cost_report()["rows"]}
+
+    assert stages == {"(не размечено)"}
+
+
+def test_spend_guard_stops_the_call_before_it_is_paid_for(monkeypatch, tmp_path) -> None:
+    """Потолок проверяется до вызова: смысл в том, чтобы не потратить."""
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    monkeypatch.delenv("RC_QWEN_PAYG_GRANT_START", raising=False)
+    qwen_policy.record_usage(
+        model="qwen3.8-max",
+        endpoint="payg",
+        prompt_tokens=1_000_000,
+        completion_tokens=1_000_000,
+        stage="synthesis",
+    )
+
+    # Без потолка поведение прежнее — неявного лимита не появляется.
+    monkeypatch.delenv("RC_QWEN_MAX_SPEND_CNY", raising=False)
+    qwen_policy.check_spend_guard("qwen3.8-max")
+
+    monkeypatch.setenv("RC_QWEN_MAX_SPEND_CNY", "10")
+    with pytest.raises(RuntimeError, match="достиг"):
+        qwen_policy.check_spend_guard("qwen3.8-max")
+
+    # Нечисловой потолок не роняет прогон, а лишь не применяется.
+    monkeypatch.setenv("RC_QWEN_MAX_SPEND_CNY", "десять")
+    qwen_policy.check_spend_guard("qwen3.8-max")

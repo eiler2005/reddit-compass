@@ -210,6 +210,7 @@ async def _call_qwen(
     timeout_seconds: float = 300.0,
     endpoint: str | None = None,
     think: bool | None = None,
+    stage: str = "",
 ) -> str:
     """Вызов Qwen API (OpenAI-compatible, через aiohttp).
 
@@ -219,12 +220,16 @@ async def _call_qwen(
     """
     import aiohttp
 
-    from .qwen_policy import record_usage
+    from .qwen_policy import check_spend_guard, record_usage
 
     timeout = max(0.001, float(timeout_seconds))
     api_key, base_url, default_model, _ = _get_api_config(model, endpoint)
     resolved_model = model or default_model
     resolved_endpoint = "token-plan" if base_url == _TOKEN_PLAN_URL else "payg"
+    # Потолок расхода проверяется до вызова, а не после: смысл в том, чтобы не потратить,
+    # а не в том, чтобы узнать о трате. Без `RC_QWEN_MAX_SPEND_CNY` ничего не меняется —
+    # неявного лимита у сервиса не появляется.
+    check_spend_guard(resolved_model)
     url = f"{base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
@@ -267,6 +272,7 @@ async def _call_qwen(
             endpoint=resolved_endpoint,
             prompt_tokens=int(usage.get("prompt_tokens") or 0),
             completion_tokens=int(usage.get("completion_tokens") or 0),
+            stage=stage,
         )
         content: str = data.get("choices", [{}])[0].get("message", {}).get("content", "")
         return content
@@ -279,6 +285,7 @@ async def call_qwen_json(
     timeout_seconds: float = ENGINE_REVIEW_TIMEOUT_SECONDS,
     endpoint: str | None = None,
     think: bool | None = None,
+    stage: str = "",
 ) -> str:
     """Run one bounded, temperature-zero Engine JSON review.
 
@@ -301,6 +308,7 @@ async def call_qwen_json(
             timeout_seconds=timeout_seconds,
             endpoint=endpoint,
             think=think,
+            stage=stage,
         ),
         timeout=timeout_seconds,
     )
@@ -393,7 +401,9 @@ async def analyze_posts(
         messages = [{"role": "user", "content": prompt}]
 
         try:
-            response = await _call_qwen(messages, model=model, endpoint=endpoint, think=False)
+            response = await _call_qwen(
+                messages, model=model, endpoint=endpoint, think=False, stage="classify"
+            )
             if not response:
                 failed_batches.append(f"батч {batch_idx + 1}: пустой ответ")
                 continue
@@ -444,7 +454,9 @@ async def analyze_posts(
             logger.warning("LLM batch %d: timeout, retry через 10с...", batch_idx + 1)
             await asyncio.sleep(10)
             try:
-                response = await _call_qwen(messages, model=model, endpoint=endpoint, think=False)
+                response = await _call_qwen(
+                    messages, model=model, endpoint=endpoint, think=False, stage="classify"
+                )
                 if response:
                     text = response.strip()
                     if text.startswith("```"):

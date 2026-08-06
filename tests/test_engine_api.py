@@ -1771,3 +1771,16 @@ def test_today_sort_form_does_not_pin_the_reader_to_a_date(engine_client: TestCl
     pinned = engine_client.get("/today?date=2026-07-29").text
     pinned_form = pinned.split('action="/today"', 1)[1].split("</form>", 1)[0]
     assert 'name="date" value="2026-07-29"' in pinned_form
+
+
+def test_runs_page_shows_the_calendar_coverage_strip(engine_client: TestClient) -> None:
+    """Пропуск дня обязан быть виден на операционной странице, а не только в CLI.
+
+    Раньше о нём узнавали ручным `collect --coverage` или живым SQL — то есть уже при
+    разборе странного релиза.
+    """
+    page = engine_client.get("/runs")
+
+    assert page.status_code == 200
+    assert "Покрытие по дням" in page.text
+    assert "coverage-strip" in page.text

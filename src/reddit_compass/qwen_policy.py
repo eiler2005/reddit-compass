@@ -75,6 +75,35 @@ SYNTH_CHAIN: tuple[tuple[str, str], ...] = (
 )
 
 
+# List prices Model Studio, Singapore/international, CNY за 1M токенов (input, output).
+# Проверены вручную в console 5 августа 2026 — дата обязательна: цены провайдер меняет,
+# а отчёт, посчитанный по молча устаревшей таблице, хуже отсутствующего.
+#
+# Здесь только list price. Промо-скидки в отчёт не попадают: единственный первоисточник
+# по ним — твит, официальная страница цен молчит, а скидки Qoder — кредиты чужого
+# продукта, а не наш биллинг (см. `docs/QWEN_ROUTING.md`). Записать промо можно, но
+# отдельным полем с датой подтверждения, а не подменой этой таблицы.
+LIST_PRICES_SOURCE_DATE = "2026-08-05"
+LIST_PRICES_CNY_PER_1M: dict[str, tuple[float, float]] = {
+    "qwen3.7-flash": (0.225, 0.974),
+    "qwen3.6-flash": (1.87355, 11.2413),
+    "qwen3.8-max": (14.988, 44.965),
+    "qwen3.7-max": (14.988, 44.965),
+}
+
+
+def call_cost_cny(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    """Стоимость вызова по list price; ``None`` — цены для модели нет.
+
+    ``None``, а не ноль: неизвестная цена и бесплатный вызов — разные вещи, и складывать
+    их в одну сумму значило бы занизить расход ровно там, где он не проверен.
+    """
+    price = LIST_PRICES_CNY_PER_1M.get(model)
+    if price is None:
+        return None
+    return prompt_tokens / 1_000_000 * price[0] + completion_tokens / 1_000_000 * price[1]
+
+
 def ledger_path() -> Path:
     override = os.environ.get("RC_QWEN_LEDGER_PATH", "")
     return Path(override) if override else DEFAULT_DATA_DIR / "qwen_usage.db"
@@ -95,6 +124,12 @@ def _connect(path: Path) -> sqlite3.Connection:
             created_at       TEXT NOT NULL
         )"""
     )
+    # Стадия появилась позже таблицы, поэтому добавляется отдельно: у существующих
+    # леджеров записи останутся с пустой стадией, и отчёт честно назовёт их
+    # нераспределёнными, а не припишет к какой-то одной.
+    columns = {str(row[1]) for row in conn.execute("PRAGMA table_info(qwen_usage)").fetchall()}
+    if "stage" not in columns:
+        conn.execute("ALTER TABLE qwen_usage ADD COLUMN stage TEXT NOT NULL DEFAULT ''")
     return conn
 
 
@@ -104,8 +139,14 @@ def record_usage(
     endpoint: str,
     prompt_tokens: int,
     completion_tokens: int,
+    stage: str = "",
 ) -> None:
-    """Пишет расход вызова в леджер. Сбой леджера не роняет сам вызов."""
+    """Пишет расход вызова в леджер. Сбой леджера не роняет сам вызов.
+
+    ``stage`` — какая стадия цикла потратила токены (`extract`, `pair_review`,
+    `trend_review`, `classify`, `synthesis`). Пустая строка допустима и означает
+    «не размечено»: отчёт покажет такие вызовы отдельной строкой, а не растворит их.
+    """
     try:
         path = ledger_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,14 +154,15 @@ def record_usage(
         with conn:
             conn.execute(
                 "INSERT INTO qwen_usage "
-                "(model, endpoint, prompt_tokens, completion_tokens, created_at) "
-                "VALUES (?, ?, ?, ?, ?)",
+                "(model, endpoint, prompt_tokens, completion_tokens, created_at, stage) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     model,
                     endpoint,
                     int(prompt_tokens),
                     int(completion_tokens),
                     datetime.now(UTC).isoformat(),
+                    stage,
                 ),
             )
         conn.close()
@@ -362,3 +404,107 @@ def pick_endpoint(model: str, now: datetime | None = None) -> tuple[str, str]:
             return "payg", "подтверждённая бесплатная квота pay-as-you-go"
         return "payg", "pay-as-you-go list price (free grant unavailable)"
     return "", "ключей Qwen нет"
+
+
+def cost_report(path: Path | None = None, *, since: datetime | None = None) -> dict[str, object]:
+    """Расход по (стадия, модель, эндпоинт) с оценкой в CNY по list price.
+
+    Отчёт намеренно не выводит одну цифру «итого» без оговорок: у части моделей цены в
+    таблице нет, и такие вызовы считаются отдельно как ``unpriced``. Складывать их с
+    нулевой ценой значило бы занизить расход именно там, где он не проверен.
+    """
+    target = path or ledger_path()
+    if not target.exists():
+        return {
+            "price_source_date": LIST_PRICES_SOURCE_DATE,
+            "rows": [],
+            "total_cny": 0.0,
+            "unpriced_calls": 0,
+        }
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect(target)
+        query = """SELECT COALESCE(NULLIF(stage, ''), '(не размечено)') AS stage,
+                          model, endpoint,
+                          COUNT(*) AS calls,
+                          SUM(prompt_tokens) AS prompt_tokens,
+                          SUM(completion_tokens) AS completion_tokens
+                   FROM qwen_usage"""
+        params: tuple[object, ...] = ()
+        if since is not None:
+            query += " WHERE created_at >= ?"
+            params = (since.isoformat(),)
+        query += " GROUP BY stage, model, endpoint ORDER BY stage, model"
+        rows = conn.execute(query, params).fetchall()
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("Не удалось прочитать леджер Qwen для отчёта (%s)", exc)
+        return {
+            "price_source_date": LIST_PRICES_SOURCE_DATE,
+            "rows": [],
+            "total_cny": 0.0,
+            "unpriced_calls": 0,
+        }
+    finally:
+        if conn is not None:
+            conn.close()
+
+    report_rows: list[dict[str, object]] = []
+    total = 0.0
+    unpriced = 0
+    for stage, model, endpoint, calls, prompt_tokens, completion_tokens in rows:
+        cost = call_cost_cny(str(model), int(prompt_tokens or 0), int(completion_tokens or 0))
+        if cost is None:
+            unpriced += int(calls)
+        else:
+            total += cost
+        report_rows.append(
+            {
+                "stage": str(stage),
+                "model": str(model),
+                "endpoint": str(endpoint),
+                "calls": int(calls),
+                "prompt_tokens": int(prompt_tokens or 0),
+                "completion_tokens": int(completion_tokens or 0),
+                "cost_cny": None if cost is None else round(cost, 4),
+            }
+        )
+    return {
+        "price_source_date": LIST_PRICES_SOURCE_DATE,
+        "rows": report_rows,
+        "total_cny": round(total, 4),
+        "unpriced_calls": unpriced,
+    }
+
+
+def spend_guard_limit() -> float | None:
+    """Жёсткий потолок расхода в CNY из ``RC_QWEN_MAX_SPEND_CNY``; пусто — без потолка."""
+    raw = os.environ.get("RC_QWEN_MAX_SPEND_CNY", "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        logger.warning("RC_QWEN_MAX_SPEND_CNY=%r — не число; потолок расхода не применяется", raw)
+        return None
+    return value if value >= 0 else None
+
+
+def check_spend_guard(model: str, *, since: datetime | None = None) -> None:
+    """Поднять ошибку, если накопленный расход уже перебрал потолок.
+
+    Проверка идёт до дорогого вызова и только для моделей с известной ценой: у Flash
+    расход на порядок ниже, и упереться в потолок на нём практически невозможно — а вот
+    Max-синтез способен съесть бюджет за один прогон. Потолок не задан — поведение
+    прежнее, никакого неявного лимита не появляется.
+    """
+    limit = spend_guard_limit()
+    if limit is None:
+        return
+    spent = float(cost_report(since=since or payg_grant_start())["total_cny"])  # type: ignore[arg-type]
+    if spent < limit:
+        return
+    raise RuntimeError(
+        f"Расход Qwen по list price достиг {spent:.2f} CNY при потолке "
+        f"RC_QWEN_MAX_SPEND_CNY={limit:.2f}. Вызов {model} остановлен. "
+        f"Поднимите потолок осознанно либо разберите отчёт `reddit-compass qwen cost`."
+    )

@@ -533,3 +533,54 @@ def test_recovery_moves_snapshot_date_backwards_only(tmp_path: Path) -> None:
     row = conn.execute("SELECT snapshot_date, published_at FROM items").fetchone()
     assert row["snapshot_date"] == "2026-08-04"
     assert row["published_at"] == "2026-08-04T06:00:00Z"
+
+
+def test_coverage_summary_names_only_safe_actions(tmp_path: Path) -> None:
+    """Алерт обязан предлагать безопасное действие, а не «собери сегодняшнее за вчера».
+
+    Оператор читал по-дневный JSON глазами. Для cron нужен вердикт, и он не имеет права
+    предложить живой сбор за прошлую дату — только финализацию сохранённых артефактов
+    либо date-aware историческое восстановление.
+    """
+    from datetime import UTC, datetime
+
+    from reddit_compass.collector import coverage_summary
+
+    today = datetime.now(UTC).date().isoformat()
+    summary = coverage_summary(
+        [
+            {
+                "date": "2026-08-01",
+                "raw_complete": True,
+                "recoverable_from_snapshots": False,
+                "artifacts": {"rss": True},
+            },
+            {
+                "date": "2026-08-02",
+                "raw_complete": False,
+                "recoverable_from_snapshots": True,
+                "artifacts": {"rss": True},
+            },
+            {
+                "date": "2026-08-03",
+                "raw_complete": False,
+                "recoverable_from_snapshots": False,
+                "artifacts": {"rss": False},
+            },
+            {
+                "date": today,
+                "raw_complete": False,
+                "recoverable_from_snapshots": False,
+                "artifacts": {"rss": False},
+            },
+        ]
+    )
+
+    assert summary["days_complete"] == 1
+    actions = {gap["date"]: gap["recommended_action"] for gap in summary["gaps"]}
+    assert actions["2026-08-02"] == "recover_snapshots"
+    assert actions["2026-08-03"] == "historical_recovery"
+    # Сегодняшний день ещё собирается — тревожить по нему нельзя.
+    assert actions[today] == "pending"
+    assert summary["gap_count"] == 2
+    assert "pending" not in summary["actions"]

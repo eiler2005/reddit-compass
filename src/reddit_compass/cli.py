@@ -22,7 +22,7 @@ import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .config import DEFAULT_HARVESTS_DIR, DEFAULT_PROFILE, DEFAULT_SNAPSHOTS_DIR, MonitorConfig
 from .detect_virality import detect_virality
@@ -644,19 +644,22 @@ async def _cmd_collect(args: argparse.Namespace) -> None:
                 )
             )
             return
-        print(
-            json.dumps(
-                collection_coverage(
-                    snapshots_dir,
-                    db_path,
-                    profile=args.profile,
-                    since=args.since,
-                    until=args.until,
-                ),
-                ensure_ascii=False,
-                indent=2,
-            )
+        from .collector import coverage_summary
+
+        days = collection_coverage(
+            snapshots_dir,
+            db_path,
+            profile=args.profile,
+            since=args.since,
+            until=args.until,
         )
+        summary = coverage_summary(days)
+        print(json.dumps({"summary": summary, "days": days}, ensure_ascii=False, indent=2))
+        # Ненулевой код только по явному флагу: интерактивный вызов не должен выглядеть
+        # упавшим из-за пропуска, который оператор и пришёл посмотреть. Для cron-алерта
+        # нужен именно код возврата, поэтому он включается отдельно.
+        if args.fail_on_gap and int(cast(int, summary["gap_count"])):
+            raise SystemExit(1)
         return
     collection_result = await _execute_collection(args)
     _record_corpus_version(collection_result)
@@ -747,6 +750,10 @@ async def _cmd_qwen(args: argparse.Namespace) -> None:
     """Леджер расхода Qwen и прозрачность роутера (см. docs/QWEN_ROUTING.md)."""
     from . import qwen_policy
 
+    if args.qwen_action == "cost":
+        report = qwen_policy.cost_report(since=qwen_policy.payg_grant_start())
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return
     if args.qwen_action == "pick":
         model, endpoint, why = qwen_policy.pick_model(args.task)
         print(
@@ -896,6 +903,17 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         indent=2,
                     )
                 )
+                return
+            if args.engine_action == "readiness":
+                from .intelligence.engine import format_release_readiness, release_readiness
+
+                readiness = release_readiness(engine_conn, data_release_id=args.release)
+                if args.format in {"markdown", "both"}:
+                    print(format_release_readiness(readiness))
+                if args.format == "both":
+                    print()
+                if args.format in {"json", "both"}:
+                    print(json.dumps(readiness, ensure_ascii=False, indent=2))
                 return
             if args.engine_action == "verify":
                 valid = verify_data_release(engine_conn, args.release)
@@ -1188,6 +1206,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         str(job["prompt"]),
                         model=args.model,
                         think=False,
+                        stage="pair_review",
                     )
                     results.append(
                         store_story_review_response(
@@ -1258,6 +1277,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                             endpoint=bulk_endpoint,
                             timeout_seconds=180.0,
                             think=False,
+                            stage="actor_normalize",
                         )
                     except transient_provider_errors() as exc:
                         print(
@@ -1332,6 +1352,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         endpoint=bulk_endpoint,
                         timeout_seconds=180.0,
                         think=False,
+                        stage="schema_extract",
                     ),
                     model=bulk_model,
                     batch_size=int(args.batch_size),
@@ -1446,6 +1467,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         endpoint=review_endpoint or None,
                         timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS,
                         think=False,
+                        stage="trend_review",
                     ),
                     store_response=lambda **kwargs: store_trend_review_response(
                         engine_conn, **kwargs
@@ -1942,6 +1964,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                         endpoint=cycle_endpoint or None,
                         timeout_seconds=TREND_REVIEW_TIMEOUT_SECONDS,
                         think=False,
+                        stage="trend_review",
                     )
                 )
                 if _engine_review_requested(args)
@@ -2303,6 +2326,10 @@ def build_parser() -> argparse.ArgumentParser:
     qwen_sub.add_parser(
         "usage", help="Расход по моделям/эндпоинтам и остатки квот (подписка и бесплатные)"
     )
+    qwen_sub.add_parser(
+        "cost",
+        help="Расход по стадиям и моделям с оценкой в CNY по list price",
+    )
     qwen_pick = qwen_sub.add_parser("pick", help="Какую модель роутер выбрал бы сейчас для задачи")
     qwen_pick.add_argument("--task", choices=["bulk", "synth"], default="bulk")
     sub.add_parser("radar", parents=[common], help="Trend radar: отчёт с ссылками (без LLM)")
@@ -2385,6 +2412,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     collect_p.add_argument(
+        "--fail-on-gap",
+        action="store_true",
+        help=(
+            "Exit 1 when --coverage finds a day that needs recovery. For cron alerting; "
+            "the current UTC day is never counted as a gap."
+        ),
+    )
+    collect_p.add_argument(
         "--overwrite-artifacts",
         action="store_true",
         help=(
@@ -2417,6 +2452,17 @@ def build_parser() -> argparse.ArgumentParser:
     engine_release_sub.add_parser("list")
     engine_release_verify = engine_release_sub.add_parser("verify")
     engine_release_verify.add_argument("--release", required=True)
+    engine_release_readiness = engine_release_sub.add_parser(
+        "readiness",
+        help="Read-only снимок готовности релиза: checksum, полы, указатели, откат",
+    )
+    engine_release_readiness.add_argument("--release", required=True)
+    engine_release_readiness.add_argument(
+        "--format",
+        choices=["json", "markdown", "both"],
+        default="both",
+        help="JSON для журнала, markdown для оператора",
+    )
 
     engine_embeddings = engine_sub.add_parser(
         "embeddings",
