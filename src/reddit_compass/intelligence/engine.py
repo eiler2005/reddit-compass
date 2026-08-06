@@ -4433,9 +4433,14 @@ def _adapt_schema_trends(
     for trend in raw_trends:
         story_ids = [str(story_id) for story_id in trend["story_ids"]]
         members = [by_id[story_id] for story_id in story_ids if story_id in by_id]
-        providers = {
-            str(story.get("source_count") or 0) for story in members
-        }  # source_count уже посчитан на слое Stories
+        # `source_count` сюжета — число различных провайдеров, которые его освещали.
+        # Сюжет с ним ≥2 доказуемо пересекает провайдеров, поэтому и тренд с таким
+        # сюжетом — cross_source. Обратное недоказуемо: два сюжета по одному источнику
+        # могут быть из разных провайдеров, но на слое Stories их имён уже нет, только
+        # счётчик. Раньше здесь стояло множество самих счётчиков, и `len(providers) > 1`
+        # означало «у сюжетов *разные* счётчики» — тренд из сюжетов по два источника
+        # каждый получал single_source, а из сюжетов 1 и 2 — cross_source.
+        cross_source = any(int(story.get("source_count") or 0) > 1 for story in members)
         domains = sorted(
             {
                 domain
@@ -4464,7 +4469,7 @@ def _adapt_schema_trends(
                     "domain_ids": domains,
                     "confidence": confidence,
                     "lifecycle": "stable",
-                    "source_scope": "cross_source" if len(providers) > 1 else "single_source",
+                    "source_scope": "cross_source" if cross_source else "single_source",
                     "first_seen": str(trend["first_seen"]),
                     "last_seen": str(trend["last_seen"]),
                     "story_count": len(story_ids),
@@ -4475,6 +4480,9 @@ def _adapt_schema_trends(
                     "review_status": "pending",
                     "review_id": "",
                     "distinct_actors": trend["distinct_actors"],
+                    # Не попадает в engine_trends — INSERT перечисляет колонки поимённо.
+                    # Нужна `apply_cached_trend_reviews`, чтобы пересчитать акторов.
+                    "actor_by_story": trend.get("actor_by_story", {}),
                 },
                 [(story_id, confidence, "event schema") for story_id in story_ids],
             )
@@ -4496,6 +4504,7 @@ def _llm_schema_resolver(
         _story_domains,
         has_out_of_scope_domain,
         is_non_actor,
+        is_out_of_scope,
         is_publisher,
     )
     from .trend_schema_llm import action_label, title_key
@@ -4513,7 +4522,13 @@ def _llm_schema_resolver(
         if not label:
             return None
         domains = _story_domains(story)
-        if has_out_of_scope_domain(domains):
+        # Вето здесь двойное — ровно как в `schema_v2`, где `extract_action` начинается с
+        # `is_out_of_scope`. Домен ловит спортивное регулирование без спортивной лексики,
+        # заголовок — военное и спортивное действие, которое таксономия доменом не пометила.
+        # v3 применял только доменное, и «Chelsea banned from signing players after Premier
+        # League probe» с доменом `business_markets` уезжал в тренд `bans and restrictions
+        # in business`, хотя v2 его отвергал.
+        if has_out_of_scope_domain(domains) or is_out_of_scope(title):
             return None
         # Актор от модели проходит те же проверки, что и регулярочный: издания и
         # категории не участники события. Раньше этот путь их не проходил, и в тренды
@@ -4871,6 +4886,7 @@ def create_trend_release(
         stories=stories,
         model=str(params["review_model"]),
         prompt_version=str(params["review_prompt_version"]),
+        min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
     )
     # Ревью могло удалить родителя и переименовать ребёнка — дерево чиним до записи.
     trends = _reconcile_trend_hierarchy(trends)
@@ -5221,6 +5237,51 @@ async def run_trend_review_batch(
     return results, errors
 
 
+def _schema_trend_aggregates(
+    trend: dict[str, Any],
+    memberships: list[tuple[str, float, str]],
+    story_by_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Агрегаты тренда, посчитанные по фактическому составу.
+
+    Считает ровно то, что зависит от состава: охват провайдеров, окно дат, число сюжетов
+    и — только для схемных методов — акторов. Имя, паттерн и домены сюда не входят: их
+    состав не определяет.
+
+    ``actor_by_story`` есть лишь у `schema_v2`/`schema_v3`; `embedding_v2` и графовый
+    метод считают акторов иначе и такой карты не отдают. Пересчитывать их акторов по
+    отсутствующей карте значило бы обнулить список и удалить тренд по порогу — поэтому
+    без карты actor-поля остаются прежними, и вызывающий не проверяет порог заново.
+    """
+    from .trend_schema import canonical_actors
+
+    actor_by_story = trend.get("actor_by_story") or {}
+    story_ids = [story_id for story_id, _, _ in memberships]
+    members = [story_by_id[story_id] for story_id in story_ids if story_id in story_by_id]
+    dates = sorted(
+        {str(story.get("first_seen") or "")[:10] for story in members if story.get("first_seen")}
+    )
+    aggregates: dict[str, Any] = {
+        "source_scope": (
+            "cross_source"
+            if any(int(story.get("source_count") or 0) > 1 for story in members)
+            else "single_source"
+        ),
+        "story_count": len(story_ids),
+        # Пустое окно оставляем прежним: сюжеты без даты не повод стереть границы,
+        # которые уже показаны читателю.
+        "first_seen": dates[0] if dates else str(trend.get("first_seen") or ""),
+        "last_seen": dates[-1] if dates else str(trend.get("last_seen") or ""),
+    }
+    if actor_by_story:
+        distinct = canonical_actors(
+            {actor_by_story[sid] for sid in story_ids if actor_by_story.get(sid)}
+        )
+        aggregates["distinct_actors"] = distinct
+        aggregates["source_count"] = len(distinct)
+    return aggregates
+
+
 def apply_cached_trend_reviews(
     conn: sqlite3.Connection,
     *,
@@ -5228,6 +5289,7 @@ def apply_cached_trend_reviews(
     stories: list[dict[str, Any]],
     model: str,
     prompt_version: str,
+    min_distinct_actors: int = 2,
 ) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
     story_by_id = {str(story["story_id"]): story for story in stories}
     resolved: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
@@ -5289,6 +5351,17 @@ def apply_cached_trend_reviews(
         ]
         if len(accepted_memberships) < 3:
             continue
+        # Ревью отсеяло часть состава — значит все агрегаты тренда посчитаны по уже не
+        # существующему множеству. Раньше пересчитывался только `story_count`, и тренд
+        # с четырьмя выжившими сюжетами одной компании публиковался `confirmed` со
+        # списком из полутора десятков акторов, у которых не осталось ни одного сюжета.
+        # Порог `min_distinct_actors` — само определение тренда, а не фильтр кандидатов,
+        # поэтому после отсева он проверяется заново: одноакторная сюжетная линия не
+        # становится трендом оттого, что была им до ревью.
+        surviving = _schema_trend_aggregates(trend, accepted_memberships, story_by_id)
+        recomputed_actors = surviving.get("distinct_actors")
+        if recomputed_actors is not None and len(recomputed_actors) < min_distinct_actors:
+            continue
         resolved.append(
             (
                 {
@@ -5299,11 +5372,11 @@ def apply_cached_trend_reviews(
                     "review_name_ru": review.trend_name_ru,
                     "domain_ids": review.domains or trend["domain_ids"],
                     "confidence": review.confidence,
-                    "story_count": len(accepted_memberships),
                     "evidence_story_ids": review.evidence_story_ids,
                     "counterpoints": review.counterpoints,
                     "review_status": "confirmed",
                     "review_id": str(row["review_id"]),
+                    **surviving,
                 },
                 accepted_memberships,
             )

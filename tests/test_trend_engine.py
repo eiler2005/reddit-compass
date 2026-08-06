@@ -8,6 +8,7 @@ import json
 import sqlite3
 from collections import defaultdict
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -19,6 +20,7 @@ from reddit_compass.intelligence.engine import (
     _discover_trends_graph,
     _event_number_conflict,
     _event_numbers,
+    _schema_trend_aggregates,
     _story_topic_keys,
     active_label_story_pairs,
     apply_cached_trend_reviews,
@@ -2456,3 +2458,164 @@ def test_trend_review_cache_applies_to_release_with_more_stories(tmp_path: Path)
     assert resolved[0][0]["name_ru"] == "root"
     assert resolved[0][0]["pattern"] == "root"
     assert resolved[0][0]["review_name_ru"] == "тестовый паттерн"
+
+
+def _seeded_review_trend(
+    engine: sqlite3.Connection,
+    *,
+    actor_by_story: dict[str, str],
+    accepted: int = 5,
+) -> tuple[list[dict[str, Any]], list[tuple[str, float, str]], dict[str, Any]]:
+    """Общая заготовка: 25 сюжетов, ревью подтверждает `accepted` из показанных."""
+    _seed_trend_review_release(engine, 25)
+    jobs = prepare_trend_review_jobs(engine, "trends_review_test", limit=10)
+    shown = jobs[0]["story_ids"]
+    store_trend_review_response(
+        engine,
+        target_id="trend_root",
+        input_hash=str(jobs[0]["input_hash"]),
+        raw_response=json.dumps(
+            {
+                "decision": "coherent_trend",
+                "trend_name_ru": "тестовый паттерн",
+                "pattern": "повторяющийся паттерн",
+                "story_ids": shown[:accepted],
+                "evidence_story_ids": shown[:3],
+                "counterpoints": [],
+                "domains": [],
+                "confidence": 0.8,
+            }
+        ),
+        allowed_story_ids=set(shown),
+    )
+    stories = [
+        {
+            "story_id": f"story_{index:02}",
+            "title": f"Title {index}",
+            "summary_ru": f"Summary {index}",
+            "domain_ids": '["other"]',
+            "theme_ids": "[]",
+            "first_seen": "2026-07-28",
+            "last_seen": "2026-08-03",
+            # Обязано совпадать с посевом `_seed_trend_review_release`: `source_count`
+            # входит в payload ревью, а значит и в `input_hash`. Разойдётся — кэш не
+            # найдётся, и тест померит ветку `pending`, а не отсев.
+            "source_count": 2,
+        }
+        for index in range(25)
+    ]
+    memberships = [(f"story_{index:02}", 1.0 + index, "") for index in range(25)]
+    trend = {
+        "trend_id": "trend_root",
+        "name_ru": "root",
+        "pattern": "root",
+        "domain_ids": [],
+        "confidence": 0.9,
+        "first_seen": "2026-07-28",
+        "last_seen": "2026-08-03",
+        "story_count": 25,
+        "source_count": 15,
+        "source_scope": "cross_source",
+        "distinct_actors": [f"Actor {index}" for index in range(15)],
+        "actor_by_story": actor_by_story,
+    }
+    return stories, memberships, trend
+
+
+def test_review_recomputes_actors_from_the_surviving_members(tmp_path: Path) -> None:
+    """Отсев ревью обязан пересчитать акторов, а не пронести их от прежнего состава.
+
+    Список акторов и `source_count` считались до ревью и проносились через него как есть.
+    Тренд с четырьмя выжившими сюжетами публиковался `confirmed` со списком из пятнадцати
+    акторов, у одиннадцати из которых не осталось ни одного сюжета — их рендерила секция
+    Actors, и из того же счётчика `_reconcile_trend_hierarchy` строила суффикс имени.
+    """
+    engine = engine_db(tmp_path / "trend_engine.db")
+    # Выжившие сюжеты принадлежат двум акторам, а не пятнадцати.
+    actor_by_story = {f"story_{index:02}": f"Actor {index % 2}" for index in range(25)}
+    stories, memberships, trend = _seeded_review_trend(engine, actor_by_story=actor_by_story)
+
+    resolved = apply_cached_trend_reviews(
+        engine,
+        trends=[(trend, memberships)],
+        stories=stories,
+        model="qwen3.7-flash",
+        prompt_version=TREND_REVIEW_PROMPT_VERSION,
+    )
+
+    assert len(resolved) == 1
+    confirmed, accepted_memberships = resolved[0]
+    assert confirmed["review_status"] == "confirmed"
+    assert set(confirmed["distinct_actors"]) == {"Actor 0", "Actor 1"}
+    assert confirmed["source_count"] == 2
+    assert confirmed["story_count"] == len(accepted_memberships)
+
+
+def test_source_scope_reads_provider_reach_not_the_set_of_counts() -> None:
+    """`source_scope` считается по охвату провайдеров, а не по разбросу счётчиков.
+
+    Здесь стояло множество самих `source_count`, и `len(providers) > 1` означало «у
+    сюжетов разные счётчики». Тренд из сюжетов по два провайдера каждый получал
+    `single_source`, а одно-провайдерный со счётчиками 1 и 2 — `cross_source`.
+    Обратное направление недоказуемо: у слоя Stories остался счётчик, а не имена
+    провайдеров, поэтому два сюжета по одному источнику честнее звать `single_source`.
+    """
+
+    def scope(counts: list[int]) -> str:
+        stories = {
+            f"s{i}": {"story_id": f"s{i}", "first_seen": "2026-07-28", "source_count": count}
+            for i, count in enumerate(counts)
+        }
+        memberships = [(story_id, 1.0, "") for story_id in stories]
+        return str(_schema_trend_aggregates({}, memberships, stories)["source_scope"])
+
+    assert scope([2, 2, 2]) == "cross_source"
+    assert scope([1, 1, 1]) == "single_source"
+    assert scope([1, 2]) == "cross_source"
+
+
+def test_review_drops_a_trend_that_became_single_actor(tmp_path: Path) -> None:
+    """`min_distinct_actors` — определение тренда, а не фильтр кандидатов до ревью.
+
+    Порог применялся один раз, на построении. Ревью могло оставить сюжеты одного актора,
+    и одна сюжетная линия публиковалась `confirmed` как тренд — ровно то, что порог
+    существует чтобы не допустить.
+    """
+    engine = engine_db(tmp_path / "trend_engine.db")
+    actor_by_story = {f"story_{index:02}": "OpenAI" for index in range(25)}
+    stories, memberships, trend = _seeded_review_trend(engine, actor_by_story=actor_by_story)
+
+    resolved = apply_cached_trend_reviews(
+        engine,
+        trends=[(trend, memberships)],
+        stories=stories,
+        model="qwen3.7-flash",
+        prompt_version=TREND_REVIEW_PROMPT_VERSION,
+    )
+
+    assert resolved == []
+
+
+def test_review_leaves_non_schema_trend_actors_alone(tmp_path: Path) -> None:
+    """У `embedding_v2` и графа нет карты акторов — обнулять их список нельзя.
+
+    Пересчёт по отсутствующей карте дал бы пустой список, тренд не взял бы порог и
+    молча исчез. Без карты actor-поля остаются прежними, порог заново не проверяется.
+    """
+    engine = engine_db(tmp_path / "trend_engine.db")
+    stories, memberships, trend = _seeded_review_trend(engine, actor_by_story={})
+
+    resolved = apply_cached_trend_reviews(
+        engine,
+        trends=[(trend, memberships)],
+        stories=stories,
+        model="qwen3.7-flash",
+        prompt_version=TREND_REVIEW_PROMPT_VERSION,
+    )
+
+    assert len(resolved) == 1
+    confirmed = resolved[0][0]
+    assert confirmed["distinct_actors"] == [f"Actor {index}" for index in range(15)]
+    assert confirmed["source_count"] == 15
+    # Состав всё равно пересчитан — он от резолвера не зависит.
+    assert confirmed["story_count"] == len(resolved[0][1])

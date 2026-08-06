@@ -69,6 +69,33 @@ class QwenApiError(RuntimeError):
         super().__init__(f"Qwen API {status}: {body[:200]}")
 
 
+class QwenConfigError(RuntimeError):
+    """Ключ или модель настроены неверно.
+
+    Отдельный тип, а не `ValueError`: батчевые циклы ловят `ValueError` как ошибку
+    разбора ответа (`int("8/10")`), и отсутствующий ключ логировался как «parse error»
+    на каждом батче подряд, после чего стадия отчитывалась об успехе с нулём сигналов.
+    Ошибка конфигурации не транзиентна — повтор её не исправит, и глотать её нельзя.
+    """
+
+
+class QwenAllBatchesFailedError(RuntimeError):
+    """Ни один батч не дошёл до результата.
+
+    Пропуск отдельного батча — осознанная терпимость: классификация Pulse не обязана
+    быть полной. Но провал **всех** батчей означает, что стадии нечего сказать о
+    корпусе, а раньше она возвращала `[]`, и вызывающий писал пустой `signals.jsonl`,
+    отчёт, историю тем и радар, после чего выходил с кодом 0. Неверный ключ выглядел
+    ровно как «сегодня нет сигналов».
+    """
+
+    def __init__(self, batches: int, reasons: list[str]) -> None:
+        self.batches = batches
+        self.reasons = reasons
+        detail = "; ".join(reasons[:3])
+        super().__init__(f"Все {batches} батчей классификации не удались: {detail}")
+
+
 def transient_provider_errors() -> tuple[type[BaseException], ...]:
     """Сбои, при которых батч разумно пропустить, а прогон продолжить.
 
@@ -102,11 +129,23 @@ def _get_api_config(
         "QWEN_Pay_As_You_Go_PLAN_KEY",
     ):
         payg_key = os.environ.get(var, "") or payg_key
-    if endpoint == "token-plan" and model in _PAYG_ONLY_MODELS:
+    # Проверка по модели, а не по `endpoint`: строку `"token-plan"` сюда не передаёт
+    # никто. Обе цепочки `qwen_policy` — payg, а `pick_endpoint` возвращает `"payg"`
+    # либо `""`, и вызывающие приводят пустую строку к `None`. Пока условие включало
+    # `endpoint == "token-plan"`, весь блок был недостижим: на деплое, где задан только
+    # `QWEN_TOKEN_PLAN_KEY`, `qwen3.7-flash` — дефолт `engine stories review`,
+    # `engine trends review`, `--review-model` и `--trend-review-model` — доезжала до
+    # последней ветки, уходила на token-plan URL и получала 404 на каждом джобе.
+    if model in _PAYG_ONLY_MODELS:
         if payg_key:
             base_url = os.environ.get("DASHSCOPE_BASE_URL", _DASHSCOPE_INTL_URL)
             return payg_key, base_url, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
-        raise ValueError(f"{model} is available only on the pay-as-you-go Qwen endpoint")
+        raise QwenConfigError(
+            f"{model} доступна только на pay-as-you-go endpoint Qwen, а ключ "
+            "pay-as-you-go не задан. Задайте DASHSCOPE_API_KEY либо выберите модель, "
+            "доступную на token-plan: подмена модели молча сделала бы кэш "
+            "`llm_reviews` невоспроизводимым."
+        )
     if endpoint == "token-plan" and token_plan_key:
         return token_plan_key, _TOKEN_PLAN_URL, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
     if endpoint == "payg" and payg_key:
@@ -117,7 +156,7 @@ def _get_api_config(
         return payg_key, base_url, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
     if token_plan_key:
         return token_plan_key, _TOKEN_PLAN_URL, _MODEL_CLASSIFY, _MODEL_SYNTHESIS
-    raise ValueError(
+    raise QwenConfigError(
         "Ключ Qwen не установлен. Задайте QWEN_TOKEN_PLAN_KEY "
         "или DASHSCOPE_API_KEY. Получить: https://home.qwencloud.com/api-keys"
     )
@@ -331,6 +370,8 @@ async def analyze_posts(
         model, endpoint, _ = pick_model("bulk")
 
     signals: list[SignalCard] = []
+    # Пропуск одного батча допустим, провал всех — нет: см. `QwenAllBatchesFailedError`.
+    failed_batches: list[str] = []
     batches = [cards[i : i + BATCH_SIZE] for i in range(0, len(cards), BATCH_SIZE)]
 
     for batch_idx, batch in enumerate(batches):
@@ -354,6 +395,7 @@ async def analyze_posts(
         try:
             response = await _call_qwen(messages, model=model, endpoint=endpoint, think=False)
             if not response:
+                failed_batches.append(f"батч {batch_idx + 1}: пустой ответ")
                 continue
 
             # Парсим JSON из ответа (может быть обёрнут в ```json ... ```)
@@ -390,11 +432,13 @@ async def analyze_posts(
 
         except (json.JSONDecodeError, ValueError) as exc:
             logger.warning("LLM batch %d: parse error: %s", batch_idx + 1, exc)
+            failed_batches.append(f"батч {batch_idx + 1}: parse error: {exc}")
             continue
         except QwenApiError as exc:
             # Классификация Pulse не обязана быть полной: пропуск батча здесь —
             # осознанный выбор, а не побочный эффект транспорта, возвращавшего "".
             logger.warning("LLM batch %d: %s", batch_idx + 1, exc)
+            failed_batches.append(f"батч {batch_idx + 1}: {exc}")
             continue
         except TimeoutError:
             logger.warning("LLM batch %d: timeout, retry через 10с...", batch_idx + 1)
@@ -442,14 +486,17 @@ async def analyze_posts(
                         len(batches),
                         len(parsed),
                     )
-            except Exception:
+            except Exception as exc:
                 logger.warning("LLM batch %d: retry не удался, пропускаем", batch_idx + 1)
+                failed_batches.append(f"батч {batch_idx + 1}: retry: {type(exc).__name__}")
             continue
 
         # Пауза между батчами (rate limit Qwen)
         if batch_idx < len(batches) - 1:
             await asyncio.sleep(1.0)
 
+    if batches and len(failed_batches) == len(batches):
+        raise QwenAllBatchesFailedError(len(batches), failed_batches)
     return signals
 
 

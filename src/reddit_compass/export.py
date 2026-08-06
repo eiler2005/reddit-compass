@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from collections import defaultdict
 from pathlib import Path
 
@@ -18,11 +19,29 @@ def _ensure_dir(path: Path) -> None:
 # ── JSONL writers ──────────────────────────────────────────────────────────
 
 
-def write_posts_jsonl(cards: list[PostCard], path: Path) -> int:
+def _write_lines_atomically(path: Path, lines: list[str]) -> None:
+    """Записать файл целиком или не тронуть прежний.
+
+    ``mode="w"`` усекает файл в момент открытия, поэтому падение адаптера на середине
+    записи оставляло дневной артефакт обрезанным, а отказ ещё до первой строки — пустым.
+    Пустой артефакт неотличим от честно пустого дня, и день уходил в релиз как собранный.
+    """
     _ensure_dir(path)
-    with path.open("w", encoding="utf-8") as f:
-        for card in cards:
-            f.write(card.to_json() + "\n")
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as f:
+            for line in lines:
+                f.write(line + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def write_posts_jsonl(cards: list[PostCard], path: Path) -> int:
+    _write_lines_atomically(path, [card.to_json() for card in cards])
     logger.info("Записано %d постов → %s", len(cards), path)
     return len(cards)
 

@@ -22,6 +22,8 @@ from pathlib import Path
 
 from .config import DEFAULT_DATA_DIR
 
+logger = logging.getLogger("reddit_compass")
+
 # 17:00–03:00 МСК (UTC+3) в координатах UTC.
 _OFFPEAK_START_UTC = time(14, 0)
 _OFFPEAK_END_UTC = time(0, 0)
@@ -126,7 +128,7 @@ def record_usage(
         # Леджер — наблюдение, а не условие работы: диск не должен останавливать прогон.
         # Но и глотать сбой целиком нельзя: недосчитанный расход роутер прочтёт как
         # свободную квоту, поэтому потеря обязана оставить след.
-        logging.getLogger(__name__).warning(
+        logger.warning(
             "Qwen ledger write failed (%s: %s); %d+%d tokens for %s/%s not recorded",
             type(exc).__name__,
             exc,
@@ -148,26 +150,56 @@ def usage_totals(
     target = path or ledger_path()
     if not target.exists():
         return {}
-    conn = _connect(target)
-    if since is None:
-        rows = conn.execute(
-            """SELECT model, endpoint, SUM(prompt_tokens + completion_tokens)
-               FROM qwen_usage GROUP BY model, endpoint"""
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            """SELECT model, endpoint, SUM(prompt_tokens + completion_tokens)
-               FROM qwen_usage WHERE created_at >= ? GROUP BY model, endpoint""",
-            (since.isoformat(),),
-        ).fetchall()
-    conn.close()
+    # Леджер — наблюдение, а не предусловие маршрутизации: `record_usage` уже глотает
+    # свои сбои, но `pick_model`/`pick_endpoint` зовут эту функцию первой, причём
+    # вызывающие делают это *вне* своих try-блоков. Незакрытый `database is locked`
+    # под конкурентностью 6–8 убивал bulk-стадию целиком. Недоступный леджер означает
+    # «расход неизвестен» — это ноль известного расхода, а не отказ стадии.
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect(target)
+        query = """SELECT model, endpoint, SUM(prompt_tokens + completion_tokens)
+                   FROM qwen_usage"""
+        if since is None:
+            rows = conn.execute(f"{query} GROUP BY model, endpoint").fetchall()
+        else:
+            rows = conn.execute(
+                f"{query} WHERE created_at >= ? GROUP BY model, endpoint",
+                (since.isoformat(),),
+            ).fetchall()
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("Не удалось прочитать леджер Qwen (%s); считаем расход нулевым", exc)
+        return {}
+    finally:
+        if conn is not None:
+            conn.close()
     return {(str(model), str(endpoint)): int(total) for model, endpoint, total in rows}
+
+
+def _int_env(name: str, default: int | None) -> int | None:
+    """Целое из переменной окружения; мусор и отрицательное — предупреждение и default.
+
+    Голый `int(raw)` ронял стадию трейсбеком на `1M`, `1e6` или `1,000,000` — записях,
+    которые оператор набирает естественно. Отрицательное значение принималось молча и
+    означало «нет квоты», что неотличимо от опечатки.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        logger.warning("%s=%r — не целое число; берём значение по умолчанию %r", name, raw, default)
+        return default
+    if value < 0:
+        logger.warning("%s=%d отрицательно; берём значение по умолчанию %r", name, value, default)
+        return default
+    return value
 
 
 def token_plan_quota() -> int | None:
     """Общий лимит токенов подписки token-plan; пусто — неизвестен (считаем безлимитом)."""
-    raw = os.environ.get("RC_QWEN_TOKEN_PLAN_TOKENS", "").strip()
-    return int(raw) if raw else None
+    return _int_env("RC_QWEN_TOKEN_PLAN_TOKENS", None)
 
 
 def payg_grant_start() -> datetime | None:
@@ -182,9 +214,21 @@ def payg_grant_start() -> datetime | None:
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(raw).replace(tzinfo=UTC)
+        parsed = datetime.fromisoformat(raw)
     except ValueError:
+        # Битую дату нельзя проглатывать молча: `payg_grant_expired` тогда навсегда
+        # отвечает «не истёк», и оператор, набравший `05.08.2026`, продолжает получать
+        # «подтверждённая бесплатная квота» после 90-го дня. Более строгая настройка
+        # деградировала в самую разрешительную.
+        logger.warning(
+            "RC_QWEN_PAYG_GRANT_START=%r не разбирается как дата (ожидается YYYY-MM-DD); "
+            "срок гранта не проверяется",
+            raw,
+        )
         return None
+    # Смещение отбрасывать нельзя: `.replace(tzinfo=UTC)` над `…+03:00` сдвигал окно на
+    # три часа. Naive-значение считаем UTC, aware — приводим к UTC.
+    return parsed.replace(tzinfo=UTC) if parsed.tzinfo is None else parsed.astimezone(UTC)
 
 
 def payg_grant_expired(now: datetime | None = None) -> bool:
@@ -196,8 +240,22 @@ def payg_grant_expired(now: datetime | None = None) -> bool:
 
 
 def payg_free_quota() -> int:
-    raw = os.environ.get("RC_QWEN_PAYG_FREE_TOKENS", "").strip()
-    return int(raw) if raw else DEFAULT_PAYG_FREE_TOKENS
+    value = _int_env("RC_QWEN_PAYG_FREE_TOKENS", DEFAULT_PAYG_FREE_TOKENS)
+    return DEFAULT_PAYG_FREE_TOKENS if value is None else value
+
+
+def payg_grant_is_per_model() -> bool:
+    """Даётся ли бесплатный грант каждой модели отдельно, а не общим пулом на аккаунт.
+
+    Провайдер этого не документирует, а разница дорогая: при общем пуле «свободные»
+    модели ниже по цепочке свободными не являются. Включать только после проверки в
+    Model Studio console — ровно как и сам ``RC_QWEN_PAYG_FREE_TOKENS``.
+    """
+    return os.environ.get("RC_QWEN_PAYG_GRANT_PER_MODEL", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
 
 
 def in_offpeak(now: datetime | None = None) -> bool:
@@ -235,7 +293,6 @@ def _room_left(
     *,
     grant_expired: bool = False,
 ) -> bool:
-    used = totals.get((model, endpoint), 0)
     if endpoint == "token-plan":
         quota = token_plan_quota()
         if quota is None:
@@ -245,7 +302,18 @@ def _room_left(
     # есть, значит выставлять счёт там, где роутер обещал бесплатно.
     if grant_expired:
         return False
-    return used < payg_free_quota()
+    # Считать грант отдельным для каждой модели можно только если это подтверждено:
+    # если пул на самом деле общий, то после его исчерпания роутер уверен, что впереди
+    # ещё три бесплатные модели, и уводит извлечение (~1020 вызовов) с `qwen3.7-flash`
+    # на `qwen3.6-flash`, который по списку цен дороже в 8.3× по input и 11.5× по
+    # output — продолжая при этом писать в лог «подтверждённая бесплатная квота».
+    # Провайдер семантику гранта не документирует, поэтому по умолчанию считаем пул
+    # общим: ошибка в эту сторону оставляет нас на самой дешёвой модели, ошибка в
+    # обратную — платит по восьмикратному тарифу.
+    if payg_grant_is_per_model():
+        return totals.get((model, endpoint), 0) < payg_free_quota()
+    spent = sum(total for (_, e), total in totals.items() if e == "payg")
+    return spent < payg_free_quota()
 
 
 def pick_model(task: str, now: datetime | None = None) -> tuple[str, str, str]:

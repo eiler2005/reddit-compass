@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode, urlsplit, urlunsplit
 
 from ..models import PostCard
+from .errors import RequestTally, SourceTransportError
 
 logger = logging.getLogger("reddit_compass")
 
@@ -307,11 +308,14 @@ async def fetch_ladder_source(
     """Загружает статьи источника через Ladder (парсинг listing-страниц)."""
     cards: list[PostCard] = []
     seen_urls: set[str] = set()
+    tally = RequestTally(f"ladder:{source.name}")
 
     for path in source.search_paths[:max_pages]:
         url = f"{source.base_url}{path}"
+        tally.attempt()
         html = await fetch_ladder_page(url)
         if not html:
+            tally.failed(f"{path}: no page")
             continue
 
         # Извлекаем статьи из listing-страницы
@@ -348,6 +352,7 @@ async def fetch_ladder_source(
             )
 
     logger.info("Ladder %s: %d статей", source.name, len(cards))
+    tally.raise_if_total_failure()
     return cards
 
 
@@ -366,8 +371,18 @@ async def fetch_all_ladder(
         )
     sources = sources or LADDER_SOURCES
     all_cards: list[PostCard] = []
+    # Как и в RSS: коллектор считает Ladder одним источником, поэтому недоступность
+    # одного издания — лишь неудачная попытка, а отказ — когда не ответило ни одно.
+    tally = RequestTally("ladder")
     for source in sources:
-        cards = await fetch_ladder_source(source, snapshot_date, max_pages)
+        tally.attempt()
+        try:
+            cards = await fetch_ladder_source(source, snapshot_date, max_pages)
+        except SourceTransportError as exc:
+            logger.warning("Ladder source %s unavailable: %s", source.name, exc)
+            tally.failed(f"{source.name}: all pages failed")
+            continue
         all_cards.extend(cards)
     logger.info("Ladder total: %d статей из %d источников", len(all_cards), len(sources))
+    tally.raise_if_total_failure()
     return all_cards

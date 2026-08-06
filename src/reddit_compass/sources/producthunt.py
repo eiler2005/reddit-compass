@@ -12,6 +12,7 @@ import xml.etree.ElementTree as ET
 from datetime import UTC, datetime
 
 from ..models import PostCard
+from .errors import SourceTransportError
 
 logger = logging.getLogger("reddit_compass")
 
@@ -22,6 +23,11 @@ HTML_TAG_RE = re.compile(r"<[^>]+>")
 def _strip_html(html: str) -> str:
     text = HTML_TAG_RE.sub(" ", html)
     return text.strip()[:2000]
+
+
+def _entry_published(entry: ET.Element, ns: dict[str, str]) -> str | None:
+    pub_el = entry.find("atom:published", ns)
+    return pub_el.text.strip() if pub_el is not None and pub_el.text else None
 
 
 async def fetch_producthunt(
@@ -42,7 +48,8 @@ async def fetch_producthunt(
         ):
             if resp.status != 200:
                 logger.warning("ProductHunt RSS: HTTP %d", resp.status)
-                return []
+                # Единственный запрос адаптера: его отказ — отказ источника целиком.
+                raise SourceTransportError("producthunt", 1, [f"feed: HTTP {resp.status}"])
             text = await resp.text()
 
         root = ET.fromstring(text)
@@ -50,6 +57,16 @@ async def fetch_producthunt(
         # Atom: <feed><entry> (namespace http://www.w3.org/2005/Atom)
         ns = {"atom": "http://www.w3.org/2005/Atom"}
         entries = root.findall("atom:entry", ns)
+        if historical_date:
+            # Обрезание после фильтра, а не до: иначе лимит съедали самые свежие записи
+            # и до нужного дня очередь не доходила. У Product Hunt date-aware запроса нет
+            # вовсе — фид всегда текущий, поэтому за прошлую дату он честно вернёт пусто,
+            # а не подставит сегодняшние запуски.
+            entries = [
+                entry
+                for entry in entries
+                if _published_on_date(_entry_published(entry, ns), historical_date)
+            ]
 
         for entry in entries[:limit]:
             title_el = entry.find("atom:title", ns)
@@ -97,12 +114,16 @@ async def fetch_producthunt(
                 )
             )
 
+    except SourceTransportError:
+        raise
     except ET.ParseError as exc:
+        # Ответ пришёл, но разобрать его нельзя: данных за день нет и доказательства
+        # пустоты тоже нет. Это отказ, а не тихий день.
         logger.warning("ProductHunt RSS parse error: %s", exc)
-        return []
+        raise SourceTransportError("producthunt", 1, [f"feed: ParseError {exc}"]) from exc
     except Exception as exc:
         logger.warning("ProductHunt fetch error: %s", exc)
-        return []
+        raise SourceTransportError("producthunt", 1, [f"feed: {type(exc).__name__}"]) from exc
 
     logger.info("ProductHunt: %d продуктов", len(cards))
     return cards

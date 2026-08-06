@@ -10,7 +10,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 from reddit_compass.api.app import create_app
+from reddit_compass.api.dates import display_date
 from reddit_compass.api.ui import _build_today_reading_list, _today_change_candidates
+from reddit_compass.api.v2 import _sort_news_rows
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.engine import engine_db, store_quality_report
 from reddit_compass.intelligence.migrations import migrate
@@ -1293,7 +1295,10 @@ def test_published_lists_rank_strength_before_freshness_and_expose_dates(
     assert trends[1]["last_seen"] == "2026-08-05"
     assert fresh_trends[0]["trend_id"] == "trend_tie_new"
     assert pulse["items"][0]["published_at"] == "2026-08-05T11:00:00Z"
-    assert "2026-08-02T09:00:00Z" in news_page.text
+    # Страница показывает день, а не отметку времени провайдера: в одной колонке рядом
+    # стояли RFC 2822, ISO и ISO с микросекундами из отката на `observed_at`.
+    assert "2026-08-02" in news_page.text
+    assert "2026-08-02T09:00:00Z" not in news_page.text
     assert "По сюжетам" in news_page.text
     assert "Все материалы" in news_page.text
     assert "Сначала свежее" in news_page.text
@@ -1663,3 +1668,53 @@ def test_trend_children_render_on_the_list_page(engine_client: TestClient) -> No
     assert response.status_code == 200
     assert "Проверяемый тренд by companies" in response.text
     assert "Anthropic, TikTok" in response.text
+
+
+def _news_row(item_id: str, published_at: str) -> dict[str, object]:
+    """Строка News-проекции; `sqlite3.Row` здесь не нужен — сортировка читает по ключу."""
+    return {
+        "item_id": item_id,
+        "published_at": published_at,
+        "observed_at": "",
+        "snapshot_date": "",
+        "story_source_count": 1,
+        "story_item_count": 1,
+        "raw_engagement": "{}",
+    }
+
+
+def test_news_sort_orders_mixed_date_formats_chronologically() -> None:
+    """Сортировка обязана идти по времени, а не по написанию даты.
+
+    `published_at` не нормализован: Reddit и HN отдают ISO-8601, RSS — RFC 2822. В боевом
+    релизе это 3219 против 1414 строк. Пока дата была пятым ключом `_news_strength`, до
+    неё доходило только при совпадении четырёх предыдущих. `b048cdf` поднял её в первичный
+    ключ `sort=fresh`, и лексикографика начала сортировать по названию дня недели:
+    `W > T > S > M > F > "2"` — сначала все среды, затем вторники, и только после всех RSS
+    шли 3219 материалов Reddit и HN независимо от свежести.
+    """
+    rows = [
+        _news_row("iso-oldest", "2026-07-27T06:00:00Z"),
+        _news_row("rfc-newest", "Wed, 29 Jul 2026 06:00:00 GMT"),
+        _news_row("iso-middle", "2026-07-28T06:00:00Z"),
+        _news_row("undated", ""),
+    ]
+
+    fresh = [str(row["item_id"]) for row in _sort_news_rows(rows, sort="fresh")]  # type: ignore[arg-type]
+    oldest = [str(row["item_id"]) for row in _sort_news_rows(rows, sort="oldest")]  # type: ignore[arg-type]
+
+    assert fresh[:3] == ["rfc-newest", "iso-middle", "iso-oldest"]
+    assert oldest[:3] == ["iso-oldest", "iso-middle", "rfc-newest"]
+    # Материал без даты — последний в обоих направлениях, а не первый по возрастанию.
+    assert fresh[-1] == "undated"
+    assert oldest[-1] == "undated"
+
+
+def test_published_date_filter_collapses_three_formats_to_one_day() -> None:
+    """В одной колонке стояли RFC 2822, ISO и ISO с микросекундами из отката `observed_at`."""
+    assert display_date("Wed, 29 Jul 2026 06:59:37 GMT") == "2026-07-29"
+    assert display_date("2026-07-29T06:59:37Z") == "2026-07-29"
+    assert display_date("2026-07-27T21:19:31.983321Z") == "2026-07-27"
+    # Испорченная дата у одного материала не имеет права ронять выдачу целиком.
+    assert display_date("not a date") == ""
+    assert display_date(None) == ""

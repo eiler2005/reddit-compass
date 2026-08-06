@@ -12,7 +12,7 @@
         <span title="Reddit upvotes">▲ {{ post.reddit_score }}</span>
         <span title="Комментарии">💬 {{ post.reddit_comments }}</span>
         <span title="Pulse score">pulse {{ post.pulse_score }}</span>
-        {% if post.published_at %}<span>{{ post.published_at }}</span>{% endif %}
+        {% if post.published_at %}<span>{{ post.published_at | published_date }}</span>{% endif %}
         {% if post.target_url %}
         <a href="{{ post.target_url }}" target="_blank" rel="noopener">первоисточник</a>
         {% endif %}

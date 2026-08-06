@@ -564,6 +564,10 @@ def _make_trend(
         "pattern": name,
         "story_ids": [str(story["story_id"]) for story, _, _ in members],
         "distinct_actors": distinct,
+        # Актор каждого сюжета отдельно от схлопнутого списка: ревью отсеивает часть
+        # состава, и без этой карты пересчитать `distinct_actors` по выжившим нельзя —
+        # актора извлекал резолвер (лексикон или LLM), которого на слое ревью уже нет.
+        "actor_by_story": {str(story["story_id"]): actor for story, _, actor in members if actor},
         "first_seen": dates[0],
         "last_seen": dates[-1],
         "story_count": len(members),

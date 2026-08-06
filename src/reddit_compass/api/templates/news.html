@@ -64,7 +64,7 @@
                     item.story_source_count ~ " кластеров · " ~ item.story_item_count ~ " материалов в сюжете" if item.story_id else "один источник",
                     "▲ " ~ item.raw_score if item.raw_score else "",
                     "💬 " ~ item.raw_comments if item.raw_comments else "",
-                    item.published_at or item.observed_at or item.snapshot_date
+                    (item.published_at or item.observed_at or item.snapshot_date) | published_date
                 ],
                 domain_ids=item.domain_ids,
                 row_pains=item.pain_points,

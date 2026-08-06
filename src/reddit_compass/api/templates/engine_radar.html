@@ -154,7 +154,7 @@
                     <span class="confidence-badge confidence-high">{{ "%.0f"|format(s.pulse_score) }} pulse</span>
                 </div>
                 <h3><a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a></h3>
-                <p class="section-note">r/{{ s.subreddit }} · {{ s.signal_type }}{% if s.published_at %} · {{ s.published_at }}{% endif %}</p>
+                <p class="section-note">r/{{ s.subreddit }} · {{ s.signal_type }}{% if s.published_at %} · {{ s.published_at | published_date }}{% endif %}</p>
             </article>
             {% endfor %}
         </div>
@@ -169,7 +169,7 @@
                     <span>{{ "%.0f"|format(s.pulse_score) }} pulse</span>
                 </div>
                 <h3><a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a></h3>
-                <p class="section-note">r/{{ s.subreddit }}{% if s.published_at %} · {{ s.published_at }}{% endif %}</p>
+                <p class="section-note">r/{{ s.subreddit }}{% if s.published_at %} · {{ s.published_at | published_date }}{% endif %}</p>
             </article>
             {% endfor %}
         </div>
@@ -185,7 +185,7 @@
                     <span>{{ "%.0f"|format(s.pulse_score) }} pulse</span>
                 </div>
                 <h3><a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a></h3>
-                <p class="section-note">r/{{ s.subreddit }}{% if s.published_at %} · {{ s.published_at }}{% endif %}</p>
+                <p class="section-note">r/{{ s.subreddit }}{% if s.published_at %} · {{ s.published_at | published_date }}{% endif %}</p>
             </article>
             {% endfor %}
         </div>
@@ -201,7 +201,7 @@
                     <span>{{ "%.0f"|format(s.pulse_score) }} pulse</span>
                 </div>
                 <h3><a href="{{ s.discussion_url }}" target="_blank" rel="noopener">{{ s.title }}</a></h3>
-                <p class="section-note">r/{{ s.subreddit }} · 0 mainstream coverage{% if s.published_at %} · {{ s.published_at }}{% endif %}</p>
+                <p class="section-note">r/{{ s.subreddit }} · 0 mainstream coverage{% if s.published_at %} · {{ s.published_at | published_date }}{% endif %}</p>
             </article>
             {% endfor %}
         </div>

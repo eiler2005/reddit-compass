@@ -42,6 +42,7 @@ from ..intelligence.repository import (
     update_research_state,
 )
 from ..intelligence.taxonomy import BROAD_DOMAINS
+from .dates import sort_key
 from .query_service import (
     build_domain_matrix,
     build_domain_summaries,
@@ -611,6 +612,10 @@ def _filter_news_rows(
     return filtered
 
 
+# Stories и Trends хранят чистый `YYYY-MM-DD`, поэтому им хватает строкового потолка;
+# у News формат задаёт провайдер, и там работает `api.dates.sort_key`.
+_UNDATED_LAST = "9999-12-31"
+
 _NEWS_SORTS = frozenset({"strength", "fresh", "engagement", "oldest"})
 _STORY_SORTS = frozenset({"strength", "fresh", "volume", "oldest"})
 _TREND_SORTS = frozenset({"strength", "fresh", "coverage", "oldest"})
@@ -621,8 +626,13 @@ def _safe_sort(value: str, allowed: frozenset[str], *, default: str = "strength"
     return value if value in allowed else default
 
 
-def _news_date(row: sqlite3.Row) -> str:
+def _news_raw_date(row: sqlite3.Row) -> str:
     return str(row["published_at"] or row["observed_at"] or row["snapshot_date"] or "")
+
+
+def _news_date(row: sqlite3.Row, *, ascending: bool = False) -> str:
+    """Сопоставимый ключ даты: провайдеры отдают ISO-8601 и RFC 2822 вперемешку."""
+    return sort_key(_news_raw_date(row), ascending=ascending)
 
 
 def _news_strength(row: sqlite3.Row) -> tuple[int, int, int, int, str, str]:
@@ -641,7 +651,7 @@ def _sort_news_rows(rows: list[sqlite3.Row], *, sort: str) -> list[sqlite3.Row]:
     """Sort a read-only News projection before selecting Story representatives."""
     selected_sort = _safe_sort(sort, _NEWS_SORTS)
     if selected_sort == "oldest":
-        return sorted(rows, key=lambda row: (_news_date(row), str(row["item_id"])))
+        return sorted(rows, key=lambda row: (_news_date(row, ascending=True), str(row["item_id"])))
     if selected_sort == "fresh":
         return sorted(
             rows,
@@ -689,7 +699,9 @@ def _sort_story_rows(rows: list[sqlite3.Row], *, sort: str) -> list[sqlite3.Row]
     if selected_sort == "oldest":
         return sorted(
             rows,
-            key=lambda row: (str(row["first_seen"] or ""), str(row["story_id"])),
+            # `or _UNDATED_LAST`, а не `or ""`: пустая дата по возрастанию сортируется
+            # первой, и «Сначала раннее» открывалось сюжетами вообще без даты.
+            key=lambda row: (str(row["first_seen"] or _UNDATED_LAST), str(row["story_id"])),
         )
     if selected_sort == "fresh":
         return sorted(
@@ -730,7 +742,7 @@ def _sort_trend_rows(rows: list[sqlite3.Row], *, sort: str) -> list[sqlite3.Row]
     if selected_sort == "oldest":
         return sorted(
             rows,
-            key=lambda row: (str(row["first_seen"] or ""), str(row["trend_id"])),
+            key=lambda row: (str(row["first_seen"] or _UNDATED_LAST), str(row["trend_id"])),
         )
     if selected_sort == "fresh":
         return sorted(

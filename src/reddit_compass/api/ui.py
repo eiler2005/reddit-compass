@@ -41,6 +41,7 @@ from ..intelligence.repository import (
 )
 from ..intelligence.taxonomy import BROAD_DOMAINS
 from ..versioning import assets_version
+from .dates import display_date, sort_key
 from .view_models import cluster_label
 
 router = APIRouter()
@@ -57,6 +58,10 @@ templates.env.globals["asset_version"] = assets_version()
 # Полоса источников подписывает свои сегменты человеческими названиями кластеров,
 # а не их идентификаторами: «🗣 Голоса» вместо voices.
 templates.env.globals["cluster_label"] = cluster_label
+# Даты публикации приходят от провайдеров в ISO-8601 и RFC 2822, а откат на `observed_at`
+# добавляет третий вид — с микросекундами. Все три стояли в одной колонке; фильтр
+# приводит их к одному дню. Ни один date-фильтр на env раньше зарегистрирован не был.
+templates.env.filters["published_date"] = display_date
 
 _CSRF_SECRET = secrets.token_hex(32)
 
@@ -609,10 +614,16 @@ def _build_today_reading_list(
         return score
 
     selected_sort = _safe_today_sort(sort)
+
+    def date_key(item: dict[str, object]) -> str:
+        # Провайдеры отдают ISO-8601 и RFC 2822 вперемешку; сравнение их как строк
+        # упорядочивает по названию дня недели, а не по времени.
+        return sort_key(str(item.get("published_at") or ""))
+
     if selected_sort == "fresh":
         candidates.sort(
             key=lambda item: (
-                str(item.get("published_at", "")),
+                date_key(item),
                 score_key(item),
                 str(item.get("title", "")),
             ),
@@ -622,7 +633,7 @@ def _build_today_reading_list(
         candidates.sort(
             key=lambda item: (
                 score_key(item),
-                str(item.get("published_at", "")),
+                date_key(item),
                 str(item.get("title", "")),
             ),
             reverse=True,

@@ -71,6 +71,23 @@ def _parse_snapshot_date(snapshot_date: str) -> datetime:
         raise ValueError("snapshot_date must use YYYY-MM-DD") from exc
 
 
+def _canonical_snapshot_date(snapshot_date: str) -> str:
+    """Validate and normalize a snapshot date to its canonical ``YYYY-MM-DD`` spelling.
+
+    ``strptime`` accepts ``2026-8-3``, but stored dates are always zero-padded, so an
+    un-normalized value silently misses every comparison: the coverage query compares
+    ``snapshot_date BETWEEN ? AND ?`` as text, and ``'2026-08-04' >= '2026-8-3'`` is
+    false.  A whole collected week then reports as missing, and ``--from-snapshots``
+    creates a phantom ``snapshots/2026-8-3/`` no canonical-date query can ever find.
+    Normalizing at the boundary keeps one spelling everywhere below it.
+    """
+    return _parse_snapshot_date(snapshot_date).date().isoformat()
+
+
+def _utc_today() -> str:
+    return datetime.now(UTC).date().isoformat()
+
+
 def collection_coverage(
     snapshots_dir: Path,
     db_path: Path,
@@ -88,6 +105,9 @@ def collection_coverage(
     source.  Artifact presence is reported separately so operators can safely
     recover a missed finalizer without re-fetching or relabelling fresh data.
     """
+    # Normalize before the SQL below compares these as text, not after.
+    since = _canonical_snapshot_date(since)
+    until = _canonical_snapshot_date(until)
     start = _parse_snapshot_date(since).date()
     end = _parse_snapshot_date(until).date()
     if end < start:
@@ -187,8 +207,15 @@ def recover_snapshot_gaps(
         until=until,
     )
     recovered: list[CollectionResult] = []
+    # Сегодняшний день исключаем так же, как это делает `collect_sources` для
+    # исторической даты: если прямо сейчас идёт сбор, его артефакты дописываются, и
+    # финализация прочитала бы половину дня как полный. `collect` за сегодня закроет
+    # его сам, а до тех пор день честно остаётся незавершённым.
+    today = _utc_today()
     for day in coverage:
         if not bool(day["recoverable_from_snapshots"]):
+            continue
+        if str(day["date"]) >= today:
             continue
         recovered.append(
             finalize_snapshot_collection(
@@ -214,13 +241,13 @@ async def collect_sources(
     profile: str = DEFAULT_PROFILE,
     snapshot_date: str | None = None,
     historical_recovery: bool = False,
+    overwrite_artifacts: bool = False,
 ) -> CollectionResult:
     """Collect and persist raw corpus facts without derived intelligence."""
     from .db import get_db
 
     today = datetime.now(UTC).date()
-    date = snapshot_date or today.isoformat()
-    _parse_snapshot_date(date)
+    date = _canonical_snapshot_date(snapshot_date) if snapshot_date else today.isoformat()
     if historical_recovery and date >= today.isoformat():
         raise ValueError("historical recovery date must be before current UTC date")
     if snapshot_date and not historical_recovery and date != today.isoformat():
@@ -252,6 +279,7 @@ async def collect_sources(
             snap_dir,
             date,
             historical_date=date if historical_recovery else None,
+            overwrite_artifacts=overwrite_artifacts,
         )
         if historical_recovery:
             result = replace(
@@ -324,8 +352,7 @@ def finalize_snapshot_collection(
     """
 
     del config  # Kept in the public signature alongside ``collect_sources``.
-    date = snapshot_date or datetime.now(UTC).strftime("%Y-%m-%d")
-    _parse_snapshot_date(date)
+    date = _canonical_snapshot_date(snapshot_date) if snapshot_date else _utc_today()
     run_id = f"{date}:{profile}"
     started_at = now_iso()
     snap_dir = snapshots_dir / date
@@ -556,10 +583,27 @@ async def run_source_adapter(
     snapshot_date: str,
     *,
     historical_date: str | None = None,
+    overwrite_artifacts: bool = False,
 ) -> SourceResult:
     """Run one read-only source adapter."""
     source_id = _ALIASES.get(source_id, source_id)
     started = time.monotonic()
+    artifact = snap_dir / _FILE_MAP[source_id]
+    # Историческое восстановление идёт по датам, за которые артефакт часто уже лежит —
+    # его просто не финализировали.  Запись поверх уничтожала настоящий дневной сбор и
+    # подменяла его тем немногим, что отдаёт ретроспективный запрос: 530 items рассыпались
+    # в 12.  Порядок шагов рунбука (сначала --recover-snapshots) теперь держит код, а не
+    # только текст.
+    has_artifact = artifact.is_file() and artifact.stat().st_size > 0
+    if historical_date and not overwrite_artifacts and has_artifact:
+        return SourceResult(
+            source_id=source_id,
+            status="skipped",
+            message=(
+                f"{artifact.name} already exists for {historical_date}: finalize it with "
+                "--recover-snapshots, or pass --overwrite-artifacts to discard it"
+            ),
+        )
     try:
         cards = await _fetch_source_cards(
             source_id,
@@ -580,9 +624,13 @@ async def run_source_adapter(
             )
         from .export import write_posts_jsonl
 
-        write_posts_jsonl(cards, snap_dir / _FILE_MAP[source_id])
+        write_posts_jsonl(cards, artifact)
         return SourceResult(
             source_id=source_id,
+            # ``empty`` здесь означает именно пустой день: адаптер, у которого не удался
+            # ни один запрос, поднимает ``SourceTransportError`` и уходит в ``error``
+            # ниже. Раньше он возвращал ``[]``, отказ становился ``empty``, run — уже
+            # ``complete``, и провалившийся день навсегда исчезал из ``--coverage``.
             status="ok" if cards else "empty",
             count=len(cards),
             duration_sec=round(time.monotonic() - started, 1),

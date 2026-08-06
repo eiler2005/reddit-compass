@@ -48,7 +48,14 @@ def test_bulk_starts_at_the_cheapest_flash_not_the_strongest_model(both_keys) ->
 
 
 def test_bulk_falls_through_exhausted_free_quotas(both_keys, monkeypatch) -> None:
+    """Переход на следующую модель цепочки оправдан только подтверждённым грантом.
+
+    `qwen3.6-flash` дороже `qwen3.7-flash` в 8.3× по input и 11.5× по output, поэтому
+    уходить на неё имеет смысл, лишь если её грант действительно отдельный. Провайдер
+    семантику пула не документирует — признак включается явно.
+    """
     monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "100")
+    monkeypatch.setenv("RC_QWEN_PAYG_GRANT_PER_MODEL", "1")
     qwen_policy.record_usage(
         model="qwen3.7-flash",
         endpoint="payg",
@@ -236,5 +243,92 @@ def test_unknown_grant_start_keeps_counting_whole_history(both_keys, monkeypatch
         completion_tokens=60,
     )
 
+    monkeypatch.setenv("RC_QWEN_PAYG_GRANT_PER_MODEL", "1")
+
     assert not qwen_policy.payg_grant_expired()
     assert qwen_policy.pick_model("bulk")[:2] == ("qwen3.6-flash", "payg")
+
+
+def test_payg_only_model_never_routes_to_token_plan(monkeypatch) -> None:
+    """`qwen3.7-flash` на token-plan не существует — молча уводить её туда нельзя.
+
+    Guard проверял `endpoint == "token-plan"`, но эту строку сюда не передаёт никто:
+    обе цепочки политики — payg, а `pick_endpoint` отдаёт `"payg"` либо `""`, которое
+    вызывающие приводят к `None`. Блок был недостижим, и на деплое только с
+    `QWEN_TOKEN_PLAN_KEY` каждый review-джоб уходил на token-plan URL и получал 404.
+    """
+    from reddit_compass.signals import QwenConfigError, _get_api_config
+
+    for var in ("DASHSCOPE_API_KEY", "QWEN_PAY_AS_YOU_GO_PLAN_KEY", "QWEN_Pay_As_You_Go_PLAN_KEY"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("QWEN_TOKEN_PLAN_KEY", "tp-key")
+
+    with pytest.raises(QwenConfigError) as excinfo:
+        _get_api_config("qwen3.7-flash", None)
+
+    assert "pay-as-you-go" in str(excinfo.value)
+
+
+def test_payg_only_model_uses_the_payg_key_whatever_the_endpoint(monkeypatch) -> None:
+    """При наличии payg-ключа модель обязана уйти на payg с любым endpoint-аргументом."""
+    from reddit_compass.signals import _DASHSCOPE_INTL_URL, _get_api_config
+
+    monkeypatch.setenv("QWEN_TOKEN_PLAN_KEY", "tp-key")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "payg-key")
+    monkeypatch.delenv("DASHSCOPE_BASE_URL", raising=False)
+
+    for endpoint in (None, "payg", "token-plan"):
+        key, base_url, _, _ = _get_api_config("qwen3.7-flash", endpoint)
+        assert (key, base_url) == ("payg-key", _DASHSCOPE_INTL_URL)
+
+
+def test_quota_env_garbage_falls_back_instead_of_crashing(monkeypatch) -> None:
+    """`RC_QWEN_PAYG_FREE_TOKENS=1M` роняло стадию трейсбеком из голого `int(raw)`."""
+    monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "1M")
+    assert qwen_policy.payg_free_quota() == qwen_policy.DEFAULT_PAYG_FREE_TOKENS
+
+    # Отрицательное принималось молча и означало «нет квоты» — неотличимо от опечатки.
+    monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "-5")
+    assert qwen_policy.payg_free_quota() == qwen_policy.DEFAULT_PAYG_FREE_TOKENS
+
+    monkeypatch.setenv("RC_QWEN_TOKEN_PLAN_TOKENS", "не число")
+    assert qwen_policy.token_plan_quota() is None
+
+
+def test_malformed_grant_start_does_not_silently_disable_expiry(monkeypatch) -> None:
+    """Битая дата гранта делала `payg_grant_expired` вечно ложной без единого следа."""
+    monkeypatch.setenv("RC_QWEN_PAYG_GRANT_START", "05.08.2026")
+    assert qwen_policy.payg_grant_start() is None
+
+    # Смещение больше не отбрасывается: `.replace(tzinfo=UTC)` сдвигал окно на три часа.
+    monkeypatch.setenv("RC_QWEN_PAYG_GRANT_START", "2026-08-05T00:00:00+03:00")
+    start = qwen_policy.payg_grant_start()
+    assert start is not None
+    assert start.isoformat() == "2026-08-04T21:00:00+00:00"
+
+
+def test_free_quota_is_an_account_pool_unless_confirmed_per_model(monkeypatch, tmp_path) -> None:
+    """Общий пул по умолчанию: иначе роутер уводит извлечение на модель дороже в 8×.
+
+    Цепочка bulk падает с `qwen3.7-flash` на `qwen3.6-flash`, который по собственной
+    таблице цен дороже в 8.3× по input и 11.5× по output. Это оправдано, только если
+    грант действительно свой у каждой модели. Провайдер этого не документирует, поэтому
+    по умолчанию пул считается общим: ошибка в эту сторону оставляет на самой дешёвой
+    модели, ошибка в обратную — платит по восьмикратному тарифу.
+    """
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    monkeypatch.setenv("RC_QWEN_PAYG_FREE_TOKENS", "1000")
+    monkeypatch.setenv("DASHSCOPE_API_KEY", "payg-key")
+    monkeypatch.delenv("RC_QWEN_PAYG_GRANT_PER_MODEL", raising=False)
+    qwen_policy.record_usage(
+        model="qwen3.7-flash", endpoint="payg", prompt_tokens=900, completion_tokens=200
+    )
+
+    model, _, reason = qwen_policy.pick_model("bulk")
+    assert model == "qwen3.7-flash"
+    assert "list price" in reason
+
+    monkeypatch.setenv("RC_QWEN_PAYG_GRANT_PER_MODEL", "1")
+    per_model, _, per_model_reason = qwen_policy.pick_model("bulk")
+    assert per_model == "qwen3.6-flash"
+    assert "бесплатн" in per_model_reason

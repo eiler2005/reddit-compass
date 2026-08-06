@@ -6,7 +6,7 @@
     <div class="reading-rank">{{ "%02d"|format(rank) }}</div>
     <div class="reading-main">
         <div class="story-meta">
-            {% for value in [item.provider_label, item.source_section, item.source_cluster, item.published_at] if value %}
+            {% for value in [item.provider_label, item.source_section, item.source_cluster, item.published_at | published_date] if value %}
             <span>{{ value }}</span>
             {% endfor %}
         </div>

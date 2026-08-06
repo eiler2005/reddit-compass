@@ -542,6 +542,7 @@ async def _execute_collection(args: argparse.Namespace) -> object:
         profile=profile,
         snapshot_date=historical_date or None,
         historical_recovery=bool(historical_date),
+        overwrite_artifacts=bool(getattr(args, "overwrite_artifacts", False)),
     )
 
 
@@ -2381,6 +2382,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Recover one prior UTC date through date-aware public source queries; "
             "the observed_at timestamp remains current."
+        ),
+    )
+    collect_p.add_argument(
+        "--overwrite-artifacts",
+        action="store_true",
+        help=(
+            "Allow --historical-date to discard existing dated JSONL artifacts. "
+            "Without it a present artifact is left untouched and reported as skipped."
         ),
     )
 

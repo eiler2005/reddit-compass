@@ -13,6 +13,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from ..models import PostCard
+from .errors import RequestTally
 
 logger = logging.getLogger("reddit_compass")
 
@@ -54,6 +55,7 @@ async def fetch_hn_stories(
     queries = queries or DEFAULT_QUERIES
     cards: list[PostCard] = []
     seen_ids: set[str] = set()
+    tally = RequestTally("hackernews")
 
     if historical_date:
         start = datetime.strptime(historical_date, "%Y-%m-%d").replace(tzinfo=UTC)
@@ -125,7 +127,7 @@ async def fetch_hn_stories(
             ]
         )
         for label, url in front_page_specs:
-            await _fetch_algolia_url(session, url, label, snapshot_date, seen_ids, cards)
+            await _fetch_algolia_url(session, url, label, snapshot_date, seen_ids, cards, tally)
 
         for query in queries:
             url = _algolia_url(
@@ -137,9 +139,11 @@ async def fetch_hn_stories(
                     "numericFilters": time_filter,
                 },
             )
-            await _fetch_algolia_url(session, url, query, snapshot_date, seen_ids, cards)
+            await _fetch_algolia_url(session, url, query, snapshot_date, seen_ids, cards, tally)
 
     logger.info("HN total: %d unique stories", len(cards))
+    # Пустой список после того, как отвалились все запросы, — не пустой день.
+    tally.raise_if_total_failure()
     return cards
 
 
@@ -150,13 +154,18 @@ async def _fetch_algolia_url(
     snapshot_date: str,
     seen_ids: set[str],
     cards: list[PostCard],
+    tally: RequestTally | None = None,
 ) -> None:
     import aiohttp
 
+    if tally is not None:
+        tally.attempt()
     try:
         async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
             if resp.status != 200:
                 logger.warning("HN Algolia %r: HTTP %d", query_label, resp.status)
+                if tally is not None:
+                    tally.failed(f"{query_label}: HTTP {resp.status}")
                 return
             data: dict[str, Any] = await resp.json()
 
@@ -199,6 +208,8 @@ async def _fetch_algolia_url(
 
     except Exception as exc:
         logger.warning("HN fetch error for %r: %s", query_label, exc)
+        if tally is not None:
+            tally.failed(f"{query_label}: {type(exc).__name__}")
         return
 
 

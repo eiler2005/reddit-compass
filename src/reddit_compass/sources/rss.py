@@ -16,6 +16,7 @@ from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from ..models import PostCard
+from .errors import RequestTally, SourceTransportError
 
 logger = logging.getLogger("reddit_compass")
 
@@ -313,6 +314,7 @@ async def fetch_rss_source(
 
     cards: list[PostCard] = []
     seen_urls: set[str] = set()
+    tally = RequestTally(f"rss:{source.name}")
     headers = {"User-Agent": "reddit-compass/0.2 (trend monitor)"}
 
     async with aiohttp.ClientSession(headers=headers) as session:
@@ -320,6 +322,7 @@ async def fetch_rss_source(
             request_url = (
                 _historical_feed_url(feed_url, historical_date) if historical_date else feed_url
             )
+            tally.attempt()
             try:
                 async with session.get(
                     request_url,
@@ -327,16 +330,24 @@ async def fetch_rss_source(
                 ) as resp:
                     if resp.status != 200:
                         logger.warning("RSS %s (%s): HTTP %d", source.name, feed_url, resp.status)
+                        tally.failed(f"{feed_url}: HTTP {resp.status}")
                         continue
                     text = await resp.text()
                     items = parse_feed(text, source.name)
                     section = _section_from_feed_url(feed_url)
+                    # Фильтр по дате идёт до обрезания, а не после. При обратном порядке
+                    # лимит съедали самые свежие записи, а до нужного дня очередь просто
+                    # не доходила: у шести прямых фидов (BBC, Guardian, TechCrunch, Verge,
+                    # Ars, Medium) `_historical_feed_url` возвращает URL без изменений,
+                    # поэтому историческое восстановление структурно давало почти ноль.
+                    if historical_date:
+                        items = [
+                            item
+                            for item in items
+                            if _published_on_date(item["published"], historical_date)
+                        ]
 
                     for item in items[:max_items_per_feed]:
-                        if historical_date and not _published_on_date(
-                            item["published"], historical_date
-                        ):
-                            continue
                         url = item["url"]
                         if url in seen_urls:
                             continue
@@ -365,9 +376,12 @@ async def fetch_rss_source(
 
             except Exception as exc:
                 logger.warning("RSS fetch error (%s): %s", source.name, exc)
+                tally.failed(f"{feed_url}: {type(exc).__name__}")
                 continue
 
     logger.info("RSS %s: %d статей", source.name, len(cards))
+    # Отвалились все фиды источника — это отказ транспорта, а не тихий день.
+    tally.raise_if_total_failure()
     return cards
 
 
@@ -380,13 +394,24 @@ async def fetch_all_rss(
     """Загружает все RSS-источники."""
     sources = sources or RSS_SOURCES
     all_cards: list[PostCard] = []
+    # Коллектор считает весь RSS одним источником, поэтому падение одного издания не
+    # должно ронять день: провал каждого издания здесь лишь попытка. Отказом становится
+    # только ситуация, где не ответило ни одно издание.
+    tally = RequestTally("rss")
     for source in sources:
-        cards = await fetch_rss_source(
-            source,
-            snapshot_date,
-            max_items_per_feed,
-            historical_date,
-        )
+        tally.attempt()
+        try:
+            cards = await fetch_rss_source(
+                source,
+                snapshot_date,
+                max_items_per_feed,
+                historical_date,
+            )
+        except SourceTransportError as exc:
+            logger.warning("RSS source %s unavailable: %s", source.name, exc)
+            tally.failed(f"{source.name}: all feeds failed")
+            continue
         all_cards.extend(cards)
     logger.info("RSS total: %d статей из %d источников", len(all_cards), len(sources))
+    tally.raise_if_total_failure()
     return all_cards

@@ -153,7 +153,7 @@
                     <span title="Reddit upvotes">▲ {{ "%.0f"|format(s.reddit_score) }}</span>
                     <span title="Комментарии">💬 {{ "%.0f"|format(s.reddit_comments) }}</span>
                     <span title="Pulse score">pulse {{ "%.0f"|format(s.pulse_score) }}</span>
-                    {% if s.published_at %}<span>{{ s.published_at }}</span>{% endif %}
+                    {% if s.published_at %}<span>{{ s.published_at | published_date }}</span>{% endif %}
                     {% if s.target_url and s.target_url != s.discussion_url %}
                     <a href="{{ s.target_url }}" target="_blank" rel="noopener">первоисточник</a>
                     {% endif %}

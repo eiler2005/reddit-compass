@@ -11,7 +11,7 @@
         <div class="pulse-row-head">
             <span class="signal-type-badge signal-type-{{ s.signal_type }}">{{ signal_type_label(s.signal_type) }}</span>
             <span class="pulse-subreddit">r/{{ s.subreddit }}</span>
-            {% if s.published_at %}<span>{{ s.published_at }}</span>{% endif %}
+            {% if s.published_at %}<span>{{ s.published_at | published_date }}</span>{% endif %}
             {% if show_gap and s.perspective_gap %}
             <span class="scope-badge scope-community_only" title="Разрыв перспективы">разрыв {{ "%.2f"|format(s.perspective_gap) }}</span>
             {% endif %}

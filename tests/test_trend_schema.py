@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from reddit_compass.intelligence.actor_types import normalize_title_key
+from reddit_compass.intelligence.engine import _llm_schema_resolver
 from reddit_compass.intelligence.quality import is_bad_trend_name
 from reddit_compass.intelligence.trend_schema import (
     canonical_actors,
@@ -14,6 +15,7 @@ from reddit_compass.intelligence.trend_schema import (
     is_not_an_event,
     story_schema,
 )
+from reddit_compass.intelligence.trend_schema_llm import title_key
 
 
 def _story(story_id: str, title: str, date: str, domain: str = "ai_technology") -> dict[str, Any]:
@@ -761,3 +763,41 @@ def test_unmapped_domains_still_get_distinct_names() -> None:
     ]
 
     assert len(set(names)) == len(domains), names
+
+
+def test_llm_schema_applies_the_same_out_of_scope_veto_as_the_lexicon() -> None:
+    """Поколения обязаны отвергать одни и те же вне-зоны заголовки.
+
+    Доменное вето ловит спортивное регулирование без спортивной лексики, заголовочное —
+    обратный случай: спортивное или военное действие, которое таксономия доменом не
+    пометила. `schema_v2` применяет оба (`extract_action` начинается с `is_out_of_scope`),
+    а `schema_v3` применял только доменное — и «Chelsea banned from signing players»
+    с доменом `business_markets` становился трендом `bans and restrictions in business`.
+    Разошедшиеся вето означают, что сравнение поколений мерит не извлечение, а зону.
+    """
+    out_of_scope = (
+        ("Chelsea banned from signing players after Premier League probe", "business_markets"),
+        ("Israel halts fuel imports after missile strikes on Gaza port", "world_geopolitics"),
+    )
+
+    for title, domain in out_of_scope:
+        story = _story("s", title, "2026-08-01", domain)
+        schemas = {
+            title_key(title): {"is_event": True, "key": "ban", "actor": "Chelsea"},
+        }
+        resolve = _llm_schema_resolver(schemas)
+
+        assert story_schema(story) is None, title
+        assert resolve(story) is None, title
+
+
+def test_llm_schema_still_admits_in_scope_events() -> None:
+    """Вето не имеет права уносить обычное событие — иначе v3 просто пустеет."""
+    title = "Apple banned from bundling its browser after the EU probe"
+    story = _story("s", title, "2026-08-01", "business_markets")
+    schemas = {title_key(title): {"is_event": True, "key": "ban", "actor": "Apple"}}
+
+    resolved = _llm_schema_resolver(schemas)(story)
+
+    assert resolved is not None
+    assert resolved[2] == "Apple"

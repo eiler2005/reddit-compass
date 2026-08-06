@@ -272,8 +272,9 @@ def test_historical_collection_passes_target_date_to_each_adapter(
         snapshot_date: str,
         *,
         historical_date: str | None = None,
+        overwrite_artifacts: bool = False,
     ) -> SourceResult:
-        del config, snap_dir, snapshot_date
+        del config, snap_dir, snapshot_date, overwrite_artifacts
         calls.append((source_id, historical_date))
         return SourceResult(source_id=source_id, status="empty")
 
@@ -315,3 +316,130 @@ def _legacy_card(post_id: str, date: str) -> PostCard:
         monitoring_type="hot",
         snapshot_date=date,
     )
+
+
+def test_total_adapter_failure_is_an_error_not_an_empty_day(tmp_path: Path, monkeypatch) -> None:
+    """Провал всех запросов адаптера обязан дать `partial`, а не `complete`.
+
+    Адаптеры ловили HTTP- и сетевые ошибки внутри себя и возвращали `[]`. Дальше
+    `status="ok" if cards else "empty"` превращало отказ в пустой день, набор
+    `{"ok", "empty"}` давал run `complete`, а `collection_coverage` считала такой день
+    собранным. Ночь, где Algolia отдаёт 429, а фиды 503, записывалась полным днём с
+    одним Reddit и навсегда исчезала из `--coverage`.
+    """
+    from reddit_compass.sources.errors import SourceTransportError
+
+    async def fake_fetch(source_id, config, snapshot_date, *, historical_date=None):
+        del config, snapshot_date, historical_date
+        if source_id == "reddit":
+            return [_legacy_card("r1", "2026-08-04")]
+        raise SourceTransportError(source_id, 3, ["HTTP 429", "HTTP 503", "HTTP 503"])
+
+    monkeypatch.setattr("reddit_compass.collector._fetch_source_cards", fake_fetch)
+
+    result = asyncio.run(
+        collect_sources(
+            MonitorConfig(),
+            tmp_path / "snapshots",
+            tmp_path / "compass.db",
+            sources=["reddit", "hn"],
+            profile="starter",
+        )
+    )
+
+    assert result.status == "partial"
+    failed = [row for row in result.source_results if row.source_id == "hackernews"]
+    assert failed[0].status == "error"
+    assert failed[0].error_code == "SourceTransportError"
+    # Отказ не оставляет за собой артефакт, который выглядел бы как пустой день.
+    assert not (tmp_path / "snapshots" / result.date / "hackernews.jsonl").exists()
+
+
+def test_a_genuinely_empty_day_still_counts_as_collected(tmp_path: Path, monkeypatch) -> None:
+    """Пустой день — нормальное явление и обязан остаться `complete`.
+
+    Различать надо не «нет карточек», а «ни один запрос не удался»: иначе тихие сутки
+    Product Hunt начали бы блокировать релиз наравне с реальным отказом.
+    """
+
+    async def fake_fetch(source_id, config, snapshot_date, *, historical_date=None):
+        del config, snapshot_date, historical_date
+        return [_legacy_card("r1", "2026-08-04")] if source_id == "reddit" else []
+
+    monkeypatch.setattr("reddit_compass.collector._fetch_source_cards", fake_fetch)
+
+    result = asyncio.run(
+        collect_sources(
+            MonitorConfig(),
+            tmp_path / "snapshots",
+            tmp_path / "compass.db",
+            sources=["reddit", "hn"],
+            profile="starter",
+        )
+    )
+
+    assert result.status == "complete"
+    assert [row.status for row in result.source_results] == ["ok", "empty"]
+
+
+def test_coverage_normalizes_a_non_padded_date_range(tmp_path: Path) -> None:
+    """`2026-8-3` обязан дать тот же ответ, что и канонический `2026-08-03`.
+
+    `strptime` принимает неканоническую запись, но даты хранятся с ведущими нулями, а
+    coverage сравнивает их как текст: `'2026-08-04' >= '2026-8-3'` ложно, и BETWEEN не
+    матчил ничего — полностью собранная неделя показывалась как missing.
+    """
+    db_path = tmp_path / "compass.db"
+    snapshots = tmp_path / "snapshots"
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    canonical = collection_coverage(
+        snapshots, db_path, profile="starter", since="2026-08-03", until="2026-08-05"
+    )
+    loose = collection_coverage(
+        snapshots, db_path, profile="starter", since="2026-8-3", until="2026-8-5"
+    )
+
+    assert [day["date"] for day in loose] == ["2026-08-03", "2026-08-04", "2026-08-05"]
+    assert loose == canonical
+
+
+def test_recover_snapshot_gaps_leaves_today_alone(tmp_path: Path) -> None:
+    """Финализация сегодняшнего дня прочитала бы идущий сбор как завершённый.
+
+    `collect_sources` для исторической даты требует, чтобы она была строго раньше
+    текущей UTC; у recovery такой защиты не было. Запуск во время идущего сбора
+    финализировал наполовину дописанные артефакты, а живой прогон затем переписывал
+    статус — транзиентно неверный `complete` на дне, который ещё собирается.
+    """
+    from datetime import UTC, datetime
+
+    today = datetime.now(UTC).date().isoformat()
+    snapshot_dir = tmp_path / "snapshots" / today
+    for filename in (
+        "posts.jsonl",
+        "hackernews.jsonl",
+        "rss.jsonl",
+        "ladder.jsonl",
+        "producthunt.jsonl",
+    ):
+        write_posts_jsonl([_legacy_card(f"{filename}-post", today)], snapshot_dir / filename)
+    db_path = tmp_path / "compass.db"
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    coverage, recovered = recover_snapshot_gaps(
+        MonitorConfig(),
+        tmp_path / "snapshots",
+        db_path,
+        profile="broad",
+        since=today,
+        until=today,
+    )
+
+    # День виден как восстановимый, но recovery его не трогает — его закроет `collect`.
+    assert coverage[0]["recoverable_from_snapshots"] is True
+    assert recovered == []
