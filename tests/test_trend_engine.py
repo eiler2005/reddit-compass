@@ -2975,95 +2975,22 @@ def test_releases_store_their_parameters_not_only_a_hash(tmp_path: Path) -> None
     assert trend_params
 
 
-def test_merge_model_marks_rejects_instead_of_deleting_the_pair() -> None:
-    """Слабая модель не имеет права вычёркивать пару до откалиброванного ранжировщика.
+def test_merge_model_never_decides_the_gray_zone() -> None:
+    """Обученная модель не участвует в решении о слиянии — ни повысить, ни понизить.
 
-    Замер 6 августа на одном корпусе: провизорный релиз (без модели) дал 16 009 пар и
-    944 multi-item сюжета, пересобранный с моделью — 8 563 пары и 390. Модель, обученная
-    на 222 автометках со сдвигом −3.10, вычёркивала 7 446 пар через `return None`, и
-    cross-encoder, откалиброванный при precision ≥ 0.95, до них просто не доходил.
-    Слабый сигнал побеждал сильный тем, что шёл первым.
+    Она осталась диагностикой: обучается и пишется в метрики релиза, но серую зону
+    разбирает cross-encoder, откалиброванный на отложенной половине размеченного
+    набора при precision ≥ 0.95.
+
+    Причины (замеры 6 августа): обучающие данные замкнуты сами на себя — из 222 меток
+    215 автометки, сгенерированные той же лестницей, которую модель должна была
+    улучшать, реальных ответов Qwen семь при двенадцати признаках; модель
+    переобучалась каждый цикл и не версионировалась, поэтому релизы различались
+    моделью, которую никто не смотрел; а её отказ удалял пару до ранжировщика, и
+    16 009 пар с 944 multi-item превращались в 8 563 и 390.
     """
     from reddit_compass.intelligence.engine import (
         DEFAULT_STORY_PARAMS,
-        MIN_MERGE_MODEL_LABELS,
-        FrozenItem,
-        _score_story_pair,
-    )
-
-    def item(item_id: str, title: str, provider: str) -> FrozenItem:
-        return FrozenItem(
-            item_id=item_id,
-            provider=provider,
-            source_cluster="mainstream",
-            canonical_url=f"https://{provider}.example/{item_id}",
-            target_url="",
-            discussion_url="",
-            title=title,
-            excerpt="Regulator opened a formal probe into the company today.",
-            published_at="2026-08-06T09:00:00Z",
-            snapshot_date="2026-08-06",
-            content_scope="headline",
-            source_section="business",
-            domain_ids=["business_markets"],
-            raw_engagement={},
-            metadata={},
-        )
-
-    left = item("a1", "EU opens antitrust probe into Acme", "reuters")
-    right = item("b1", "Brussels opens antitrust investigation into Acme", "guardian")
-
-    # Модель, отвергающая всё: большой отрицательный сдвиг, нулевые веса.
-    from reddit_compass.intelligence.story_scoring import FEATURE_KEYS
-
-    reject_all = {
-        "bias": -50.0,
-        "weights": [0.0] * len(FEATURE_KEYS),
-        "feature_keys": list(FEATURE_KEYS),
-        "threshold": 0.5,
-        # Выше порога допуска: иначе модель к решению не допускается вовсе, и тест
-        # мерил бы guard, а не поведение отказа.
-        "trained_on": MIN_MERGE_MODEL_LABELS,
-    }
-    base = {**DEFAULT_STORY_PARAMS, "merge_model": reject_all}
-
-    with_encoder = _score_story_pair(
-        left,
-        right,
-        {},
-        {},
-        generated_by={"sparse"},
-        params={**base, "cross_encoder_enabled": True},
-        dense_similarity=0.7,
-    )
-    without_encoder = _score_story_pair(
-        left,
-        right,
-        {},
-        {},
-        generated_by={"sparse"},
-        params={**base, "cross_encoder_enabled": False},
-        dense_similarity=0.7,
-    )
-
-    # Главное: пара доживает до ранжировщика вместо того, чтобы исчезнуть.
-    assert with_encoder is not None
-    assert with_encoder.decision == "review"
-    # Без ранжировщика отказ становится явным и попадает в метрики, а не пропадает.
-    assert without_encoder is not None
-    assert without_encoder.decision == "reject"
-
-
-def test_undertrained_merge_model_is_not_allowed_to_decide() -> None:
-    """Модель на паре сотен меток — шум, а не модель, и в решении не участвует.
-
-    Замер 6 августа: обучение шло на 222 метках, из которых лишь 7 — реальные ответы
-    Qwen, при двенадцати признаках. При этом её отказ ещё и удалял пару из набора
-    кандидатов, и цена ошибки составила 944 → 390 multi-item сюжетов.
-    """
-    from reddit_compass.intelligence.engine import (
-        DEFAULT_STORY_PARAMS,
-        MIN_MERGE_MODEL_LABELS,
         FrozenItem,
         _score_story_pair,
     )
@@ -3090,27 +3017,42 @@ def test_undertrained_merge_model_is_not_allowed_to_decide() -> None:
 
     left = item("a1", "EU opens antitrust probe into Acme", "reuters")
     right = item("b1", "Brussels opens antitrust investigation into Acme", "guardian")
-    # Модель, которая склеила бы всё: без порога допуска она бы повысила пару.
-    merge_all = {
-        "bias": 50.0,
-        "weights": [0.0] * len(FEATURE_KEYS),
-        "feature_keys": list(FEATURE_KEYS),
-        "threshold": 0.5,
-        "trained_on": MIN_MERGE_MODEL_LABELS - 1,
-    }
 
-    candidate = _score_story_pair(
+    def decide(bias: float, trained_on: int) -> Any:
+        model = {
+            "bias": bias,
+            "weights": [0.0] * len(FEATURE_KEYS),
+            "feature_keys": list(FEATURE_KEYS),
+            "threshold": 0.5,
+            "trained_on": trained_on,
+        }
+        return _score_story_pair(
+            left,
+            right,
+            {},
+            {},
+            generated_by={"sparse"},
+            params={**DEFAULT_STORY_PARAMS, "merge_model": model},
+            dense_similarity=0.7,
+        )
+
+    baseline = _score_story_pair(
         left,
         right,
         {},
         {},
         generated_by={"sparse"},
-        params={**DEFAULT_STORY_PARAMS, "merge_model": merge_all, "cross_encoder_enabled": True},
+        params=dict(DEFAULT_STORY_PARAMS),
         dense_similarity=0.7,
     )
+    merge_all = decide(bias=50.0, trained_on=100_000)
+    reject_all = decide(bias=-50.0, trained_on=100_000)
 
-    assert candidate is not None
-    # Решение осталось за детерминированной лестницей, модель к нему не допущена.
-    assert candidate.decision == "review"
-    assert candidate.features["merge_model_skipped"] == MIN_MERGE_MODEL_LABELS - 1
-    assert "merge_model_score" not in candidate.features
+    assert baseline is not None
+    # Ни склеивающая, ни отвергающая модель не меняют исход: решает лестница и дальше
+    # ранжировщик. Пара при этом никогда не исчезает из набора кандидатов.
+    for candidate in (merge_all, reject_all):
+        assert candidate is not None
+        assert candidate.decision == baseline.decision
+        assert candidate.reason == baseline.reason
+        assert "merge_model_score" not in candidate.features

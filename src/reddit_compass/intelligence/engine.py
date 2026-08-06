@@ -64,7 +64,7 @@ from .entities import extract_structured_event_frame
 from .llm_pipeline import build_deterministic_item_signals
 from .models import ContentItem
 from .reddit_pulse import build_reddit_pulse_signals, perspective_gap_available_counts
-from .story_scoring import MergeModel, auto_label_pair, extract_feature_vector, train_merge_model
+from .story_scoring import auto_label_pair, extract_feature_vector, train_merge_model
 from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
@@ -2417,11 +2417,6 @@ def _select_engine_items(
 # ``_valid_group_against_medoid``). Переслияние не появляется вплоть до 0.5.
 DEFAULT_MEDOID_MIN_SCORE = 0.55
 
-# Меток, ниже которых обученная модель слияния к решению не допускается. Двенадцать
-# признаков на паре сотен примеров дают переобучение, а её отказ раньше ещё и удалял
-# пару из набора кандидатов — цена ошибки была 944 → 390 multi-item сюжетов.
-MIN_MERGE_MODEL_LABELS = 500
-
 DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "auto_merge_threshold": 0.82,
     "review_threshold": 0.62,
@@ -4010,52 +4005,25 @@ def _score_story_pair(
         decision = "auto_merge"
         reason = "bounded component evidence candidate"
         candidate_features["bounded_component_candidate"] = True
-    # Фаза 3: обученная модель решает исход серой зоны. Жёсткие правила (auto_merge по
-    # provenance-якорям и reject по hard conflicts) остаются детерминированными — модель
-    # применяется только к парам, которые лестница отправила в review.
-    merge_model_params = params.get("merge_model")
-    if decision == "review" and isinstance(merge_model_params, dict):
-        model = MergeModel.from_params(merge_model_params)
-        # Недообученная модель не участвует в решении вовсе. Замер 6 августа: модель
-        # обучалась на 222 метках, из которых лишь 7 — реальные ответы Qwen, при
-        # двенадцати признаках. Это не модель, а шум, и её мнение о серой зоне не
-        # должно ни повышать, ни понижать пару. Порог низкий намеренно: он отсекает
-        # заведомо вырожденный случай, а не решает, сколько меток «достаточно».
-        if model.trained_on < MIN_MERGE_MODEL_LABELS:
-            candidate_features["merge_model_skipped"] = model.trained_on
-            return PairCandidate(
-                item_id_a=item_id_a,
-                item_id_b=item_id_b,
-                score=score,
-                decision=decision,
-                reason=reason,
-                features=candidate_features,
-            )
-        model_score = model.score(candidate_features)
-        if model.predict(candidate_features):
-            decision = "auto_merge"
-            reason = "learned merge model"
-            score = max(score, round(model_score, 4))
-            candidate_features["merge_model_score"] = round(model_score, 4)
-            candidate_features["merge_model_hash"] = model.model_hash
-        else:
-            candidate_features["merge_model_score"] = round(model_score, 4)
-            candidate_features["merge_model_hash"] = model.model_hash
-            # Отказ модели помечает пару, но не удаляет её. Раньше здесь стоял
-            # `return None`, и пара исчезала из набора кандидатов до того, как её
-            # увидит cross-encoder. Замер 6 августа на одном корпусе: провизорный
-            # релиз (без модели) — 16 009 пар и 944 multi-item сюжета, пересобранный
-            # с моделью — 8 563 пары и 390. Модель, обученная на 222 автометках со
-            # сдвигом −3.10, вычёркивала 7 446 пар, среди которых были настоящие
-            # слияния, а откалиброванный при precision ≥ 0.95 ранжировщик до них
-            # просто не доходил: слабый сигнал побеждал сильный тем, что шёл первым.
-            #
-            # Когда ранжировщик включён, пара остаётся в серой зоне — решает он.
-            # Когда выключен, отказ модели становится явным `reject`: то же влияние
-            # на группировку, но пара видна в метриках и аудите, а не пропадает.
-            if not params.get("cross_encoder_enabled"):
-                decision = "reject"
-                reason = "learned merge model rejected"
+    # Обученная модель слияния к решению не допускается. Она осталась в конвейере как
+    # диагностика (обучается и пишется в метрики релиза), но серую зону разбирает
+    # cross-encoder, откалиброванный на отложенной половине размеченного набора при
+    # precision ≥ 0.95.
+    #
+    # Причины, по которым модель убрана из пути слияния (замеры 6 августа):
+    #
+    # * обучающие данные замкнуты сами на себя — из 222 меток 215 автометки,
+    #   сгенерированные той же лестницей, которую модель должна была улучшать; реальных
+    #   ответов Qwen семь, при двенадцати признаках это переобучение по построению;
+    # * модель переобучалась каждый цикл и не версионировалась как артефакт, поэтому два
+    #   релиза различались не только данными, но и моделью, которую никто не смотрел;
+    # * её отказ удалял пару из набора кандидатов до ранжировщика: 16 009 пар и 944
+    #   multi-item сюжета превращались в 8 563 и 390, а выглядело это как деградация
+    #   данных.
+    #
+    # Если обучаемый компонент понадобится снова, ему нужен размеченный человеком набор,
+    # версионирование вместе с релизом и замер против cross-encoder на отложенной
+    # выборке — см. `docs/NEXT_IMPROVEMENTS.md`.
     return PairCandidate(
         item_id_a=item_id_a,
         item_id_b=item_id_b,
@@ -7026,9 +6994,10 @@ async def run_engine_cycle(
             **story_params,
             "reviewed_from_story_release": provisional_stories.story_release_id,
         }
-        trained_model = trained.get("model")
-        if isinstance(trained_model, dict):
-            reviewed_story_params["merge_model"] = trained_model
+        # Обученная модель в параметры релиза не идёт: она осталась диагностикой и
+        # к решению о слиянии не допускается (см. `_score_story_pair`). Класть её в
+        # params значило бы менять `params_hash` от прогона к прогону, делая релизы
+        # несравнимыми ради компонента, который ни на что не влияет.
         stories = create_story_release(
             conn,
             facet_release_id=facets.facet_release_id,

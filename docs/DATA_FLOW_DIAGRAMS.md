@@ -75,27 +75,41 @@ flowchart TD
 
     D -->|общий event-URL<br/>near-dup fingerprint<br/>cross-source event| AM[auto_merge<br/>по provenance-якорю]
     D -->|hard conflict<br/>number/location/person| RJ[reject]
-    D -->|серая зона| GZ{merge_model?<br/>Фаза 3}
+    D -->|серая зона| RV[review]
 
-    GZ -->|да: логистическая модель| MD{model.predict}
-    MD -->|score ≥ threshold| AM2[auto_merge<br/>learned merge model]
-    MD -->|иначе| DROP[drop]
-    GZ -->|нет| RV[review → Qwen / ручная метка]
+    RV --> CE{cross-encoder<br/>precision ≥ 0.95}
+    CE -->|score ≥ порог| AM2[auto_merge<br/>cross-encoder adjudication]
+    CE -->|иначе| RJ2[reject<br/>решение видно в метриках]
 
     AM --> CG[_constrained_story_groups<br/>medoid validation]
     AM2 --> CG
     CG --> ST[engine_stories<br/>+ engine_story_items]
 ```
 
-**Фаза 3 (обучаемый скоринг):**
-- `story_scoring.py` — dependency-light логистическая регрессия (numpy).
-- Авто-разметка `auto_label_story_pairs` (детерминированная, без человека) →
-  `engine_labels`; Qwen, Claude и человеческие метки используют тот же canonical
-  `item_id_a|item_id_b` key. После валидной bounded Qwen-порции cycle materializes второй
-  immutable StoryRelease, поэтому review влияет на текущий выпуск.
-- `train_story_merge_model` обучает модель, калибрует порог под целевую precision,
-  сохраняет веса + хэш в `metrics_json.merge_model` (воспроизводимо).
-- Жёсткие правила остаются детерминированными; модель решает **только серую зону**.
+**Серую зону разбирает cross-encoder, а не обучаемая модель.**
+
+`merge_model` осталась в конвейере как **диагностика**: она обучается на автометках и
+пишется в `metrics_json.merge_model`, но к решению о слиянии не допускается. Убрана из
+пути 6 августа по трём причинам, все измерены:
+
+- **Обучающие данные замкнуты сами на себя.** Из 222 меток 215 — автометки,
+  сгенерированные той же лестницей, которую модель должна была улучшать. Реальных
+  ответов Qwen семь, при двенадцати признаках это переобучение по построению.
+- **Модель переобучалась каждый цикл и не версионировалась как артефакт.** Два релиза
+  различались не только данными, но и моделью, которую никто не смотрел, — это прямо
+  противоречит идее сравнимых immutable-релизов.
+- **Её отказ удалял пару из набора кандидатов** до того, как её увидит ранжировщик:
+  16 009 пар и 944 multi-item сюжета превращались в 8 563 и 390, а выглядело это как
+  деградация данных.
+
+Условия, при которых обучаемый компонент имеет смысл вернуть, — в
+[`NEXT_IMPROVEMENTS.md`](NEXT_IMPROVEMENTS.md): размеченный человеком набор,
+версионирование вместе с релизом и замер против cross-encoder на отложенной выборке.
+
+**Разметка** (`auto_label_story_pairs` → `engine_labels`) продолжает копиться: Qwen,
+Claude и человеческие метки используют один canonical `item_id_a|item_id_b` key. После
+валидной bounded Qwen-порции cycle materializes второй immutable StoryRelease, поэтому
+review влияет на текущий выпуск.
 
 **Приоритет источников меток** — `human > claude_review > qwen_review > assistant_review > auto_label`
 (`resolve_pair_labels`). Авто-метка на паре, которую правила уже решили детерминированно,

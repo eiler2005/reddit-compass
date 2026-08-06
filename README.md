@@ -80,7 +80,11 @@ reddit-compass engine release create --run RUN_ID
 reddit-compass engine facets --release RELEASE_ID --profile broad
 reddit-compass engine stories propose --facet-release FACET_ID --limit 50
 reddit-compass engine trends propose --story-release STORY_ID --window 30d
-reddit-compass engine cycle --profile broad --window 7 --publish-channel shadow
+# Один цикл: Data → Facets → Stories → Trends → Pulse → quality → shadow.
+# Метод трендов по умолчанию — schema_v3 (действие события извлекает LLM);
+# --cross-encoder разбирает серую зону Stories, без него три пола полноты не берутся.
+reddit-compass engine cycle --profile broad --window 7 \
+  --cross-encoder --review-limit 20 --trend-review-limit 12 --publish-channel shadow
 
 # Read the published UI.
 reddit-compass serve               # REST API + UI on :8900
@@ -243,7 +247,11 @@ uv run reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph 
 uv run reddit-compass collect --profile broad --sources reddit,hn,rss,ladder,ph
 
 # Iterate on the same frozen input without collecting again.
-uv run reddit-compass engine cycle --profile broad --window 7 --publish-channel shadow
+# schema_v3 — метод трендов по умолчанию: он даёт читаемые имена
+# («product launches in AI»), тогда как embedding_v2 называет кластер частотными
+# токенами и на боевом корпусе дал 79 нечитаемых имён из 80.
+uv run reddit-compass engine cycle --profile broad --window 7 \
+  --cross-encoder --review-limit 20 --trend-review-limit 12 --publish-channel shadow
 
 # Start the API:
 uv run reddit-compass serve
@@ -346,7 +354,8 @@ the whole corpus directly.
 
 ```bash
 export DASHSCOPE_API_KEY=<qwen-api-key>
-uv run reddit-compass engine cycle --profile broad --window 7 --publish-channel shadow
+uv run reddit-compass engine cycle --profile broad --window 7 \
+  --cross-encoder --review-limit 20 --trend-review-limit 12 --publish-channel shadow
 ```
 
 Engine facets and Qwen-reviewed outputs include:
