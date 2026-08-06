@@ -4021,7 +4021,21 @@ def _score_story_pair(
         else:
             candidate_features["merge_model_score"] = round(model_score, 4)
             candidate_features["merge_model_hash"] = model.model_hash
-            return None
+            # Отказ модели помечает пару, но не удаляет её. Раньше здесь стоял
+            # `return None`, и пара исчезала из набора кандидатов до того, как её
+            # увидит cross-encoder. Замер 6 августа на одном корпусе: провизорный
+            # релиз (без модели) — 16 009 пар и 944 multi-item сюжета, пересобранный
+            # с моделью — 8 563 пары и 390. Модель, обученная на 222 автометках со
+            # сдвигом −3.10, вычёркивала 7 446 пар, среди которых были настоящие
+            # слияния, а откалиброванный при precision ≥ 0.95 ранжировщик до них
+            # просто не доходил: слабый сигнал побеждал сильный тем, что шёл первым.
+            #
+            # Когда ранжировщик включён, пара остаётся в серой зоне — решает он.
+            # Когда выключен, отказ модели становится явным `reject`: то же влияние
+            # на группировку, но пара видна в метриках и аудите, а не пропадает.
+            if not params.get("cross_encoder_enabled"):
+                decision = "reject"
+                reason = "learned merge model rejected"
     return PairCandidate(
         item_id_a=item_id_a,
         item_id_b=item_id_b,
