@@ -85,7 +85,10 @@ class TestRegistryCompleteness:
         assert SOURCES["hackernews"].expected_min_items >= 1
 
     def test_rss_sources(self):
-        rss_sources = ["bbc", "guardian", "reuters", "techcrunch", "theverge", "arstechnica"]
+        # `verge`, а не `theverge`: имя берётся из того, что RSS-адаптер реально пишет
+        # в items. Прежний список закреплял имя из реестра, поэтому расхождение между
+        # реестром и адаптером тест не ловил, а фиксировал.
+        rss_sources = ["bbc", "guardian", "reuters", "techcrunch", "verge", "arstechnica"]
         for source_id in rss_sources:
             assert source_id in SOURCES, f"Missing RSS source: {source_id}"
             assert SOURCES[source_id].access == "rss"

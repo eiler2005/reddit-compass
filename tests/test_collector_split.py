@@ -748,3 +748,39 @@ def test_provider_level_coverage_sees_a_publisher_that_adapters_hide(tmp_path: P
     assert summary["gap_count"] == 0
     assert summary["days_with_missing_providers"] == 1
     assert summary["thin_days"][0]["missing_providers"] == ["medium", "verge"]
+
+
+def test_registry_and_adapters_agree_on_the_publisher_set() -> None:
+    """Реестр и адаптеры обязаны называть издания одинаково.
+
+    В реестре стояло `theverge`, а RSS-адаптер пишет в items `verge`. Ошибка была
+    тихой: реестр выглядел полным, `get_source("verge")` возвращал None, а
+    `get_provider_label("verge")` падал в `.title()` и давал «Verge» вместо «The Verge».
+    Расхождение имён не ломает сбор, поэтому и жило незамеченным — его ловит только
+    сверка двух списков.
+
+    `enabled_by_default=False` из сверки исключены намеренно: `wsj` требует ключа и
+    адаптера не имеет, `nytimes` обслуживается через RSS и Ladder. Это осознанно
+    отключённая конфигурация, а не пропущенное издание.
+    """
+    from reddit_compass.sources.registry import SOURCES
+
+    enabled = {source.provider for source in SOURCES.values() if source.enabled_by_default}
+
+    assert enabled == set(expected_providers())
+    assert len(enabled) == 21
+
+
+def test_disabled_registry_entries_are_not_counted_as_expected() -> None:
+    """Незаконфигурированное издание не должно попадать в знаменатель покрытия.
+
+    Иначе `wsj`, у которого нет ни адаптера, ни ключа, вечно считался бы недостающим
+    и держал бы долю покрытия ниже пола — то есть пол блокировал бы релизы за то,
+    чего никто и не собирался собирать.
+    """
+    from reddit_compass.sources.registry import SOURCES
+
+    disabled = {source.provider for source in SOURCES.values() if not source.enabled_by_default}
+
+    assert "wsj" in disabled
+    assert "wsj" not in expected_providers()

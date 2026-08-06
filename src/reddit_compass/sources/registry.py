@@ -82,9 +82,14 @@ SOURCES: dict[str, SourceDefinition] = {
         cluster="tech_culture",
         access="rss",
     ),
-    "theverge": SourceDefinition(
-        source_id="theverge",
-        provider="theverge",
+    # `verge`, а не `theverge`: RSS-адаптер пишет в items именно это имя, и реестр
+    # обязан совпадать с фактическим провайдером. Пока здесь стояло `theverge`,
+    # `get_source("verge")` возвращал None, а `get_provider_label("verge")` молча падал
+    # в `.title()` и давал «Verge» вместо «The Verge». Ошибка тихая: реестр выглядел
+    # полным, но реальное издание в нём отсутствовало.
+    "verge": SourceDefinition(
+        source_id="verge",
+        provider="verge",
         label="The Verge",
         cluster="tech_culture",
         access="rss",
