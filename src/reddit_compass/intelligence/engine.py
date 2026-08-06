@@ -749,6 +749,12 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
     # `action='publish'`. Форсированный broad-указатель после этого неотличим от
     # прошедшего гейты, то есть вопрос «почему этот релиз опубликован» остаётся без
     # ответа именно в том случае, когда ответ важнее всего.
+    # Релиз хранил только `params_hash`. Хэш необратим, поэтому вопрос «почему два
+    # релиза разошлись» оставался без ответа: 2026-08-06 склеил 398 multi-item против
+    # 878 у предыдущего, params_hash разный — а чем именно, восстановить нечем.
+    # Воспроизводимость требует не отпечатка параметров, а самих параметров.
+    _ensure_engine_column(conn, "story_releases", "params_json", "TEXT NOT NULL DEFAULT '{}'")
+    _ensure_engine_column(conn, "trend_releases", "params_json", "TEXT NOT NULL DEFAULT '{}'")
     _ensure_engine_column(
         conn,
         "radar_publications",
@@ -2579,8 +2585,8 @@ def create_story_release(
         conn.execute(
             """INSERT INTO story_releases
                (story_release_id, facet_release_id, method, params_hash, status,
-                metrics_json, git_sha, created_at)
-               VALUES (?, ?, ?, ?, 'building', '{}', ?, ?)""",
+                metrics_json, git_sha, created_at, params_json)
+               VALUES (?, ?, ?, ?, 'building', '{}', ?, ?, ?)""",
             (
                 story_release_id,
                 facet_release_id,
@@ -2588,6 +2594,7 @@ def create_story_release(
                 params_hash,
                 _git_sha(),
                 created_at,
+                _json({**params, "limit": limit, "domain": domain or ""}),
             ),
         )
         conn.executemany(
@@ -4953,8 +4960,8 @@ def create_trend_release(
         conn.execute(
             """INSERT INTO trend_releases
                (trend_release_id, story_release_id, window, method, params_hash,
-                status, history_status, metrics_json, git_sha, created_at)
-               VALUES (?, ?, ?, ?, ?, 'building', ?, '{}', ?, ?)""",
+                status, history_status, metrics_json, git_sha, created_at, params_json)
+               VALUES (?, ?, ?, ?, ?, 'building', ?, '{}', ?, ?, ?)""",
             (
                 trend_release_id,
                 story_release_id,
@@ -4964,6 +4971,7 @@ def create_trend_release(
                 history_status,
                 _git_sha(),
                 created_at,
+                _json(params),
             ),
         )
         for trend, memberships in trends:
@@ -8555,8 +8563,24 @@ def release_readiness(
             for floor in floors
             if isinstance(floor, dict) and not bool(floor.get("passed", True))
         ]
+        story_params_row = conn.execute(
+            "SELECT params_json FROM story_releases WHERE story_release_id = ?",
+            (str(quality_row["story_release_id"]),),
+        ).fetchone()
+        trend_params_row = conn.execute(
+            "SELECT params_json FROM trend_releases WHERE trend_release_id = ?",
+            (str(quality_row["trend_release_id"]),),
+        ).fetchone()
         report["quality"] = {
             "present": True,
+            # Параметры, а не их хэш: два релиза с разными числами обязаны объясняться
+            # разницей входных настроек, а `params_hash` необратим.
+            "story_params": _json_dict(
+                story_params_row["params_json"] if story_params_row else "{}"
+            ),
+            "trend_params": _json_dict(
+                trend_params_row["params_json"] if trend_params_row else "{}"
+            ),
             "passed": bool(quality_row["passed"]),
             "created_at": str(quality_row["created_at"]),
             "story_release_id": str(quality_row["story_release_id"]),

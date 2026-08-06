@@ -2934,3 +2934,42 @@ def test_schema_v3_is_the_default_trend_method() -> None:
     from reddit_compass.intelligence.engine import run_engine_cycle
 
     assert inspect.signature(run_engine_cycle).parameters["trend_method"].default == "schema_v3"
+
+
+def test_releases_store_their_parameters_not_only_a_hash(tmp_path: Path) -> None:
+    """Хэш параметров необратим — расхождение двух релизов по нему не объяснить.
+
+    2026-08-06 склеил 398 multi-item сюжетов против 878 у предыдущего релиза при
+    сопоставимом объёме корпуса. `params_hash` у них разный, но чем именно отличались
+    настройки — восстановить было нечем: в таблице лежал только отпечаток. Для системы,
+    построенной на immutable и объяснимых релизах, это дыра.
+    """
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    release = create_data_release(corpus, engine, source_db_path=corpus_path, run_ids=_run_ids())
+    facets = create_facet_release(engine, data_release_id=release.release_id)
+    stories = create_story_release(
+        engine,
+        facet_release_id=facets.facet_release_id,
+        params={"cross_encoder_enabled": True, "cross_encoder_threshold": 0.95},
+    )
+    trends = create_trend_release(engine, story_release_id=stories.story_release_id)
+
+    story_params = json.loads(
+        engine.execute(
+            "SELECT params_json FROM story_releases WHERE story_release_id = ?",
+            (stories.story_release_id,),
+        ).fetchone()["params_json"]
+    )
+    trend_params = json.loads(
+        engine.execute(
+            "SELECT params_json FROM trend_releases WHERE trend_release_id = ?",
+            (trends.trend_release_id,),
+        ).fetchone()["params_json"]
+    )
+
+    # Именно то, чего не хватило при разборе: настройка слияния видна в самом релизе.
+    assert story_params["cross_encoder_enabled"] is True
+    assert story_params["cross_encoder_threshold"] == 0.95
+    assert trend_params
