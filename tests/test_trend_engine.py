@@ -2986,6 +2986,7 @@ def test_merge_model_marks_rejects_instead_of_deleting_the_pair() -> None:
     """
     from reddit_compass.intelligence.engine import (
         DEFAULT_STORY_PARAMS,
+        MIN_MERGE_MODEL_LABELS,
         FrozenItem,
         _score_story_pair,
     )
@@ -3020,6 +3021,9 @@ def test_merge_model_marks_rejects_instead_of_deleting_the_pair() -> None:
         "weights": [0.0] * len(FEATURE_KEYS),
         "feature_keys": list(FEATURE_KEYS),
         "threshold": 0.5,
+        # Выше порога допуска: иначе модель к решению не допускается вовсе, и тест
+        # мерил бы guard, а не поведение отказа.
+        "trained_on": MIN_MERGE_MODEL_LABELS,
     }
     base = {**DEFAULT_STORY_PARAMS, "merge_model": reject_all}
 
@@ -3048,3 +3052,65 @@ def test_merge_model_marks_rejects_instead_of_deleting_the_pair() -> None:
     # Без ранжировщика отказ становится явным и попадает в метрики, а не пропадает.
     assert without_encoder is not None
     assert without_encoder.decision == "reject"
+
+
+def test_undertrained_merge_model_is_not_allowed_to_decide() -> None:
+    """Модель на паре сотен меток — шум, а не модель, и в решении не участвует.
+
+    Замер 6 августа: обучение шло на 222 метках, из которых лишь 7 — реальные ответы
+    Qwen, при двенадцати признаках. При этом её отказ ещё и удалял пару из набора
+    кандидатов, и цена ошибки составила 944 → 390 multi-item сюжетов.
+    """
+    from reddit_compass.intelligence.engine import (
+        DEFAULT_STORY_PARAMS,
+        MIN_MERGE_MODEL_LABELS,
+        FrozenItem,
+        _score_story_pair,
+    )
+    from reddit_compass.intelligence.story_scoring import FEATURE_KEYS
+
+    def item(item_id: str, title: str, provider: str) -> FrozenItem:
+        return FrozenItem(
+            item_id=item_id,
+            provider=provider,
+            source_cluster="mainstream",
+            canonical_url=f"https://{provider}.example/{item_id}",
+            target_url="",
+            discussion_url="",
+            title=title,
+            excerpt="Regulator opened a formal probe into the company today.",
+            published_at="2026-08-06T09:00:00Z",
+            snapshot_date="2026-08-06",
+            content_scope="headline",
+            source_section="business",
+            domain_ids=["business_markets"],
+            raw_engagement={},
+            metadata={},
+        )
+
+    left = item("a1", "EU opens antitrust probe into Acme", "reuters")
+    right = item("b1", "Brussels opens antitrust investigation into Acme", "guardian")
+    # Модель, которая склеила бы всё: без порога допуска она бы повысила пару.
+    merge_all = {
+        "bias": 50.0,
+        "weights": [0.0] * len(FEATURE_KEYS),
+        "feature_keys": list(FEATURE_KEYS),
+        "threshold": 0.5,
+        "trained_on": MIN_MERGE_MODEL_LABELS - 1,
+    }
+
+    candidate = _score_story_pair(
+        left,
+        right,
+        {},
+        {},
+        generated_by={"sparse"},
+        params={**DEFAULT_STORY_PARAMS, "merge_model": merge_all, "cross_encoder_enabled": True},
+        dense_similarity=0.7,
+    )
+
+    assert candidate is not None
+    # Решение осталось за детерминированной лестницей, модель к нему не допущена.
+    assert candidate.decision == "review"
+    assert candidate.features["merge_model_skipped"] == MIN_MERGE_MODEL_LABELS - 1
+    assert "merge_model_score" not in candidate.features

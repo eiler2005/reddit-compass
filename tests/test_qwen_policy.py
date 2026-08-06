@@ -402,3 +402,45 @@ def test_spend_guard_stops_the_call_before_it_is_paid_for(monkeypatch, tmp_path)
     # Нечисловой потолок не роняет прогон, а лишь не применяется.
     monkeypatch.setenv("RC_QWEN_MAX_SPEND_CNY", "десять")
     qwen_policy.check_spend_guard("qwen3.8-max")
+
+
+def test_timeout_marks_the_call_as_unmetered_instead_of_losing_it(monkeypatch, tmp_path) -> None:
+    """Отменённый по timeout вызов провайдер уже оплатил — молчать об этом нельзя.
+
+    Токены списываются в момент генерации, а не получения ответа: `record_usage`
+    вызывается только после 200 и потому не срабатывает. Роутер прочитал бы расход как
+    меньший, чем он есть, и решил бы, что бесплатной квоты ещё много. Записывать оценку
+    токенов нельзя — это выдуманное число, поэтому фиксируется сам факт.
+    """
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    qwen_policy.record_usage(
+        model="qwen3.8-max",
+        endpoint="payg",
+        prompt_tokens=1000,
+        completion_tokens=500,
+        stage="trend_review",
+    )
+    qwen_policy.record_unmetered_call(
+        model="qwen3.8-max", endpoint="payg", stage="trend_review", reason="timeout 240s"
+    )
+
+    report = qwen_policy.cost_report()
+
+    assert report["unmetered_calls"] == 1
+    assert report["unmetered_detail"][0]["stage"] == "trend_review"
+    assert "timeout" in report["unmetered_detail"][0]["reason"]
+    # Сумма остаётся нижней границей: токены отменённого вызова неизвестны и не выдуманы.
+    assert report["total_cny"] > 0
+
+
+def test_cost_report_without_timeouts_reports_zero_unmetered(monkeypatch, tmp_path) -> None:
+    """Пустой счётчик — сигнал, что оценка расхода полна, а не что учёта нет."""
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    qwen_policy.record_usage(
+        model="qwen3.7-flash", endpoint="payg", prompt_tokens=100, completion_tokens=50
+    )
+
+    report = qwen_policy.cost_report()
+
+    assert report["unmetered_calls"] == 0
+    assert report["unmetered_detail"] == []

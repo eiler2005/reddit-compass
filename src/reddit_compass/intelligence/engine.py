@@ -2417,6 +2417,11 @@ def _select_engine_items(
 # ``_valid_group_against_medoid``). Переслияние не появляется вплоть до 0.5.
 DEFAULT_MEDOID_MIN_SCORE = 0.55
 
+# Меток, ниже которых обученная модель слияния к решению не допускается. Двенадцать
+# признаков на паре сотен примеров дают переобучение, а её отказ раньше ещё и удалял
+# пару из набора кандидатов — цена ошибки была 944 → 390 multi-item сюжетов.
+MIN_MERGE_MODEL_LABELS = 500
+
 DEFAULT_STORY_PARAMS: dict[str, Any] = {
     "auto_merge_threshold": 0.82,
     "review_threshold": 0.62,
@@ -4011,6 +4016,21 @@ def _score_story_pair(
     merge_model_params = params.get("merge_model")
     if decision == "review" and isinstance(merge_model_params, dict):
         model = MergeModel.from_params(merge_model_params)
+        # Недообученная модель не участвует в решении вовсе. Замер 6 августа: модель
+        # обучалась на 222 метках, из которых лишь 7 — реальные ответы Qwen, при
+        # двенадцати признаках. Это не модель, а шум, и её мнение о серой зоне не
+        # должно ни повышать, ни понижать пару. Порог низкий намеренно: он отсекает
+        # заведомо вырожденный случай, а не решает, сколько меток «достаточно».
+        if model.trained_on < MIN_MERGE_MODEL_LABELS:
+            candidate_features["merge_model_skipped"] = model.trained_on
+            return PairCandidate(
+                item_id_a=item_id_a,
+                item_id_b=item_id_b,
+                score=score,
+                decision=decision,
+                reason=reason,
+                features=candidate_features,
+            )
         model_score = model.score(candidate_features)
         if model.predict(candidate_features):
             decision = "auto_merge"

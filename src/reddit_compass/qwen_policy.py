@@ -19,6 +19,7 @@ import os
 import sqlite3
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
+from typing import cast
 
 from .config import DEFAULT_DATA_DIR
 
@@ -406,6 +407,67 @@ def pick_endpoint(model: str, now: datetime | None = None) -> tuple[str, str]:
     return "", "ключей Qwen нет"
 
 
+def record_unmetered_call(*, model: str, endpoint: str, stage: str, reason: str) -> None:
+    """Отметить вызов, который провайдер оплатил, а мы не смогли посчитать.
+
+    Токены списываются в момент генерации, а не в момент получения ответа. Отмена по
+    timeout приходит после того, как модель уже поработала: провайдер выставит счёт, а
+    в леджер не попадёт ничего. Роутер прочтёт это как «расход меньше, чем на самом
+    деле» и решит, что бесплатной квоты ещё много.
+
+    Записывать сюда оценку токенов нельзя — она была бы выдуманным числом. Поэтому
+    пишется сам факт: сколько вызовов остались неучтёнными и почему. Отчёт покажет их
+    отдельной строкой, и станет видно, что оценка остатка неполна.
+    """
+    try:
+        path = ledger_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        conn = _connect(path)
+        with conn:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS qwen_unmetered (
+                    model TEXT NOT NULL, endpoint TEXT NOT NULL, stage TEXT NOT NULL,
+                    reason TEXT NOT NULL, created_at TEXT NOT NULL
+                )"""
+            )
+            conn.execute(
+                "INSERT INTO qwen_unmetered (model, endpoint, stage, reason, created_at) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (model, endpoint, stage, reason, datetime.now(UTC).isoformat()),
+            )
+        conn.close()
+        logger.warning(
+            "Вызов %s (%s) отменён по %s: провайдер его оплатил, но токены не учтены",
+            model,
+            stage or "без стадии",
+            reason,
+        )
+    except (OSError, sqlite3.Error) as exc:
+        logger.warning("Не удалось отметить неучтённый вызов Qwen (%s)", exc)
+
+
+def unmetered_calls(path: Path | None = None) -> list[dict[str, object]]:
+    """Неучтённые вызовы по (стадия, модель, причина); пусто — все вызовы посчитаны."""
+    target = path or ledger_path()
+    if not target.exists():
+        return []
+    conn: sqlite3.Connection | None = None
+    try:
+        conn = _connect(target)
+        rows = conn.execute(
+            """SELECT stage, model, reason, COUNT(*) AS calls FROM qwen_unmetered
+               GROUP BY stage, model, reason ORDER BY calls DESC"""
+        ).fetchall()
+    except (OSError, sqlite3.Error):
+        return []
+    finally:
+        if conn is not None:
+            conn.close()
+    return [
+        {"stage": str(s), "model": str(m), "reason": str(r), "calls": int(n)} for s, m, r, n in rows
+    ]
+
+
 def cost_report(path: Path | None = None, *, since: datetime | None = None) -> dict[str, object]:
     """Расход по (стадия, модель, эндпоинт) с оценкой в CNY по list price.
 
@@ -468,11 +530,16 @@ def cost_report(path: Path | None = None, *, since: datetime | None = None) -> d
                 "cost_cny": None if cost is None else round(cost, 4),
             }
         )
+    unmetered = unmetered_calls(target)
     return {
         "price_source_date": LIST_PRICES_SOURCE_DATE,
         "rows": report_rows,
         "total_cny": round(total, 4),
         "unpriced_calls": unpriced,
+        # Вызовы, оплаченные провайдером, но не попавшие в леджер: их токены неизвестны,
+        # поэтому сумма выше — нижняя граница расхода, а не точная величина.
+        "unmetered_calls": sum(cast(int, row["calls"]) for row in unmetered),
+        "unmetered_detail": unmetered,
     }
 
 
