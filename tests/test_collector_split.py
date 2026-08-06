@@ -227,6 +227,7 @@ def test_collection_coverage_detects_recoverable_snapshot_gap(tmp_path: Path) ->
                 "ladder": True,
                 "producthunt": True,
             },
+            "historical_recovery": False,
             # Провайдерный уровень поверх адаптерного: изданий 21, адаптеров 5.
             "providers_ok": 0,
             "providers_expected": 21,
@@ -784,3 +785,42 @@ def test_disabled_registry_entries_are_not_counted_as_expected() -> None:
 
     assert "wsj" in disabled
     assert "wsj" not in expected_providers()
+
+
+def test_recovered_day_separates_structural_gaps_from_real_ones(tmp_path: Path) -> None:
+    """Отсутствие издания с прямым фидом на восстановленном дне — не сбой.
+
+    `_historical_feed_url` умеет переписать только Google News; прямой фид издания
+    отдаёт текущую ленту, и за прошлую дату из неё выживет лишь то, что ещё не
+    вытеснено. Именно поэтому 2026-08-04 не получил `medium` и `verge` — оба отдают
+    по 10 материалов ежедневно и совершенно исправны. Без разделения оператор пошёл
+    бы чинить работающее.
+    """
+    from reddit_compass.collector import coverage_summary, providers_without_historical_query
+
+    no_history = providers_without_historical_query()
+    assert {"medium", "verge"} <= no_history
+    # `reuters` ходит через Google News — его отсутствие структурным не является.
+    assert "reuters" not in no_history
+
+    summary = coverage_summary(
+        [
+            {
+                "date": "2026-08-04",
+                "raw_complete": True,
+                "recoverable_from_snapshots": False,
+                "artifacts": {},
+                "source_health": {},
+                "historical_recovery": True,
+                "providers_ok": 18,
+                "providers_expected": 21,
+                "missing_providers": ["medium", "reuters", "verge"],
+            }
+        ]
+    )
+
+    thin = summary["thin_days"][0]
+    assert thin["recovered"] is True
+    assert thin["missing_without_history"] == ["medium", "verge"]
+    # Reuters мог прийти и не пришёл — это настоящий пропуск, его прятать нельзя.
+    assert thin["missing_recoverable"] == ["reuters"]

@@ -2874,3 +2874,8 @@ a.story-card {
     color: var(--error);
     font-weight: 600;
 }
+
+/* Структурное ограничение источника, а не сбой: оператору не нужно его чинить. */
+.coverage-structural {
+    color: var(--text-muted);
+}

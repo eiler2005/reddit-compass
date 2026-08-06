@@ -2,14 +2,14 @@
 # All timestamps are UTC.  VPS is fully autonomous (scheme D).
 # Reddit collected via Playwright + residential proxy (REDDIT_COMPASS_ENGINE=playwright,
 # REDDIT_COMPASS_PROXIES from .env).  Mac fetch-and-sync.sh is fallback only.
-# Pipeline runs every 2 nights (odd days) — Engine cycle on 1-CPU VPS takes 30-60 min,
+# Pipeline runs every 2 nights (odd days) — Engine cycle takes 30-60 min on this host,
 # daily runs are redundant with a 7-day analysis window.
 # PIPELINE PAUSED 2026-08-02 by owner: collection and Engine runs are manual-only
 # until a new 2-3 day cadence is explicitly chosen. Keep the commands below as the
 # restoration template; only Docker cache maintenance remains scheduled.
 #
 # LOCKING (required before any of these are re-enabled).  Every pipeline line runs under
-# `flock -n`: on a 1-CPU VPS an Engine cycle takes 30-60 min, so a delayed job would
+# `flock -n`: an Engine cycle takes 30-60 min, so a delayed job would
 # otherwise start while the previous one is still running.  Two Collectors racing on the
 # same snapshot day write the same artifacts twice; two Engine cycles compete for the
 # same release ids.  `-n` means "skip this run", not "queue it": a skipped night is

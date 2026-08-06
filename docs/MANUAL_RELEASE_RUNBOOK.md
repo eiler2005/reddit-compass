@@ -376,6 +376,44 @@ shadow обновился. После publication заново проверьт�
 docker compose run --rm reddit-compass engine publications --channel broad
 ```
 
+## 7a. Если хост умер посреди Engine cycle
+
+Случилось 2026-08-06: хост перестал отвечать (SSH, публичный порт, ICMP) во время
+стадии cross-encoder. Порядок восстановления — ниже; паниковать за данные не нужно.
+
+**Что уцелело по построению.**
+
+- Raw-сбор финализируется **до** Engine, поэтому дневные факты уже в `compass.db`.
+- Data/Story/Trend-релизы immutable, а публикация идёт под `BEGIN IMMEDIATE`:
+  полупубликации не бывает — транзакция либо прошла, либо откатилась.
+- **Оплаченные вызовы Qwen не теряются.** Извлечение схем пишет каждый батч сразу
+  (`on_records=_persist` → `store_schemas`), трендовое ревью — каждый ответ
+  (`store_trend_review_response`), и кэш ключуется по `input_hash`. Повторный прогон
+  переиспользует уже оплаченное и доплачивает только за недостающее.
+
+**Порядок после возврата хоста.**
+
+```bash
+# 1. Хост жив? ICMP на этом хосте может быть закрыт — проверяйте порт, а не ping.
+nc -z -G 10 "$RC_DEPLOY_HOST" 22 && echo up
+
+# 2. Что показывает журнал прерванного прогона.
+ssh "$RC_DEPLOY_USER@$RC_DEPLOY_HOST" "tail -40 /tmp/rc-engine-manual.log"
+
+# 3. Не осталось ли зависшего контейнера с замком.
+docker ps -a --filter name=reddit-compass-run
+
+# 4. Состояние релизов: незафиналенные просто не публикуются.
+docker compose run --rm --entrypoint reddit-compass api engine release readiness --release <ID>
+```
+
+Указатели каналов трогать не нужно: прерванный цикл их не двигал, а если бы двигал,
+`publish_radar` всё равно отказался бы откатить канал на более старый Data Release.
+
+**Чего делать нельзя.** Перезапускать цикл, не убедившись, что предыдущий контейнер
+мёртв: два Engine на одной `trend_engine.db` конкурируют за одни и те же release id.
+В шаблоне cron это закрыто `flock -n`, при ручном запуске проверяйте `docker ps`.
+
 ## 8. Rollback и завершение журнала
 
 Перед publication запишите текущий `broad` publication ID из `engine publications --channel

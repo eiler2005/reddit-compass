@@ -165,6 +165,7 @@ def collection_coverage(
 
     runs_by_date: dict[str, str] = {}
     health_by_date: dict[str, dict[str, str]] = {}
+    recovered_dates: set[str] = set()
     if db_path.exists():
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
@@ -177,14 +178,18 @@ def collection_coverage(
             for snapshot_date, run_id, status in run_rows:
                 runs_by_date[str(snapshot_date)] = f"{run_id}\t{status}"
             health_rows = conn.execute(
-                """SELECT r.snapshot_date, sh.source_id, sh.status
+                """SELECT r.snapshot_date, sh.source_id, sh.status, COALESCE(sh.message, '')
                    FROM source_health sh
                    JOIN runs r ON r.run_id = sh.run_id
                    WHERE r.profile = ? AND r.snapshot_date BETWEEN ? AND ?""",
                 (profile, since, until),
             ).fetchall()
-            for snapshot_date, source_id, status in health_rows:
+            for snapshot_date, source_id, status, message in health_rows:
                 health_by_date.setdefault(str(snapshot_date), {})[str(source_id)] = str(status)
+                # Признак восстановленного дня пишет сам recovery — отдельного поля
+                # для него нет, и заводить его ради одной пометки избыточно.
+                if "Historical recovery" in str(message):
+                    recovered_dates.add(str(snapshot_date))
         except sqlite3.OperationalError:
             # A new corpus file has no intelligence schema yet.  It is simply
             # equivalent to no finalized raw runs, not an error in a coverage check.
@@ -240,6 +245,7 @@ def collection_coverage(
                 # Отдельно от `raw_complete`: издание может отвалиться на одну ночь, и
                 # превращать это в блокировку релиза — решение владельца, а не побочный
                 # эффект правки наблюдаемости. Пока — показываем, не блокируем.
+                "historical_recovery": snapshot_date in recovered_dates,
                 "providers_ok": len(seen_providers & providers),
                 "providers_expected": len(providers),
                 "missing_providers": missing_providers,
@@ -250,6 +256,30 @@ def collection_coverage(
         )
         current += timedelta(days=1)
     return result
+
+
+def providers_without_historical_query() -> frozenset[str]:
+    """Издания, которых нельзя дособрать за прошлую дату по их же интерфейсу.
+
+    `_historical_feed_url` умеет переписать только Google News (`when:1d` →
+    `after:/before:`). Прямой фид издания возвращается без изменений, то есть отдаёт
+    текущую ленту, и за прошлую дату из неё выживет лишь то, что ещё не вытеснено.
+    У Product Hunt date-aware интерфейса нет вовсе.
+
+    Нужно это ровно для одного: не выдавать структурное ограничение за сбой. День
+    2026-08-04 восстанавливался ретроспективно и не получил `medium` и `verge` — не
+    потому, что они сломаны (оба отдают по 10 материалов ежедневно), а потому, что их
+    ленты к моменту восстановления уже провернулись. Без пометки оператор пошёл бы
+    чинить работающее.
+    """
+    from .sources.rss import RSS_SOURCES, _historical_feed_url
+
+    direct = {
+        source.name
+        for source in RSS_SOURCES
+        if all(_historical_feed_url(feed, "2000-01-01") == feed for feed in source.feeds)
+    }
+    return frozenset(direct | {"producthunt"})
 
 
 def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
@@ -314,6 +344,17 @@ def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
             "providers_ok": day.get("providers_ok"),
             "providers_expected": day.get("providers_expected"),
             "missing_providers": day.get("missing_providers") or [],
+            # Разделяем структурное и настоящее: у восстановленного дня отсутствие
+            # издания с прямым фидом ожидаемо, отсутствие остальных — нет.
+            "missing_recoverable": sorted(
+                set(cast(list[str], day.get("missing_providers") or []))
+                - providers_without_historical_query()
+            ),
+            "missing_without_history": sorted(
+                set(cast(list[str], day.get("missing_providers") or []))
+                & providers_without_historical_query()
+            ),
+            "recovered": bool(day.get("historical_recovery")),
         }
         for day in coverage
         if bool(day["raw_complete"]) and day.get("missing_providers")

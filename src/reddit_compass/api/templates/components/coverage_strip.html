@@ -43,9 +43,18 @@
     {% if coverage.summary.thin_days %}
     <ul class="coverage-actions">
         {% for thin in coverage.summary.thin_days %}
-        <li><code>{{ thin.date }}</code> — собран, но без изданий:
-            {% for name in thin.missing_providers %}<strong>{{ name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}
-            ({{ thin.providers_ok }}/{{ thin.providers_expected }})</li>
+        <li>
+            <code>{{ thin.date }}</code> — {{ thin.providers_ok }}/{{ thin.providers_expected }} изданий{% if thin.recovered %} (день восстановлен ретроспективно){% endif %}.
+            {% if thin.missing_recoverable %}
+            Не дали материал:
+            {% for name in thin.missing_recoverable %}<strong>{{ name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}.
+            {% endif %}
+            {% if thin.missing_without_history %}
+            <span class="coverage-structural">Без date-aware интерфейса, за прошлую дату не восстанавливаются:
+            {% for name in thin.missing_without_history %}{{ name }}{% if not loop.last %}, {% endif %}{% endfor %}
+            — это ограничение источника, а не сбой.</span>
+            {% endif %}
+        </li>
         {% endfor %}
     </ul>
     {% endif %}
