@@ -340,8 +340,21 @@ async def collect_sources(
 
     source_results: list[SourceResult] = []
     all_items: list[ContentItem] = []
-    for requested_id in sources or DEFAULT_SOURCES:
-        source_id = _ALIASES.get(requested_id, requested_id)
+    selected_ids = [
+        _ALIASES.get(requested_id, requested_id) for requested_id in (sources or DEFAULT_SOURCES)
+    ]
+    # Тот же инвариант, что и у финализации: полнота считается по тому, что обязан
+    # покрыть профиль, а не по тому, что попросили собрать. Guard стоял только в
+    # `finalize_snapshot_collection`, поэтому живой `collect --sources hn,rss,ladder,ph`
+    # 6 августа объявил production-run `complete` вообще без строки Reddit. Это ровно
+    # тот же дефект, что 2026-08-01 дал `complete` с одним Reddit из одиннадцати
+    # провайдеров, только зеркально.
+    unrequested = (
+        [source_id for source_id in DEFAULT_SOURCES if source_id not in selected_ids]
+        if profile in PRODUCTION_PROFILES
+        else []
+    )
+    for source_id in selected_ids:
         result = await run_source_adapter(
             source_id,
             config,
@@ -368,6 +381,18 @@ async def collect_sources(
             now_iso(),
         )
         all_items.extend(items)
+
+    # Недостающие для профиля источники дописываются `pending` — тем же статусом, что и
+    # отсутствующий артефакт, — поэтому run остаётся pending до их появления.
+    source_results.extend(
+        SourceResult(
+            source_id=source_id,
+            status="pending",
+            error_code="not_collected",
+            message=f"Source not requested for this collection: {source_id}",
+        )
+        for source_id in unrequested
+    )
 
     finished_at = now_iso()
     _statuses = {r.status for r in source_results}

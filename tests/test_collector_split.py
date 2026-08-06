@@ -584,3 +584,57 @@ def test_coverage_summary_names_only_safe_actions(tmp_path: Path) -> None:
     assert actions[today] == "pending"
     assert summary["gap_count"] == 2
     assert "pending" not in summary["actions"]
+
+
+def test_live_collection_with_narrowed_sources_cannot_be_complete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Сужение `--sources` не даёт прод-профилю объявить себя полным и при живом сборе.
+
+    Guard стоял только в `finalize_snapshot_collection`. Живой прогон 2026-08-06
+    (`collect --sources hn,rss,ladder,ph --profile broad`) записал production-run как
+    `complete` вообще без строки Reddit — зеркало того дефекта, из-за которого
+    2026-08-01 получил `complete` с одним Reddit из одиннадцати провайдеров.
+    """
+
+    async def fake_fetch(source_id, config, snapshot_date, *, historical_date=None):
+        del config, snapshot_date, historical_date
+        return [_legacy_card(f"{source_id}-1", "2026-08-06")]
+
+    monkeypatch.setattr("reddit_compass.collector._fetch_source_cards", fake_fetch)
+
+    result = asyncio.run(
+        collect_sources(
+            MonitorConfig(),
+            tmp_path / "snapshots",
+            tmp_path / "compass.db",
+            sources=["hn", "rss", "ladder", "ph"],
+            profile="broad",
+        )
+    )
+
+    assert result.status == "pending"
+    missing = {row.source_id for row in result.source_results if row.status == "pending"}
+    assert missing == {"reddit"}
+
+
+def test_live_collection_narrowed_sources_ok_off_production(tmp_path: Path, monkeypatch) -> None:
+    """Экспериментальный профиль полноты не обязан — требование касается прод-каналов."""
+
+    async def fake_fetch(source_id, config, snapshot_date, *, historical_date=None):
+        del config, snapshot_date, historical_date
+        return [_legacy_card(f"{source_id}-1", "2026-08-06")]
+
+    monkeypatch.setattr("reddit_compass.collector._fetch_source_cards", fake_fetch)
+
+    result = asyncio.run(
+        collect_sources(
+            MonitorConfig(),
+            tmp_path / "snapshots",
+            tmp_path / "compass.db",
+            sources=["hn", "rss"],
+            profile="starter",
+        )
+    )
+
+    assert result.status == "complete"
