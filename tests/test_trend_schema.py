@@ -801,3 +801,89 @@ def test_llm_schema_still_admits_in_scope_events() -> None:
 
     assert resolved is not None
     assert resolved[2] == "Apple"
+
+
+# ── Golden set имён трендов ──────────────────────────────────────────────────
+#
+# Плохие имена взяты из боевого релиза `trends_5a880292319845b46bf3` (embedding_v2,
+# 54 тренда): именно они прошли прежний гейт и попали к читателю. Хорошие — реальный
+# вывод schema_v2/v3. Набор существует, чтобы классификатор нельзя было «подкрутить»
+# под одну сторону: любое ужесточение обязано оставить второй список нетронутым.
+_BAD_TREND_NAMES = (
+    ("actually promote saas first", "filler_word"),
+    ("job see point pay feel", "filler_word"),
+    ("agent built actually tool", "filler_word"),
+    ("remote work advice question", "filler_word"),
+    ("career data center advice job", "filler_word"),
+    ("credit retirement money house", "token_bag"),
+    ("interview job employer terminated", "token_bag"),
+    ("stock investor nervous trap", "token_bag"),
+    ("model flash deepseek parameter", "token_bag"),
+    ("yorker keep truckin sitemap april sporting s", "boilerplate_token"),
+    ("", "empty"),
+    ("ban", "bare_verb"),
+    ("xy", "single_token"),
+    ("ai agent", "generic_phrase"),
+)
+
+_GOOD_TREND_NAMES = (
+    "regulatory fines in business",
+    "bans and restrictions in business",
+    "product launches in AI",
+    "model releases in AI",
+    "layoffs in AI",
+    "shutdowns and suspensions worldwide",
+    "regulatory fines worldwide",
+    "acquisitions in business",
+    "export controls on chips",
+    "lawsuits over training data",
+    "funding rounds in AI",
+    "breaches and intrusions in finance",
+    "leadership changes in business",
+    "outages in ai_technology",
+    "Паттерн: acquisitions in business",
+    "OpenAI quantum agent platform",
+    "Amazon warehouse tracking penalty",
+)
+
+
+def test_token_bag_names_are_rejected_with_a_reason() -> None:
+    """Мешок токенов обязан отсеиваться, и причина обязана быть названа.
+
+    Прежняя проверка ловила три формы — пустое, односложное и фразу из словаря — и
+    пропускала самый частый в проде дефект. В `trends_5a880292319845b46bf3` через неё
+    прошли `actually promote saas first`, `credit retirement money house` и
+    `job see point pay feel`: формально они не односложные и не generic.
+    """
+    from reddit_compass.intelligence.quality import trend_name_defect
+
+    for name, expected in _BAD_TREND_NAMES:
+        assert trend_name_defect(name) == expected, name
+
+
+def test_real_trend_names_survive_the_name_gate() -> None:
+    """Ужесточение не имеет права уносить нормальные имена — иначе слой просто пустеет.
+
+    `agent built actually tool` и `regulatory fines in business` неотличимы по форме:
+    четыре токена, одно служебное, три знаменательных. Разводит их тип связки, и
+    именно это здесь и проверяется.
+    """
+    from reddit_compass.intelligence.quality import trend_name_defect
+
+    for name in _GOOD_TREND_NAMES:
+        assert trend_name_defect(name) == "", name
+
+
+def test_bad_name_metric_reports_reasons_and_examples() -> None:
+    """Счётчик без примеров не говорит, что чинить."""
+    from collections import Counter
+
+    from reddit_compass.intelligence.quality import trend_name_defect
+
+    names = [name for name, _ in _BAD_TREND_NAMES] + list(_GOOD_TREND_NAMES)
+    defects = [(nm, trend_name_defect(nm)) for nm in names]
+    reasons = dict(Counter(defect for _, defect in defects if defect))
+
+    assert sum(reasons.values()) == len(_BAD_TREND_NAMES)
+    assert reasons["filler_word"] == 5
+    assert reasons["token_bag"] == 4

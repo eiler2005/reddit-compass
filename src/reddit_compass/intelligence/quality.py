@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from collections import Counter
 from dataclasses import dataclass
@@ -79,15 +80,244 @@ def _trend_value(name: str) -> str:
     return name.strip().lower()
 
 
-def is_bad_trend_name(name: str) -> bool:
-    """Имя тренда неприемлемо: один токен, голый глагол или generic-фраза."""
+# Служебные слова делятся на два класса, и это различие несёт всю работу.
+#
+# `agent built actually tool` и `regulatory fines in business` неотличимы по форме:
+# четыре токена, одно служебное, три знаменательных. Считать их одинаково — значит либо
+# пропустить мешок, либо отсеять нормальное имя. Отличается **тип** связки: `in` строит
+# отношение «действие в домене», `actually` не строит ничего и появляется в имени только
+# потому, что часто встречалось в текстах кластера.
+_CONNECTIVE_WORDS = frozenset(
+    {
+        "and",
+        "or",
+        "in",
+        "of",
+        "for",
+        "on",
+        "to",
+        "with",
+        "without",
+        "from",
+        "at",
+        "by",
+        "after",
+        "before",
+        "over",
+        "under",
+        "against",
+        "across",
+        "between",
+        "worldwide",
+        "amid",
+        "as",
+    }
+)
 
+# Слова разговорной речи и оценки. В названии события их не бывает: они попадают туда
+# только из частотного разбора реплик. Одного достаточно, чтобы признать имя мешком.
+_FILLER_WORDS = frozenset(
+    {
+        "actually",
+        "really",
+        "very",
+        "too",
+        "also",
+        "still",
+        "even",
+        "just",
+        "quite",
+        "first",
+        "next",
+        "keep",
+        "see",
+        "get",
+        "got",
+        "make",
+        "made",
+        "want",
+        "need",
+        "think",
+        "feel",
+        "point",
+        "thing",
+        "things",
+        "stuff",
+        "way",
+        "ways",
+        "lot",
+        "much",
+        "many",
+        "more",
+        "most",
+        "some",
+        "any",
+        "all",
+        "good",
+        "bad",
+        "best",
+        "worst",
+        "help",
+        "advice",
+        "question",
+        "opinion",
+        "guy",
+        "guys",
+        "people",
+    }
+)
+
+# Артикли, местоимения и вспомогательные глаголы: не мусор сами по себе, но и не связка —
+# их наличие не спасает имя от признания мешком.
+_NEUTRAL_WORDS = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "have",
+        "has",
+        "had",
+        "will",
+        "would",
+        "can",
+        "could",
+        "should",
+        "may",
+        "might",
+        "must",
+        "not",
+        "no",
+        "it",
+        "its",
+        "he",
+        "she",
+        "they",
+        "them",
+        "his",
+        "her",
+        "their",
+        "my",
+        "your",
+        "we",
+        "us",
+        "i",
+        "you",
+        "me",
+        "this",
+        "that",
+        "these",
+        "those",
+        "so",
+        "such",
+        "if",
+        "then",
+        "than",
+        "up",
+        "down",
+        "out",
+        "off",
+        "about",
+        "into",
+        "onto",
+        "but",
+    }
+)
+
+# Токены, по которым имя опознаётся как мусор вёрстки, а не как событие.
+_BOILERPLATE_TOKENS = frozenset(
+    {"sitemap", "rss", "subscribe", "newsletter", "cookie", "privacy", "advertisement"}
+)
+
+
+def _has_proper_noun(name: str) -> bool:
+    """Есть ли в имени имя собственное — актор события.
+
+    Любая заглавная считается сигналом, включая первое слово. Компромисс осознанный:
+    «Amazon warehouse tracking penalty» и «Credit retirement money house» по регистру
+    неразличимы, и выбирать приходится, какая ошибка дороже. Пол блокирует релиз при
+    count > 0, поэтому ложное срабатывание останавливает нормальный релиз и подрывает
+    доверие к гейту, а пропуск — оставляет одно плохое имя, которое поймает ручная
+    проверка. Все 54 имени боевого `trends_5a880292319845b46bf3` — в нижнем регистре
+    (embedding_v2 собирает их из частотных токенов), поэтому sentence-cased мешок
+    остаётся гипотезой, а актор в начале имени — обычное дело. Мешки с заглавной, если
+    появятся, ловятся правилами про filler и boilerplate.
+    """
+    raw = name
+    for prefix in ("Паттерн: ", "Боль: ", "Тема: "):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix) :]
+    tokens = [token for token in re.split(r"[^\w]+", raw.strip()) if token]
+    return any(token[:1].isupper() or any(c.isupper() for c in token[1:]) for token in tokens)
+
+
+def trend_name_defect(name: str) -> str:
+    """Причина, по которой имя тренда непригодно; пустая строка — имя приемлемо.
+
+    Прежняя проверка ловила только три формы: пустое, односложное и фразу из словаря
+    generic. Мимо неё проходил самый частый в боевом релизе дефект — «мешок токенов»:
+    имя, собранное из частотных слов кластера, а не описывающее событие. В
+    `trends_5a880292319845b46bf3` такими были `actually promote saas first`,
+    `credit retirement money house`, `job see point pay feel`, а также
+    `yorker keep truckin sitemap april sporting s` — и все они формально проходили гейт,
+    потому что не односложные и не из словаря.
+
+    Признак мешка — не длина и не редкость слов, а отсутствие связи: доля служебных слов
+    высока, знаменательного ядра нет, либо в имя попала вёрстка источника.
+    """
     value = _trend_value(name)
     if not value:
-        return True
-    if len(value.split()) == 1 and (value in _BARE_VERBS or len(value) <= 3):
-        return True
-    return value in _BARE_VERBS or value in _GENERIC_PHRASES
+        return "empty"
+    tokens = [token for token in re.split(r"[^\w]+", value) if token]
+    if not tokens:
+        return "empty"
+    if len(tokens) == 1:
+        # Порядок важен для точности причины: голый глагол — тоже один токен, но
+        # оператору нужно знать, что имя не «слишком короткое», а «это глагол».
+        # Раньше проверка длины стояла первой и делала ветку `bare_verb` недостижимой.
+        if value in _BARE_VERBS:
+            return "bare_verb"
+        if len(value) <= 3:
+            return "single_token"
+    if value in _GENERIC_PHRASES:
+        return "generic_phrase"
+    if _BOILERPLATE_TOKENS & set(tokens):
+        return "boilerplate_token"
+    # Одиночные буквы («april sporting s») — след обрезанного токена, а не слово.
+    if len(tokens) >= 4 and any(len(token) == 1 for token in tokens):
+        return "token_bag"
+    # Разговорное слово в имени события не появляется иначе как из частотного разбора.
+    if _FILLER_WORDS & set(tokens):
+        return "filler_word"
+    connectives = [token for token in tokens if token in _CONNECTIVE_WORDS]
+    content = [
+        token for token in tokens if token not in _CONNECTIVE_WORDS and token not in _NEUTRAL_WORDS
+    ]
+    # Четыре и больше знаменательных слов без единой связки — перечисление токенов
+    # кластера, а не фраза: «credit retirement money house», «stock investor nervous trap».
+    #
+    # Исключение — имя собственное. `OpenAI quantum agent platform` имеет ту же форму
+    # (четыре знаменательных слова, ни одной связки), но называет конкретного актора, а
+    # мешок собирается из частотных нарицательных и актора не содержит по построению.
+    # Сигнал теряется при приведении к нижнему регистру, поэтому регистр проверяется по
+    # исходной строке.
+    if len(content) >= 4 and not connectives and not _has_proper_noun(name):
+        return "token_bag"
+    return ""
+
+
+def is_bad_trend_name(name: str) -> bool:
+    """Имя тренда неприемлемо. Причину даёт `trend_name_defect`."""
+    return bool(trend_name_defect(name))
 
 
 # Абсолютный допустимый уровень качества. ``op`` = "max" (value <= floor) / "min".
@@ -121,7 +351,7 @@ QUALITY_FLOORS: dict[str, dict[str, Any]] = {
     "trends_bad_name_count": {
         "op": "max",
         "value": 0,
-        "desc": "trends with single-token/bare-verb/generic name",
+        "desc": "trends with single-token/bare-verb/generic/token-bag name",
     },
     "trends_duplicate_name_count": {"op": "max", "value": 0, "desc": "duplicate trend names"},
     # На слой Trends смотрели только две проверки имён, поэтому кластер размером
@@ -231,7 +461,14 @@ def compute_quality(
         trend_release_id,
     )
     names = [r["name_ru"] for r in trends]
-    bad_names = sum(1 for nm in names if is_bad_trend_name(nm))
+    # Не только счётчик: «41 плохое имя» не говорит оператору, что чинить. Примеры с
+    # причиной превращают провал пола в конкретную задачу.
+    name_defects = [(nm, trend_name_defect(nm)) for nm in names]
+    bad_name_examples = [{"name": nm, "defect": defect} for nm, defect in name_defects if defect][
+        :10
+    ]
+    bad_name_reasons = dict(Counter(defect for _, defect in name_defects if defect))
+    bad_names = sum(1 for _, defect in name_defects if defect)
     dup_names = sum(cnt - 1 for cnt in Counter(names).values() if cnt > 1)
     max_trend_stories = max((int(r["story_count"] or 0) for r in trends), default=0)
 
@@ -258,6 +495,8 @@ def compute_quality(
         "taxonomy_rubric_dist": dict(rub.most_common()),
         "trends_count": len(names),
         "trends_bad_name_count": bad_names,
+        "trends_bad_name_reasons": bad_name_reasons,
+        "trends_bad_name_examples": bad_name_examples,
         "trends_duplicate_name_count": dup_names,
         "trends_max_story_share": round(100 * max_trend_stories / total, 2) if total else 0.0,
     }
