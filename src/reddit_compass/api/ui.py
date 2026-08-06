@@ -1902,13 +1902,31 @@ def _calendar_coverage(days: int = 14) -> dict[str, object]:
     summary = coverage_summary(rows)
     gaps = cast(list[dict[str, str]], summary["gaps"])
     actions = {gap["date"]: gap["recommended_action"] for gap in gaps}
-    strip = [
-        {
-            "date": str(row["date"]),
-            "state": "complete" if row["raw_complete"] else actions.get(str(row["date"]), "gap"),
-        }
-        for row in rows
-    ]
+    strip = []
+    for row in rows:
+        date = str(row["date"])
+        health = cast(dict[str, str], row.get("source_health") or {})
+        artifacts = cast(dict[str, bool], row.get("artifacts") or {})
+        # Посточниковый разрез на каждом дне: «4 из 5» не говорит, что чинить, а
+        # отсутствующий Reddit и отсутствующий Product Hunt — разные по цене проблемы.
+        sources = [
+            {
+                "source_id": source_id,
+                "state": state,
+                "artifact": bool(artifacts.get(source_id)),
+                "ok": state in {"ok", "empty"} and bool(artifacts.get(source_id)),
+            }
+            for source_id, state in sorted(health.items())
+        ]
+        strip.append(
+            {
+                "date": date,
+                "state": "complete" if row["raw_complete"] else actions.get(date, "gap"),
+                "sources": sources,
+                "ok_count": sum(1 for source in sources if source["ok"]),
+                "total_count": len(sources),
+            }
+        )
     return {"days": strip, "summary": summary}
 
 

@@ -638,3 +638,43 @@ def test_live_collection_narrowed_sources_ok_off_production(tmp_path: Path, monk
     )
 
     assert result.status == "complete"
+
+
+def test_coverage_gap_names_the_missing_sources(tmp_path: Path) -> None:
+    """Пропуск обязан называть источник, а не только их число.
+
+    «Артефакты неполны (4 из 5)» не говорит оператору, что чинить: отсутствующий
+    Reddit и отсутствующий Product Hunt разные по цене, и действие по ним разное —
+    у Product Hunt исторического интерфейса нет вообще.
+    """
+    from reddit_compass.collector import coverage_summary
+
+    summary = coverage_summary(
+        [
+            {
+                "date": "2026-07-24",
+                "raw_complete": False,
+                "recoverable_from_snapshots": False,
+                "artifacts": {
+                    "reddit": False,
+                    "hackernews": True,
+                    "rss": True,
+                    "ladder": True,
+                    "producthunt": True,
+                },
+                "source_health": {
+                    "reddit": "missing",
+                    "hackernews": "ok",
+                    "rss": "ok",
+                    "ladder": "ok",
+                    "producthunt": "empty",
+                },
+            }
+        ]
+    )
+
+    gap = summary["gaps"][0]
+    assert gap["missing_artifacts"] == ["reddit"]
+    assert gap["unhealthy_sources"] == ["reddit"]
+    # `empty` — честно пустой источник, а не сбой: в список неисправных не попадает.
+    assert "producthunt" not in gap["unhealthy_sources"]

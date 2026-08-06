@@ -222,10 +222,17 @@ def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
                              а не предлагаем подставить сегодняшнюю выборку.
     """
     today = _utc_today()
-    gaps: list[dict[str, str]] = []
+    gaps: list[dict[str, object]] = []
     complete = 0
     for day in coverage:
         date = str(day["date"])
+        artifacts = cast(dict[str, bool], day.get("artifacts") or {})
+        health = cast(dict[str, str], day.get("source_health") or {})
+        # Какие именно источники не дошли. «4 из 5» не говорит оператору, что чинить:
+        # отсутствующий Reddit и отсутствующий Product Hunt — разные по цене проблемы,
+        # а действие по ним может отличаться (у PH нет исторического интерфейса вообще).
+        missing_artifacts = sorted(name for name, ok in artifacts.items() if not ok)
+        unhealthy = sorted(name for name, state in health.items() if state not in {"ok", "empty"})
         if bool(day["raw_complete"]):
             complete += 1
             continue
@@ -236,11 +243,18 @@ def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
             action = "recover_snapshots"
             reason = "артефакты сохранены, не отработал финалайзер"
         else:
-            artifacts = cast(dict[str, bool], day.get("artifacts") or {})
             present = sum(1 for ok in artifacts.values() if ok)
             action = "historical_recovery"
             reason = f"артефакты неполны ({present} из {len(artifacts)})"
-        gaps.append({"date": date, "reason": reason, "recommended_action": action})
+        gaps.append(
+            {
+                "date": date,
+                "reason": reason,
+                "recommended_action": action,
+                "missing_artifacts": missing_artifacts,
+                "unhealthy_sources": unhealthy,
+            }
+        )
     # `pending` — не пропуск: сегодняшний день ещё собирается, и поднимать по нему
     # тревогу значило бы будить оператора каждую ночь.
     actionable = [gap for gap in gaps if gap["recommended_action"] != "pending"]
@@ -249,7 +263,7 @@ def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
         "days_complete": complete,
         "gap_count": len(actionable),
         "gaps": gaps,
-        "actions": sorted({gap["recommended_action"] for gap in actionable}),
+        "actions": sorted({str(gap["recommended_action"]) for gap in actionable}),
     }
 
 

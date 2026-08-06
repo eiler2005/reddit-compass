@@ -1784,3 +1784,5 @@ def test_runs_page_shows_the_calendar_coverage_strip(engine_client: TestClient) 
     assert page.status_code == 200
     assert "Покрытие по дням" in page.text
     assert "coverage-strip" in page.text
+    # Разрез по источникам виден на каждом дне: «4 из 5» не говорит, что чинить.
+    assert "coverage-day-sources" in page.text

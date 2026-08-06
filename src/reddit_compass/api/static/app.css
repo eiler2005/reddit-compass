@@ -2754,10 +2754,11 @@ a.story-card {
 
 .coverage-day {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    justify-content: center;
+    gap: var(--space-1);
     min-width: var(--text-num);
-    padding: var(--space-1);
+    padding: var(--space-2) var(--space-1);
     border-radius: var(--radius-sm);
     border: 1px solid transparent;
     font-family: var(--font-mono);
@@ -2794,4 +2795,43 @@ a.story-card {
     margin: var(--space-2) 0 0;
     padding-left: var(--space-4);
     font-size: var(--text-sm);
+}
+
+/* Посточниковый разрез внутри дня. Виден без наведения: на мобильном hover нет, а
+   именно этот разрез отвечает на вопрос «что чинить». Цвет дублируется символом
+   ●/○ — состояние читается и без различения цветов. */
+.coverage-day-count {
+    font-size: var(--text-2xs);
+    opacity: 0.75;
+}
+
+.coverage-day-sources {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.coverage-source {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: var(--text-2xs);
+    line-height: 1.25;
+    white-space: nowrap;
+}
+
+.coverage-source-ok {
+    opacity: 0.85;
+}
+
+.coverage-source-bad {
+    color: var(--error);
+    font-weight: 600;
+}
+
+.coverage-source-name {
+    font-family: var(--font-mono);
 }

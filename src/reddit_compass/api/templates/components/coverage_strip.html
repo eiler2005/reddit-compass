@@ -1,5 +1,9 @@
 {# Календарное покрытие: пропущенный день видно до запуска Engine, а не при разборе
-   странного релиза. Состояния — те же слова, что печатает `collect --coverage`. #}
+   странного релиза. Состояния — те же слова, что печатает `collect --coverage`.
+
+   На каждом дне — посточниковый разрез. «4 из 5» не говорит оператору, что чинить:
+   отсутствующий Reddit и отсутствующий Product Hunt разные по цене, и действие по ним
+   тоже разное — у Product Hunt исторического интерфейса нет вообще. #}
 {% if coverage.days %}
 <div class="coverage-strip-block">
     <h2>Покрытие по дням</h2>
@@ -13,22 +17,30 @@
     </p>
     <ol class="coverage-strip" aria-label="Календарное покрытие сбора">
         {% for day in coverage.days %}
-        <li class="coverage-day coverage-day-{{ day.state }}"
-            title="{{ day.date }} — {{ {
-                'complete': 'собран полностью',
-                'recover_snapshots': 'артефакты есть, нужен collect --recover-snapshots',
-                'historical_recovery': 'артефактов нет, нужен collect --historical-date',
-                'pending': 'текущий день, сбор ещё не завершён',
-                'gap': 'пропуск'
-            }.get(day.state, day.state) }}">
+        <li class="coverage-day coverage-day-{{ day.state }}">
             <span class="coverage-day-label">{{ day.date[8:10] }}</span>
+            <span class="coverage-day-count">{{ day.ok_count }}/{{ day.total_count }}</span>
+            {# Разрез виден и без наведения — на мобильном hover не существует. #}
+            <ul class="coverage-day-sources">
+                {% for source in day.sources %}
+                <li class="coverage-source coverage-source-{{ 'ok' if source.ok else 'bad' }}"
+                    title="{{ source.source_id }}: health {{ source.state }}, артефакт {{ 'есть' if source.artifact else 'нет' }}">
+                    <span aria-hidden="true">{{ '●' if source.ok else '○' }}</span>
+                    <span class="coverage-source-name">{{ source.source_id }}</span>
+                </li>
+                {% endfor %}
+            </ul>
         </li>
         {% endfor %}
     </ol>
     {% if coverage.summary.gaps %}
     <ul class="coverage-actions">
         {% for gap in coverage.summary.gaps if gap.recommended_action != "pending" %}
-        <li><code>{{ gap.date }}</code> — {{ gap.reason }};
+        <li>
+            <code>{{ gap.date }}</code> — {{ gap.reason }}
+            {%- if gap.missing_artifacts %}: нет артефактов
+            {%- for name in gap.missing_artifacts %} <strong>{{ name }}</strong>{% if not loop.last %},{% endif %}{% endfor %}
+            {%- endif %};
             {% if gap.recommended_action == "recover_snapshots" %}
             финализируется <code>collect --recover-snapshots</code> без сети
             {% else %}
