@@ -6807,6 +6807,51 @@ def create_signal_release(
     }
 
 
+async def _warm_schema_cache(
+    conn: sqlite3.Connection,
+    *,
+    story_release_id: str,
+    runner: Callable[[str, str], Awaitable[str]],
+    model: str,
+) -> dict[str, int]:
+    """Догревает кэш извлечения для заголовков релиза; уже извлечённые не оплачиваются.
+
+    Ключ кэша — хэш нормализованного заголовка плюс версия промпта, поэтому повторный
+    прогон по тем же сюжетам бесплатен, а платит только за новые. Батчи пишутся по мере
+    получения: обрыв теряет максимум один батч, а не всю стадию.
+    """
+    from .trend_schema_llm import extract_schemas, load_schemas, store_schemas
+
+    titles = [
+        str(row["title"] or "")
+        for row in conn.execute(
+            "SELECT title FROM engine_stories WHERE story_release_id = ? ORDER BY story_id",
+            (story_release_id,),
+        ).fetchall()
+        if str(row["title"] or "").strip()
+    ]
+    if not titles:
+        return {"requested": 0, "cached": 0, "extracted": 0}
+    have = load_schemas(conn, titles)
+    from .trend_schema_llm import title_key
+
+    pending = [title for title in titles if title_key(title) not in have]
+    if not pending:
+        return {"requested": len(titles), "cached": len(have), "extracted": 0}
+
+    written = 0
+
+    def _persist(batch: list[dict[str, Any]]) -> None:
+        nonlocal written
+        written += store_schemas(conn, batch, model=model)
+
+    logging.getLogger("reddit_compass").info(
+        "schema_v3: догреваю кэш извлечения, %d новых заголовков", len(pending)
+    )
+    await extract_schemas(pending, runner, model=model, on_records=_persist)
+    return {"requested": len(titles), "cached": len(have), "extracted": written}
+
+
 async def run_engine_cycle(
     corpus_conn: sqlite3.Connection,
     conn: sqlite3.Connection,
@@ -6816,7 +6861,7 @@ async def run_engine_cycle(
     window: int = 7,
     theme_catalog: dict[str, list[str]] | None = None,
     pack_by_subreddit: dict[str, str] | None = None,
-    trend_method: str = "embedding_v2",
+    trend_method: str = "schema_v3",
     trend_depth: int = 2,
     embed_model: str = MODEL2VEC_DEFAULT,
     review_model: str = "qwen3.7-flash",
@@ -6955,6 +7000,27 @@ async def run_engine_cycle(
         "trend_schema_depth": trend_depth,
         "review_model": trend_review_model,
     }
+    # `schema_v3` читает извлечение из кэша и падает, если его нет. До сих пор кэш грела
+    # только отдельная ручная команда `engine schemas extract`, поэтому метод нельзя
+    # было сделать методом по умолчанию: забытый шаг означал жёсткий отказ ночного
+    # прогона. Цикл греет кэш сам — извлечение это bulk-стадия на самой дешёвой модели,
+    # и уже извлечённые заголовки повторно не оплачиваются (ключ кэша — хэш заголовка).
+    schema_extract_stats: dict[str, int] = {}
+    if use_trend_method == "schema_v3" and review_runner is None:
+        # Молча подменить метод нельзя: релиз, построенный не тем методом, который
+        # запросили, невозможно объяснить постфактум. Отказ явный и с указанием выхода.
+        raise ValueError(
+            "schema_v3 требует LLM-runner: он извлекает схему события из заголовка. "
+            "Передайте review_runner, прогрейте кэш командой `engine schemas extract` "
+            "заранее либо выберите --trend-method schema_v2 (лексикон, без LLM)."
+        )
+    if use_trend_method == "schema_v3" and review_runner is not None:
+        schema_extract_stats = await _warm_schema_cache(
+            conn,
+            story_release_id=stories.story_release_id,
+            runner=review_runner,
+            model=review_model,
+        )
     trends = create_trend_release(
         conn,
         story_release_id=stories.story_release_id,
@@ -7071,6 +7137,10 @@ async def run_engine_cycle(
         "facet_release_id": facets.facet_release_id,
         "story_release_id": stories.story_release_id,
         "trend_release_id": trends.trend_release_id,
+        # Сколько заголовков пришлось извлечь заново: пустой словарь означает, что
+        # метод не схемный. Оператору это нужно, чтобы отличить дорогой прогон (кэш
+        # холодный) от дешёвого (всё переиспользовано).
+        "schema_extract": schema_extract_stats,
         "trend_method": use_trend_method,
         "embedding_fallback": embedding_fallback,
         "embed_model": embed_model if embed_ok else "",

@@ -2931,7 +2931,14 @@ def build_parser() -> argparse.ArgumentParser:
     engine_cycle.add_argument("--window", type=int, default=7)
     engine_cycle.add_argument(
         "--trend-method",
-        default="embedding_v2",
+        # `schema_v3`, а не `embedding_v2`. Замер на боевом корпусе 2026-08-06, один и
+        # тот же story-релиз: embedding_v2 дал 80 трендов и 79 нечитаемых имён
+        # («car believe old better choice cars truly», «kevin fed wall street warsh»),
+        # schema_v3 — 78 трендов и ни одного дефектного («product launches in AI»,
+        # «new regulation in business»). Это не настройка, а свойство метода:
+        # embedding_v2 называет кластер частотными токенами и читаемого имени дать не
+        # может. Пол `trends_bad_name_count` такой релиз в broad больше не пускает.
+        default="schema_v3",
         choices=["story_graph_v1", "embedding_v2", "schema_v2", "schema_v3"],
     )
     engine_cycle.add_argument(

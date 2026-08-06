@@ -2142,6 +2142,10 @@ def test_run_engine_cycle_builds_all_layers(tmp_path: Path) -> None:
                 window=2,
                 theme_catalog={},
                 pack_by_subreddit={"artificial": "ai_technology"},
+                # Метод указан явно: дефолт сменился на schema_v3, который без
+                # LLM-runner работать не может, а этот тест проверяет слои цикла,
+                # а не извлечение схем.
+                trend_method="embedding_v2",
                 review_limit=0,
                 publish_channel=None,
                 pulse=True,
@@ -2211,6 +2215,9 @@ def test_run_engine_cycle_can_publish_opted_in_partial_shadow(
                 corpus,
                 engine,
                 corpus_path=corpus_path,
+                # Дефолт сменился на schema_v3; здесь проверяется маршрутизация
+                # публикации, а не извлечение схем, поэтому метод указан явно.
+                trend_method="embedding_v2",
                 profile="broad",
                 window=2,
                 theme_catalog={},
@@ -2274,6 +2281,9 @@ def test_run_engine_cycle_rebuilds_stories_after_valid_qwen_pair(
                 corpus,
                 engine,
                 corpus_path=corpus_path,
+                # Дефолт сменился на schema_v3; здесь проверяется маршрутизация
+                # публикации, а не извлечение схем, поэтому метод указан явно.
+                trend_method="embedding_v2",
                 profile="broad",
                 window=2,
                 embed_model="",
@@ -2851,3 +2861,76 @@ def test_cross_encoder_chunking_does_not_change_the_result(caplog) -> None:
     assert len(progress) == 3
     # Последняя отметка называет полный объём, а не размер куска.
     assert str(len(pairs)) in progress[-1]
+
+
+def test_cycle_warms_the_schema_cache_and_pays_only_for_new_titles(tmp_path: Path) -> None:
+    """`schema_v3` стал методом по умолчанию — значит цикл обязан греть кэш сам.
+
+    До этого извлечение грела только отдельная команда `engine schemas extract`, и
+    забытый шаг означал жёсткий отказ: `create_trend_release` падает с «schema_v3
+    требует кэш извлечения». Делать такой метод дефолтным, не научив цикл греть кэш,
+    значило бы заложить мину в ночной прогон.
+
+    Второе требование — не платить дважды: ключ кэша это хэш заголовка плюс версия
+    промпта, поэтому повторный прогон обязан извлекать только новые заголовки.
+    """
+    import asyncio
+
+    from reddit_compass.intelligence.engine import _warm_schema_cache
+
+    engine = engine_db(tmp_path / "trend_engine.db")
+    engine.execute(
+        """INSERT INTO story_releases
+           (story_release_id, facet_release_id, method, params_hash, status,
+            metrics_json, created_at)
+           VALUES ('SR', 'FR', 'hybrid_v2', 'p', 'evaluated', '{}', '2026-08-06T00:00:00Z')"""
+    )
+    for index, title in enumerate(("OpenAI launches a model", "EU fines Google")):
+        engine.execute(
+            """INSERT INTO engine_stories
+               (story_release_id, story_id, canonical_key, title)
+               VALUES ('SR', ?, ?, ?)""",
+            (f"s{index}", f"k{index}", title),
+        )
+    engine.commit()
+
+    calls: list[str] = []
+
+    async def runner(prompt: str, model: str) -> str:
+        del model
+        calls.append(prompt)
+        # Ответ на батч: по записи на каждый пронумерованный заголовок в промпте.
+        count = sum(1 for line in prompt.splitlines() if line[:1].isdigit())
+        return json.dumps(
+            {
+                "results": [
+                    {"i": n + 1, "event": True, "actor": "X", "action": "did", "key": "launch"}
+                    for n in range(count)
+                ]
+            }
+        )
+
+    first = asyncio.run(
+        _warm_schema_cache(engine, story_release_id="SR", runner=runner, model="qwen3.7-flash")
+    )
+    assert first["requested"] == 2
+    assert first["extracted"] == 2
+    assert len(calls) == 1
+
+    # Повторный прогон по тем же заголовкам не обращается к модели вовсе.
+    calls.clear()
+    second = asyncio.run(
+        _warm_schema_cache(engine, story_release_id="SR", runner=runner, model="qwen3.7-flash")
+    )
+    assert second["cached"] == 2
+    assert second["extracted"] == 0
+    assert calls == []
+
+
+def test_schema_v3_is_the_default_trend_method() -> None:
+    """Дефолт сменён по данным, а не по вкусу: 79 мусорных имён против нуля."""
+    import inspect
+
+    from reddit_compass.intelligence.engine import run_engine_cycle
+
+    assert inspect.signature(run_engine_cycle).parameters["trend_method"].default == "schema_v3"
