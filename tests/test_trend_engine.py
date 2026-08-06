@@ -2619,3 +2619,84 @@ def test_review_leaves_non_schema_trend_actors_alone(tmp_path: Path) -> None:
     assert confirmed["source_count"] == 15
     # Состав всё равно пересчитан — он от резолвера не зависит.
     assert confirmed["story_count"] == len(resolved[0][1])
+
+
+def test_forced_production_publish_leaves_an_audit_trace(tmp_path: Path) -> None:
+    """`--force` обходит publication gate — это обязано быть видно потом.
+
+    `radar_publications` записывал только `allow_partial`, а `publication_history` —
+    только `action='publish'`. Форсированный broad-указатель после этого неотличим от
+    прошедшего гейты, то есть на вопрос «почему этот релиз опубликован» ответа не
+    оставалось именно там, где он важнее всего.
+    """
+    corpus_path = tmp_path / "compass.db"
+    corpus = _seed_corpus(corpus_path)
+    engine = engine_db(tmp_path / "trend_engine.db")
+    release = create_data_release(corpus, engine, source_db_path=corpus_path, run_ids=_run_ids())
+    facets = create_facet_release(engine, data_release_id=release.release_id)
+    stories = create_story_release(engine, facet_release_id=facets.facet_release_id)
+    trends = create_trend_release(engine, story_release_id=stories.story_release_id)
+
+    shadow = publish_radar(
+        engine,
+        story_release_id=stories.story_release_id,
+        trend_release_id=trends.trend_release_id,
+        channel="shadow",
+        allow_partial=True,
+        force=True,
+    )
+
+    # На shadow гейта нет, поэтому `force` там ничего не обходит — и метки быть не должно.
+    row = engine.execute(
+        "SELECT gate_bypassed FROM radar_publications WHERE publication_id = ?",
+        (shadow.publication_id,),
+    ).fetchone()
+    assert row["gate_bypassed"] == 0
+    action = engine.execute(
+        "SELECT action FROM publication_history WHERE to_publication_id = ?",
+        (shadow.publication_id,),
+    ).fetchone()["action"]
+    assert action == "publish"
+
+    # А теперь настоящий обход: broad с пройденным input_status, но проваленным гейтом.
+    _add_required_cluster_coverage(corpus)
+    complete = create_data_release(corpus, engine, source_db_path=corpus_path, run_ids=_run_ids())
+    assert complete.input_status == "complete"
+    complete_facets = create_facet_release(engine, data_release_id=complete.release_id)
+    complete_stories = create_story_release(
+        engine, facet_release_id=complete_facets.facet_release_id
+    )
+    complete_trends = create_trend_release(
+        engine, story_release_id=complete_stories.story_release_id
+    )
+
+    with pytest.raises(ValueError, match="publication gate"):
+        publish_radar(
+            engine,
+            story_release_id=complete_stories.story_release_id,
+            trend_release_id=complete_trends.trend_release_id,
+            channel="broad",
+        )
+
+    forced = publish_radar(
+        engine,
+        story_release_id=complete_stories.story_release_id,
+        trend_release_id=complete_trends.trend_release_id,
+        channel="broad",
+        force=True,
+    )
+
+    assert (
+        engine.execute(
+            "SELECT gate_bypassed FROM radar_publications WHERE publication_id = ?",
+            (forced.publication_id,),
+        ).fetchone()["gate_bypassed"]
+        == 1
+    )
+    assert (
+        engine.execute(
+            "SELECT action FROM publication_history WHERE to_publication_id = ?",
+            (forced.publication_id,),
+        ).fetchone()["action"]
+        == "publish_forced"
+    )

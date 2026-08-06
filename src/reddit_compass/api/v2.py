@@ -213,16 +213,27 @@ class PaginatedNews(BaseModel):
     # ``total`` is the number of entries in the selected view.  In the
     # default story view it is intentionally smaller than ``item_total``:
     # several raw materials may be evidence for the same Story.
-    total: int
-    item_total: int = 0
+    total: int = Field(
+        description=(
+            "Строк в текущей проекции: при view=stories это число после схлопывания "
+            "по сюжету, при view=items — число сырых материалов."
+        )
+    )
+    item_total: int = Field(
+        default=0,
+        description="Число сырых материалов до схлопывания; при view=items равно total.",
+    )
     page: int
     page_size: int
     publication_id: str
     data_release_id: str
     story_release_id: str
     trend_release_id: str
-    sort: str = "strength"
-    view: str = "stories"
+    sort: str = Field(default="strength", description="Фактический порядок выдачи.")
+    view: str = Field(
+        default="stories",
+        description="Фактическая проекция: stories (по сюжету) либо items (все материалы).",
+    )
     preview: bool = False
 
 
@@ -617,13 +628,34 @@ def _filter_news_rows(
 _UNDATED_LAST = "9999-12-31"
 
 _NEWS_SORTS = frozenset({"strength", "fresh", "engagement", "oldest"})
+_NEWS_VIEWS = frozenset({"stories", "items"})
 _STORY_SORTS = frozenset({"strength", "fresh", "volume", "oldest"})
 _TREND_SORTS = frozenset({"strength", "fresh", "coverage", "oldest"})
 
 
 def _safe_sort(value: str, allowed: frozenset[str], *, default: str = "strength") -> str:
-    """Return a supported sort token without exposing a free-form SQL order."""
+    """Return a supported sort token without exposing a free-form SQL order.
+
+    Приведение к дефолту — поведение для **UI**: устаревшая закладка со снятым
+    параметром не должна ронять страницу. У API оно недопустимо, поэтому эндпоинты
+    сначала валидируют вход через `_require_supported`.
+    """
     return value if value in allowed else default
+
+
+def _require_supported(name: str, value: str, allowed: frozenset[str]) -> str:
+    """Проверить значение перечислимого query-параметра или ответить 422.
+
+    Молчаливое приведение к дефолту на API означало, что `?sort=freshness` (именно так
+    параметр назван в части документации) отдавал порядок по силе и в ответе писал
+    `"sort": "strength"` — клиент получал не то, что просил, без единого признака ошибки.
+    """
+    if value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=(f"Unsupported {name}={value!r}. Supported: {', '.join(sorted(allowed))}."),
+        )
+    return value
 
 
 def _news_raw_date(row: sqlite3.Row) -> str:
@@ -2053,7 +2085,13 @@ def list_published_news(
     page_size: int = Query(default=50, ge=10, le=100),
     engine_conn: sqlite3.Connection | None = Depends(_get_engine_db),
 ) -> PaginatedNews:
-    """Published News projection; ``view=items`` exposes every raw material."""
+    """Published News projection from the immutable release.
+
+    ``view=stories`` (по умолчанию) отдаёт **по одному материалу на сюжет**: `total` —
+    число строк после схлопывания, а `item_total` — число сырых материалов. Материалы
+    без сюжета остаются как есть. ``view=items`` отдаёт каждый сырой материал, и тогда
+    `total` равен `item_total`. Ответ всегда содержит фактические `view` и `sort`.
+    """
     return _engine_news(
         _require_engine(engine_conn),
         channel=channel,
@@ -2063,8 +2101,8 @@ def list_published_news(
         provider=provider,
         source_cluster=source_cluster,
         q=q,
-        sort=sort,
-        view=view,
+        sort=_require_supported("sort", sort, _NEWS_SORTS),
+        view=_require_supported("view", view, _NEWS_VIEWS),
         page=page,
         page_size=page_size,
     )
@@ -2092,7 +2130,7 @@ def list_published_engine_stories(
         q=q,
         project_id=project_id,
         include_items=include_items,
-        sort=sort,
+        sort=_require_supported("sort", sort, _STORY_SORTS),
         page=page,
         page_size=page_size,
     )
@@ -2138,7 +2176,7 @@ def list_published_engine_trends(
         review_status=review_status,
         project_id=project_id,
         include_stories=include_stories,
-        sort=sort,
+        sort=_require_supported("sort", sort, _TREND_SORTS),
         page=page,
         page_size=page_size,
     )

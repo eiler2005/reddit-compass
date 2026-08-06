@@ -35,7 +35,9 @@
     </div>
 
     <form class="filters" method="get" action="/today" aria-label="Сортировка brief">
-        {% if radar.date %}<input type="hidden" name="date" value="{{ radar.date }}">{% endif %}
+        {# Только явно запрошенная дата: `radar.date` заполнена всегда, и подстановка её
+           сюда закрепляла читателя на текущем дне после первого же «Применить». #}
+        {% if requested_date %}<input type="hidden" name="date" value="{{ requested_date }}">{% endif %}
         <input type="hidden" name="profile" value="{{ radar.profile or 'broad' }}">
         {% if reddit_type %}<input type="hidden" name="reddit_type" value="{{ reddit_type }}">{% endif %}
         <label for="today-sort">Порядок brief</label>
@@ -136,10 +138,11 @@
         <div class="reddit-type-filters" data-reddit-filters
              data-reddit-endpoint="{{ reddit_endpoint }}">
             <a class="reddit-type-chip{% if not reddit_type %} reddit-type-chip-active{% endif %}"
-               href="/today?sort={{ sort }}" data-reddit-type="">Все темы</a>
+               href="/today?sort={{ sort }}{% if requested_date %}&amp;date={{ requested_date }}{% endif %}{% if radar.profile %}&amp;profile={{ radar.profile }}{% endif %}"
+               data-reddit-type="">Все темы</a>
             {% for rt in reddit_types %}
             <a class="reddit-type-chip{% if reddit_type == rt.signal_type %} reddit-type-chip-active{% endif %}"
-               href="/today?reddit_type={{ rt.signal_type }}&amp;sort={{ sort }}"
+               href="/today?reddit_type={{ rt.signal_type }}&amp;sort={{ sort }}{% if requested_date %}&amp;date={{ requested_date }}{% endif %}{% if radar.profile %}&amp;profile={{ radar.profile }}{% endif %}"
                data-reddit-type="{{ rt.signal_type }}">{{ rt.label }} <span class="reddit-type-count">{{ rt.total }}</span></a>
             {% endfor %}
         </div>

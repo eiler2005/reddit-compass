@@ -1718,3 +1718,56 @@ def test_published_date_filter_collapses_three_formats_to_one_day() -> None:
     # Испорченная дата у одного материала не имеет права ронять выдачу целиком.
     assert display_date("not a date") == ""
     assert display_date(None) == ""
+
+
+def test_unknown_sort_is_rejected_instead_of_silently_coerced(engine_client: TestClient) -> None:
+    """API обязан ответить 422, а не отдать другой порядок под видом запрошенного.
+
+    `_safe_sort` молча приводил неизвестное значение к дефолту, и `?sort=freshness`
+    (именно так параметр назван в части документации) возвращал порядок по силе, написав
+    в ответе `"sort": "strength"`. Клиент получал не то, что просил, без признака ошибки.
+    """
+    for path in ("/api/v2/news", "/api/v2/engine/stories", "/api/v2/engine/trends"):
+        response = engine_client.get(f"{path}?channel=shadow&sort=freshness")
+        assert response.status_code == 422, path
+        assert "freshness" in response.text
+
+    assert engine_client.get("/api/v2/news?channel=shadow&view=collapsed").status_code == 422
+
+
+def test_supported_sort_and_view_still_pass(engine_client: TestClient) -> None:
+    """Валидация не должна закрыть законные значения."""
+    for sort in ("strength", "fresh", "oldest", "engagement"):
+        assert engine_client.get(f"/api/v2/news?channel=shadow&sort={sort}").status_code == 200
+    for view in ("stories", "items"):
+        assert engine_client.get(f"/api/v2/news?channel=shadow&view={view}").status_code == 200
+
+
+def test_news_response_states_which_projection_it_returned(engine_client: TestClient) -> None:
+    """`total` значит разное при разных `view` — ответ обязан говорить, какой отдан."""
+    stories = engine_client.get("/api/v2/news?channel=shadow&view=stories").json()
+    items = engine_client.get("/api/v2/news?channel=shadow&view=items").json()
+
+    assert stories["view"] == "stories"
+    assert items["view"] == "items"
+    # При view=items схлопывания нет, поэтому total совпадает с числом сырых материалов.
+    assert items["total"] == items["item_total"]
+    assert stories["total"] <= stories["item_total"]
+
+
+def test_today_sort_form_does_not_pin_the_reader_to_a_date(engine_client: TestClient) -> None:
+    """Форма сортировки не имеет права закрепить читателя на текущем дне.
+
+    В скрытое поле подставлялась `radar.date`, а она заполнена всегда (откат на максимум
+    дат релиза). Поэтому первое же «Применить» превращало /today в /today?date=<тот день>,
+    и читатель оставался на нём, не видя следующую публикацию.
+    """
+    page = engine_client.get("/today").text
+
+    form = page.split('action="/today"', 1)[1].split("</form>", 1)[0]
+    assert 'name="date"' not in form
+
+    # Явно запрошенная дата, наоборот, обязана сохраняться при смене сортировки.
+    pinned = engine_client.get("/today?date=2026-07-29").text
+    pinned_form = pinned.split('action="/today"', 1)[1].split("</form>", 1)[0]
+    assert 'name="date" value="2026-07-29"' in pinned_form

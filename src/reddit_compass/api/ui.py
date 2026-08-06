@@ -1147,6 +1147,12 @@ async def today_page(
                     "reddit_types": reddit_types,
                     "reddit_type": reddit_type or "",
                     "sort": selected_sort,
+                    # Именно запрошенная дата, а не разрешённая `radar.date`. Последняя
+                    # всегда заполнена (откат на максимум дат релиза), поэтому форма
+                    # сортировки подставляла её скрытым полем и любое «Применить»
+                    # превращало /today в /today?date=<тот день>. Читатель после этого
+                    # оставался на нём и не видел следующую публикацию.
+                    "requested_date": date or "",
                     "reddit_quotas": {
                         "per_type": _NEW_REDDIT_PER_TYPE,
                         "per_subreddit": _NEW_REDDIT_PER_SUBREDDIT,

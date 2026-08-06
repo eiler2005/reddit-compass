@@ -443,3 +443,93 @@ def test_recover_snapshot_gaps_leaves_today_alone(tmp_path: Path) -> None:
     # День виден как восстановимый, но recovery его не трогает — его закроет `collect`.
     assert coverage[0]["recoverable_from_snapshots"] is True
     assert recovered == []
+
+
+def test_corrupt_artifact_is_not_reported_as_recoverable(tmp_path: Path) -> None:
+    """Битый JSONL не может вечно числиться восстановимым.
+
+    Проверка была только `is_file()`, поэтому день с обрезанным артефактом навсегда
+    оставался `recoverable_from_snapshots: true`: каждый прогон пытался его
+    финализировать и падал на той же строке, а оператор видел «восстановимо» и ждал.
+    """
+    date = "2026-08-04"
+    snapshot_dir = tmp_path / "snapshots" / date
+    for filename in ("posts.jsonl", "hackernews.jsonl", "ladder.jsonl", "producthunt.jsonl"):
+        write_posts_jsonl([_legacy_card(f"{filename}-post", date)], snapshot_dir / filename)
+    # Обрыв на середине строки — ровно то, что оставляла незавершённая запись.
+    (snapshot_dir / "rss.jsonl").write_text('{"post_id": "half-writ', encoding="utf-8")
+    db_path = tmp_path / "compass.db"
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    coverage = collection_coverage(
+        tmp_path / "snapshots", db_path, profile="broad", since=date, until=date
+    )
+
+    assert coverage[0]["artifacts"]["rss"] is False
+    assert coverage[0]["recoverable_from_snapshots"] is False
+
+
+def test_empty_artifact_stays_recoverable(tmp_path: Path) -> None:
+    """Пустой файл читаем и валиден: это честно пустой источник, а не поломка."""
+    date = "2026-08-04"
+    snapshot_dir = tmp_path / "snapshots" / date
+    snapshot_dir.mkdir(parents=True)
+    for filename in ("posts.jsonl", "hackernews.jsonl", "ladder.jsonl", "producthunt.jsonl"):
+        write_posts_jsonl([_legacy_card(f"{filename}-post", date)], snapshot_dir / filename)
+    (snapshot_dir / "rss.jsonl").write_text("", encoding="utf-8")
+    db_path = tmp_path / "compass.db"
+    conn = sqlite3.connect(db_path)
+    migrate(conn)
+    conn.close()
+
+    coverage = collection_coverage(
+        tmp_path / "snapshots", db_path, profile="broad", since=date, until=date
+    )
+
+    assert coverage[0]["artifacts"]["rss"] is True
+    assert coverage[0]["recoverable_from_snapshots"] is True
+
+
+def test_recovery_moves_snapshot_date_backwards_only(tmp_path: Path) -> None:
+    """Восстановленный день обязан переписать дату материала назад, но не вперёд.
+
+    `ON CONFLICT` не обновлял `snapshot_date` вовсе, поэтому материал, впервые
+    вставленный сегодняшним прогоном, после recovery за вчера оставался помеченным
+    сегодняшним днём — то есть выпадал из окна релиза за собственный день.
+    """
+    from reddit_compass.intelligence.models import ContentItem
+    from reddit_compass.intelligence.repository import upsert_items
+
+    conn = sqlite3.connect(tmp_path / "compass.db")
+    conn.row_factory = sqlite3.Row
+    migrate(conn)
+
+    def item(snapshot_date: str, published_at: str) -> ContentItem:
+        return ContentItem(
+            item_id="rss:1",
+            provider="reuters",
+            source_cluster="business",
+            external_id="1",
+            canonical_url="https://example.com/a",
+            title="A story",
+            observed_at=f"{snapshot_date}T07:00:00Z",
+            snapshot_date=snapshot_date,
+            published_at=published_at,
+        )
+
+    upsert_items(conn, [item("2026-08-05", "")])
+    upsert_items(conn, [item("2026-08-04", "2026-08-04T06:00:00Z")])
+    row = conn.execute("SELECT snapshot_date, published_at, observed_at FROM items").fetchone()
+    assert row["snapshot_date"] == "2026-08-04"
+    # Пустая дата публикации дозаполняется восстановлением.
+    assert row["published_at"] == "2026-08-04T06:00:00Z"
+    # Момент первого наблюдения — провенанс, его переписывать нельзя.
+    assert row["observed_at"] == "2026-08-05T07:00:00Z"
+
+    # Живой прогон не двигает дату вперёд у материала, уже отнесённого к прошлому дню.
+    upsert_items(conn, [item("2026-08-06", "2026-08-06T06:00:00Z")])
+    row = conn.execute("SELECT snapshot_date, published_at FROM items").fetchone()
+    assert row["snapshot_date"] == "2026-08-04"
+    assert row["published_at"] == "2026-08-04T06:00:00Z"

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -359,3 +361,49 @@ def test_actor_aliases_digest_is_stable_and_sensitive() -> None:
     assert first == second
     assert first != actor_aliases_digest({"a": "A2", "b": "B"})
     assert first != actor_aliases_digest({})
+
+
+def test_mass_batch_failure_is_raised_not_only_a_total_one() -> None:
+    """Отказ большинства батчей обязан быть виден, а не молча дать неполный кэш.
+
+    Ошибка поднималась только когда провалились **все** батчи. При отказе 90 %
+    функция возвращала горстку записей, `first_error` выбрасывался, а вызывающий видел
+    лишь `extracted/requested`. Дальше на неполном кэше строился релиз, у которого
+    `schemas_digest` отличается от такого же прогона — release переставал быть
+    воспроизводимым, и заметить это было негде.
+    """
+    from reddit_compass.signals import QwenApiError
+
+    calls = {"n": 0}
+
+    async def mostly_failing(prompt: str, model: str) -> str:
+        del prompt, model
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return json.dumps({"results": [{"i": 1, "event": False}]})
+        raise QwenApiError(429, "rate limited")
+
+    titles = [f"Headline number {i}" for i in range(50)]
+
+    with pytest.raises(RuntimeError, match="Кэш неполон"):
+        asyncio.run(extract_schemas(titles, mostly_failing, batch_size=1, concurrency=1))
+
+
+def test_small_batch_failure_only_warns(caplog) -> None:
+    """Единичный сбой — норма: успешные батчи сохранены, упавший доберётся следующим."""
+    calls = {"n": 0}
+
+    async def one_bad(prompt: str, model: str) -> str:
+        del prompt, model
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise TimeoutError("slow")
+        return json.dumps({"results": [{"i": 1, "event": False}]})
+
+    titles = [f"Headline number {i}" for i in range(10)]
+
+    with caplog.at_level(logging.WARNING):
+        records = asyncio.run(extract_schemas(titles, one_bad, batch_size=1, concurrency=1))
+
+    assert len(records) == 9
+    assert any("провалились 1 из 10" in message for message in caplog.messages)

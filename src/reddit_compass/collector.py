@@ -88,6 +88,28 @@ def _utc_today() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
+def _artifact_is_readable(path: Path) -> bool:
+    """Артефакт пригоден к финализации: существует и целиком разбирается как JSONL.
+
+    Проверки `is_file()` было мало. День с обрезанным или испорченным артефактом
+    вечно числился `recoverable_from_snapshots`, каждый прогон пытался его
+    финализировать и каждый раз падал на той же строке — а оператор видел
+    «восстановимо» и ждал, что recovery сработает. Пустой файл читаем и остаётся
+    валидным: это честно пустой источник за день, а не поломка.
+    """
+    if not path.is_file():
+        return False
+    try:
+        with path.open(encoding="utf-8") as handle:
+            for line in handle:
+                stripped = line.strip()
+                if stripped:
+                    json.loads(stripped)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
+    return True
+
+
 def collection_coverage(
     snapshots_dir: Path,
     db_path: Path,
@@ -157,7 +179,7 @@ def collection_coverage(
         run_id, _, run_status = run_value.partition("\t")
         source_health = health_by_date.get(snapshot_date, {})
         artifacts = {
-            source_id: (snapshots_dir / snapshot_date / _FILE_MAP[source_id]).is_file()
+            source_id: _artifact_is_readable(snapshots_dir / snapshot_date / _FILE_MAP[source_id])
             for source_id in selected
         }
         source_states = {

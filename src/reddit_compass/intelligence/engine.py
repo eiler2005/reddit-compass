@@ -744,6 +744,17 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
         "review_name_ru",
         "TEXT NOT NULL DEFAULT ''",
     )
+    # `--force` пропускает publication gate целиком, но в аудите не оставлял ничего:
+    # `radar_publications` писал только `allow_partial`, а `publication_history` — только
+    # `action='publish'`. Форсированный broad-указатель после этого неотличим от
+    # прошедшего гейты, то есть вопрос «почему этот релиз опубликован» остаётся без
+    # ответа именно в том случае, когда ответ важнее всего.
+    _ensure_engine_column(
+        conn,
+        "radar_publications",
+        "gate_bypassed",
+        "INTEGER NOT NULL DEFAULT 0",
+    )
     _ensure_engine_column(
         conn,
         "signal_releases",
@@ -5984,6 +5995,9 @@ def publish_radar(
             "Production channel requires passed Story/Trend publication gates "
             "or passed Engine quality floors; use a shadow channel while evaluating"
         )
+    # Гейт был пропущен только если он вообще применялся: на shadow его нет, и там
+    # `force` ничего не обходит. Отмечаем именно факт обхода, а не переданный флаг.
+    gate_bypassed = bool(force) and channel in {"broad", "ai-native"}
     current = get_current_publication(conn, channel)
     previous_id = current.publication_id if current else ""
     created_at = now_iso()
@@ -5991,14 +6005,15 @@ def publish_radar(
         "publication", channel, story_release_id, trend_release_id, created_at
     )
     event_id = _stable_id("publication_event", publication_id, "publish")
+    action = "publish_forced" if gate_bypassed else "publish"
     try:
         conn.execute("BEGIN IMMEDIATE")
         conn.execute(
             """INSERT INTO radar_publications
                (publication_id, channel, data_release_id, story_release_id,
                 trend_release_id, input_status, allow_partial,
-                previous_publication_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                previous_publication_id, created_at, gate_bypassed)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 publication_id,
                 channel,
@@ -6009,6 +6024,7 @@ def publish_radar(
                 int(allow_partial),
                 previous_id,
                 created_at,
+                int(gate_bypassed),
             ),
         )
         conn.execute(
@@ -6024,8 +6040,8 @@ def publish_radar(
             """INSERT INTO publication_history
                (event_id, channel, action, from_publication_id,
                 to_publication_id, created_at)
-               VALUES (?, ?, 'publish', ?, ?, ?)""",
-            (event_id, channel, previous_id, publication_id, created_at),
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (event_id, channel, action, previous_id, publication_id, created_at),
         )
         conn.execute(
             "UPDATE story_releases SET status = 'published' WHERE story_release_id = ?",

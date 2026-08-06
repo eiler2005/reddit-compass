@@ -73,6 +73,12 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 # BUILD_INFO фиксирует, что именно уехало на прод. На VPS исходники лежат копией
 # без git, поэтому SHA туда попадает только так — иначе после деплоя узнать версию
 # развёрнутого кода неоткуда.
+#
+# Содержимое считается здесь, а копируется на VPS в самом конце — после сборки и
+# рестарта. Раньше файл уезжал до сборки, и оборвавшийся деплой оставлял на проде
+# новый SHA при старом работающем контейнере: 6 августа сборка упала на скачивании
+# CUDA-колёс, BUILD_INFO уже показывал новую версию, а `rc-api` был «Up 14 hours».
+# Артефакт успеха обязан появляться после успеха, иначе он не доказательство.
 BUILD_INFO_FILE="$(mktemp)"
 {
     echo "git_sha=$(git -C "${PROJECT_ROOT}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -83,13 +89,8 @@ BUILD_INFO_FILE="$(mktemp)"
     echo "branch=$(git -C "${PROJECT_ROOT}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
     echo "dirty=$(git -C "${PROJECT_ROOT}" status --porcelain 2>/dev/null | head -c1 | wc -c | tr -d ' ')"
 } > "${BUILD_INFO_FILE}"
-echo "🏷  Версия: $(grep git_sha "${BUILD_INFO_FILE}" | cut -d= -f2)"
-scp "${BUILD_INFO_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/BUILD_INFO"
-rm -f "${BUILD_INFO_FILE}"
-# mktemp создаёт файл с правами 0600, и scp их сохраняет. Контейнер работает
-# не от root, поэтому смонтированный BUILD_INFO оказывался нечитаемым и
-# `version --record` падал с PermissionError.
-ssh "${VPS_USER}@${VPS_HOST}" "chmod 0644 ${REMOTE_DIR}/BUILD_INFO"
+trap 'rm -f "${BUILD_INFO_FILE}"; cleanup_control' EXIT
+echo "🏷  Версия: $(grep git_sha "${BUILD_INFO_FILE}" | cut -d= -f2) (запишется на VPS после рестарта)"
 
 scp "${PROJECT_ROOT}/Dockerfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${PROJECT_ROOT}/pyproject.toml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
@@ -113,6 +114,16 @@ ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api cadd
 
 echo "🔄 Рестарт Caddy (Docker DNS refresh)..."
 ssh "${VPS_USER}@${VPS_HOST}" "docker restart rc-caddy"
+
+# Только теперь контейнеры действительно работают на новом коде — можно записать,
+# что именно развёрнуто. Оборвавшийся выше деплой оставит прежний BUILD_INFO, и
+# несовпадение с локальным HEAD будет честным признаком незавершённого деплоя.
+echo "🏷  Записываю BUILD_INFO (сборка и рестарт прошли)..."
+scp "${BUILD_INFO_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/BUILD_INFO"
+# mktemp создаёт файл с правами 0600, и scp их сохраняет. Контейнер работает
+# не от root, поэтому смонтированный BUILD_INFO оказывался нечитаемым и
+# `version --record` падал с PermissionError.
+ssh "${VPS_USER}@${VPS_HOST}" "chmod 0644 ${REMOTE_DIR}/BUILD_INFO"
 
 if [[ "${INSTALL_CRON:-0}" == "1" ]]; then
     echo "⏱️  Устанавливаю managed host-cron..."

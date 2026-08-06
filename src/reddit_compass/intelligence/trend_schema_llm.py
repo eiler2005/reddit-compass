@@ -37,6 +37,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import logging
 import re
 import sqlite3
 from collections.abc import Awaitable, Callable, Sequence
@@ -44,6 +45,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from ..signals import transient_provider_errors
+
+logger = logging.getLogger("reddit_compass")
 
 SCHEMA_PROMPT_VERSION = "trend-schema-v3-2026-08-04"
 # Пустая строка — «модель по умолчанию у провайдера». Набор моделей зависит от того,
@@ -296,6 +299,7 @@ async def extract_schemas(
     concurrency: int = EXTRACT_CONCURRENCY,
     on_batch: Callable[[int, int], None] | None = None,
     on_records: Callable[[list[dict[str, Any]]], None] | None = None,
+    max_failure_share: float = 0.2,
 ) -> list[dict[str, Any]]:
     """Извлекает схемы батчами. ``runner`` инъектируется, поэтому тесты модель не трогают.
 
@@ -364,6 +368,27 @@ async def extract_schemas(
             f"Извлечение схем провалилось на всех {len(chunks)} батчах. "
             f"Первая ошибка — {first_error}"
         )
+    # Порог, а не только «провалились все». Отказ 90 % батчей проходил молча: функция
+    # возвращала горстку записей, `first_error` выбрасывался, а вызывающий видел лишь
+    # `extracted/requested` и ничего не проверял. Дальше на неполном кэше строился
+    # релиз, у которого `schemas_digest` отличается от такого же прогона, — то есть
+    # release переставал быть воспроизводимым, и заметить это было негде.
+    if chunks and failed:
+        share = failed / len(chunks)
+        # Один упавший батч терпим всегда, независимо от доли: на прогоне из двух
+        # батчей одна неудача — это 50 %, но не «стадия сломалась». Порог по доле
+        # начинает работать там, где доля вообще что-то значит, — на сотнях батчей.
+        allowed = max(1, int(len(chunks) * max_failure_share))
+        message = (
+            f"Извлечение схем: провалились {failed} из {len(chunks)} батчей "
+            f"({share:.0%}). Первая ошибка — {first_error}"
+        )
+        if failed > allowed:
+            raise RuntimeError(
+                f"{message}. Кэш неполон, релиз на нём невоспроизводим: повторите "
+                f"извлечение (успешные батчи уже сохранены и бесплатны)."
+            )
+        logger.warning("%s. Батчи будут добраны следующим прогоном.", message)
     return collected
 
 

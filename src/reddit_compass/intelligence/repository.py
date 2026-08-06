@@ -61,6 +61,20 @@ def upsert_items(conn: sqlite3.Connection, items: list[ContentItem]) -> None:
                    title = excluded.title,
                    summary_ru = excluded.summary_ru,
                    excerpt = excluded.excerpt,
+                   -- Восстановление пропущенного дня обязано уметь сдвинуть дату
+                   -- назад: материал, впервые вставленный сегодняшним прогоном,
+                   -- принадлежит тому дню, когда он вышел, а не тому, когда его
+                   -- заметили. Раньше `snapshot_date` не обновлялся вовсе, и после
+                   -- recovery за 2026-08-04 такой item оставался помеченным 08-05 —
+                   -- то есть выпадал из окна релиза за собственный день.
+                   -- Берём минимум, а не excluded: живой прогон не должен двигать
+                   -- дату вперёд у материала, который уже отнесён к прошлому дню.
+                   snapshot_date = MIN(items.snapshot_date, excluded.snapshot_date),
+                   -- `observed_at` не трогаем: это момент первого наблюдения, и
+                   -- переписывать его значило бы терять провенанс.
+                   published_at = CASE
+                       WHEN items.published_at IS NULL OR items.published_at = ''
+                       THEN excluded.published_at ELSE items.published_at END,
                    source_section = excluded.source_section,
                    domain_ids = excluded.domain_ids,
                    discussion_url = excluded.discussion_url,
