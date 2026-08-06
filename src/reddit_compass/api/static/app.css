@@ -2835,3 +2835,10 @@ a.story-card {
 .coverage-source-name {
     font-family: var(--font-mono);
 }
+
+/* День собран адаптерами, но не всеми изданиями. Не ошибка — предупреждение. */
+.coverage-day-thin {
+    color: var(--warning);
+    font-weight: 600;
+    opacity: 1;
+}

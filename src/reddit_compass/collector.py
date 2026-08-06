@@ -110,6 +110,28 @@ def _artifact_is_readable(path: Path) -> bool:
     return True
 
 
+def expected_providers() -> frozenset[str]:
+    """Издания, которые прод-профиль обязан покрыть, — 21 штука, а не 5 адаптеров.
+
+    `DEFAULT_SOURCES` перечисляет **адаптеры** (reddit, hackernews, rss, ladder,
+    producthunt), и покрытие считалось по ним. Но `rss` — это двенадцать изданий, а
+    `ladder` — девять; ночь, в которую RSS вернул данные одного издания из двенадцати,
+    давала `rss: ok` и день `complete`. Именно так 2026-08-04 отчитался полным, потеряв
+    `medium` и `verge`: 19 изданий из 21, и ни одного признака в отчёте.
+
+    Три издания (`ft`, `nytimes`, `washingtonpost`) обслуживаются обоими адаптерами,
+    поэтому считаются один раз: провайдер покрыт, если его дал хоть кто-то.
+    """
+    from .sources.ladder import LADDER_SOURCES
+    from .sources.rss import RSS_SOURCES
+
+    return frozenset(
+        {source.name for source in RSS_SOURCES}
+        | {source.name for source in LADDER_SOURCES}
+        | {"reddit", "hackernews", "producthunt"}
+    )
+
+
 def collection_coverage(
     snapshots_dir: Path,
     db_path: Path,
@@ -173,6 +195,7 @@ def collection_coverage(
     result: list[dict[str, object]] = []
     current = start
     healthy_statuses = {"ok", "empty"}
+    providers = expected_providers()
     while current <= end:
         snapshot_date = current.isoformat()
         run_value = runs_by_date.get(snapshot_date, "")
@@ -189,6 +212,23 @@ def collection_coverage(
             state in healthy_statuses for state in source_states.values()
         )
         artifacts_complete = all(artifacts.values())
+        # Провайдерный уровень поверх адаптерного. `source_health` уже хранит строки
+        # вида `reuters:markets`, но покрытие их не читало: считались пять адаптеров,
+        # а изданий двадцать одно. Из-за этого 2026-08-04 показан полным, потеряв
+        # `medium` и `verge`.
+        seen_providers = {
+            source_id.split(":", 1)[0]
+            for source_id, state in source_health.items()
+            if ":" in source_id and state in healthy_statuses
+        }
+        # Адаптер без разбивки по секциям (reddit/hackernews/producthunt пишут одну
+        # строку) засчитывается сам за себя.
+        seen_providers |= {
+            source_id
+            for source_id, state in source_health.items()
+            if ":" not in source_id and state in healthy_statuses and source_id in providers
+        }
+        missing_providers = sorted(providers - seen_providers)
         result.append(
             {
                 "date": snapshot_date,
@@ -197,6 +237,12 @@ def collection_coverage(
                 "raw_complete": raw_complete,
                 "source_health": source_states,
                 "artifacts": artifacts,
+                # Отдельно от `raw_complete`: издание может отвалиться на одну ночь, и
+                # превращать это в блокировку релиза — решение владельца, а не побочный
+                # эффект правки наблюдаемости. Пока — показываем, не блокируем.
+                "providers_ok": len(seen_providers & providers),
+                "providers_expected": len(providers),
+                "missing_providers": missing_providers,
                 # Recovery is intentionally limited to artifacts that were observed
                 # on the date itself.  It never asks live adapters for old data.
                 "recoverable_from_snapshots": not raw_complete and artifacts_complete,
@@ -253,14 +299,30 @@ def coverage_summary(coverage: list[dict[str, object]]) -> dict[str, object]:
                 "recommended_action": action,
                 "missing_artifacts": missing_artifacts,
                 "unhealthy_sources": unhealthy,
+                "missing_providers": cast(list[str], day.get("missing_providers") or []),
             }
         )
     # `pending` — не пропуск: сегодняшний день ещё собирается, и поднимать по нему
     # тревогу значило бы будить оператора каждую ночь.
     actionable = [gap for gap in gaps if gap["recommended_action"] != "pending"]
+    # Дни, где адаптеры отработали, но часть изданий не дала ничего. Это не пропуск
+    # дня и не блокирует релиз, но и молчать о нём нельзя: именно так 2026-08-04
+    # отчитался полным, потеряв `medium` и `verge`.
+    thin = [
+        {
+            "date": str(day["date"]),
+            "providers_ok": day.get("providers_ok"),
+            "providers_expected": day.get("providers_expected"),
+            "missing_providers": day.get("missing_providers") or [],
+        }
+        for day in coverage
+        if bool(day["raw_complete"]) and day.get("missing_providers")
+    ]
     return {
         "days_total": len(coverage),
         "days_complete": complete,
+        "days_with_missing_providers": len(thin),
+        "thin_days": thin,
         "gap_count": len(actionable),
         "gaps": gaps,
         "actions": sorted({str(gap["recommended_action"]) for gap in actionable}),

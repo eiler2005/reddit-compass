@@ -7,9 +7,12 @@ import sqlite3
 from pathlib import Path
 
 from reddit_compass.collector import (
+    _FILE_MAP,
     SourceResult,
     collect_sources,
     collection_coverage,
+    coverage_summary,
+    expected_providers,
     finalize_snapshot_collection,
     persist_collection,
     recover_snapshot_gaps,
@@ -17,7 +20,8 @@ from reddit_compass.collector import (
 from reddit_compass.config import MonitorConfig
 from reddit_compass.export import write_posts_jsonl
 from reddit_compass.intelligence.migrations import migrate
-from reddit_compass.intelligence.models import ContentItem
+from reddit_compass.intelligence.models import ContentItem, SourceHealth
+from reddit_compass.intelligence.repository import save_source_health, upsert_run
 from reddit_compass.models import PostCard
 
 
@@ -223,6 +227,10 @@ def test_collection_coverage_detects_recoverable_snapshot_gap(tmp_path: Path) ->
                 "ladder": True,
                 "producthunt": True,
             },
+            # Провайдерный уровень поверх адаптерного: изданий 21, адаптеров 5.
+            "providers_ok": 0,
+            "providers_expected": 21,
+            "missing_providers": sorted(expected_providers()),
             "recoverable_from_snapshots": True,
         }
     ]
@@ -678,3 +686,65 @@ def test_coverage_gap_names_the_missing_sources(tmp_path: Path) -> None:
     assert gap["unhealthy_sources"] == ["reddit"]
     # `empty` — честно пустой источник, а не сбой: в список неисправных не попадает.
     assert "producthunt" not in gap["unhealthy_sources"]
+
+
+def test_provider_level_coverage_sees_a_publisher_that_adapters_hide(tmp_path: Path) -> None:
+    """День может быть «5/5 адаптеров» и при этом «19/21 изданий».
+
+    `DEFAULT_SOURCES` перечисляет адаптеры, а `rss` — это двенадцать изданий, `ladder` —
+    девять. Ночь, в которую RSS вернул данные одного издания из двенадцати, давала
+    `rss: ok` и день `complete`. Ровно так 2026-08-04 отчитался полным, потеряв `medium`
+    и `verge`: 19 изданий из 21 и ни одного признака в отчёте.
+    """
+    date = "2026-08-04"
+    db_path = tmp_path / "compass.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    migrate(conn)
+    run_id = f"{date}:broad"
+    upsert_run(
+        conn,
+        run_id=run_id,
+        snapshot_date=date,
+        profile="broad",
+        status="complete",
+        started_at="2026-08-04T07:00:00Z",
+        finished_at="2026-08-04T08:00:00Z",
+    )
+    # Все пять адаптеров здоровы...
+    adapters = [
+        SourceHealth(source_id=name, provider=name, cluster="mainstream", status="ok", count=1)
+        for name in ("reddit", "hackernews", "rss", "ladder", "producthunt")
+    ]
+    # ...но издания дали материал не все: нет `medium` и `verge`.
+    publishers = [
+        SourceHealth(
+            source_id=f"{name}:top", provider=name, cluster="mainstream", status="ok", count=1
+        )
+        for name in sorted(expected_providers() - {"medium", "verge"})
+    ]
+    save_source_health(conn, run_id, adapters + publishers)
+    conn.commit()
+    conn.close()
+
+    snapshot_dir = tmp_path / "snapshots" / date
+    for filename in _FILE_MAP.values():
+        write_posts_jsonl([_legacy_card(f"{filename}-post", date)], snapshot_dir / filename)
+
+    coverage = collection_coverage(
+        tmp_path / "snapshots", db_path, profile="broad", since=date, until=date
+    )
+    day = coverage[0]
+
+    # Адаптерный уровень доволен — и это правда, адаптеры отработали.
+    assert day["raw_complete"] is True
+    # Провайдерный видит недобор и называет его поимённо.
+    assert day["providers_ok"] == 19
+    assert day["providers_expected"] == 21
+    assert day["missing_providers"] == ["medium", "verge"]
+
+    summary = coverage_summary(coverage)
+    # Недобор изданий — не пропуск дня: он не блокирует релиз, но и не молчит.
+    assert summary["gap_count"] == 0
+    assert summary["days_with_missing_providers"] == 1
+    assert summary["thin_days"][0]["missing_providers"] == ["medium", "verge"]

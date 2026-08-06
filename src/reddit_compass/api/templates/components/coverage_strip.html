@@ -14,12 +14,19 @@
         {% else %}
         Пропусков нет.
         {% endif %}
+        {% if coverage.summary.days_with_missing_providers %}
+        Ещё {{ coverage.summary.days_with_missing_providers }} дн. собраны, но не всеми изданиями —
+        адаптеров пять, изданий двадцать одно.
+        {% endif %}
     </p>
     <ol class="coverage-strip" aria-label="Календарное покрытие сбора">
         {% for day in coverage.days %}
         <li class="coverage-day coverage-day-{{ day.state }}">
             <span class="coverage-day-label">{{ day.date[8:10] }}</span>
-            <span class="coverage-day-count">{{ day.ok_count }}/{{ day.total_count }}</span>
+            <span class="coverage-day-count">{{ day.ok_count }}/{{ day.total_count }} адапт.</span>
+            <span class="coverage-day-count{% if day.missing_providers %} coverage-day-thin{% endif %}"
+                  title="{% if day.missing_providers %}Нет изданий: {{ day.missing_providers | join(', ') }}{% else %}Все издания дали материал{% endif %}">
+                {{ day.providers_ok }}/{{ day.providers_expected }} изд.</span>
             {# Разрез виден и без наведения — на мобильном hover не существует. #}
             <ul class="coverage-day-sources">
                 {% for source in day.sources %}
@@ -33,6 +40,15 @@
         </li>
         {% endfor %}
     </ol>
+    {% if coverage.summary.thin_days %}
+    <ul class="coverage-actions">
+        {% for thin in coverage.summary.thin_days %}
+        <li><code>{{ thin.date }}</code> — собран, но без изданий:
+            {% for name in thin.missing_providers %}<strong>{{ name }}</strong>{% if not loop.last %}, {% endif %}{% endfor %}
+            ({{ thin.providers_ok }}/{{ thin.providers_expected }})</li>
+        {% endfor %}
+    </ul>
+    {% endif %}
     {% if coverage.summary.gaps %}
     <ul class="coverage-actions">
         {% for gap in coverage.summary.gaps if gap.recommended_action != "pending" %}

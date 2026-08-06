@@ -1925,6 +1925,11 @@ def _calendar_coverage(days: int = 14) -> dict[str, object]:
                 "sources": sources,
                 "ok_count": sum(1 for source in sources if source["ok"]),
                 "total_count": len(sources),
+                # Изданий 21, адаптеров 5. День может быть «5/5 адаптеров» и при этом
+                # «19/21 изданий» — ровно так выглядел 2026-08-04.
+                "providers_ok": row.get("providers_ok", 0),
+                "providers_expected": row.get("providers_expected", 0),
+                "missing_providers": row.get("missing_providers") or [],
             }
         )
     return {"days": strip, "summary": summary}
