@@ -320,6 +320,26 @@ def is_bad_trend_name(name: str) -> bool:
     return bool(trend_name_defect(name))
 
 
+# Издания, без которых релиз не имеет смысла публиковать в broad.
+#
+# Владелец сформулировал правило так: блокируют «условный reddit и 5-6 новостных
+# сайтов», всё остальное — предупреждение. Пятёрка выбрана по вкладу в боевой релиз
+# `2026-07-30_2026-08-05-broad-r2` (10 927 материалов): reddit 6875, nytimes 685,
+# guardian 392, reuters 358, washingtonpost 321, bbc 247. Дальше идёт резкий обрыв
+# (ft 187, foxnews 160), поэтому граница проведена здесь, а не на глаз.
+#
+# Отвалившееся на ночь издание вне этого набора релиз не блокирует: такое случается по
+# причинам издателя, и превращать это в остановку публикации значило бы блокировать
+# чаще, чем есть настоящая проблема.
+CRITICAL_PROVIDERS = frozenset(
+    {"reddit", "nytimes", "guardian", "reuters", "washingtonpost", "bbc"}
+)
+
+# Доля изданий, ниже которой корпус перестаёт быть представительным. 70% от 21 — это
+# 15 изданий; при меньшем числе «срез мира» держится на нескольких источниках, и
+# кросс-source подтверждение, ради которого весь слой Stories и существует, слабеет.
+MIN_PROVIDER_SHARE = 70.0
+
 # Абсолютный допустимый уровень качества. ``op`` = "max" (value <= floor) / "min".
 QUALITY_FLOORS: dict[str, dict[str, Any]] = {
     "stories_overmerge_ge5": {
@@ -354,6 +374,16 @@ QUALITY_FLOORS: dict[str, dict[str, Any]] = {
         "desc": "trends with single-token/bare-verb/generic/token-bag name",
     },
     "trends_duplicate_name_count": {"op": "max", "value": 0, "desc": "duplicate trend names"},
+    "collection_provider_share": {
+        "op": "min",
+        "value": MIN_PROVIDER_SHARE,
+        "desc": "share of expected publishers present in the release, %",
+    },
+    "collection_critical_missing": {
+        "op": "max",
+        "value": 0,
+        "desc": "critical publishers (reddit + top news) missing from the release",
+    },
     # На слой Trends смотрели только две проверки имён, поэтому кластер размером
     # в четверть корпуса проходил гейт незамеченным: на 2026-07-26_2026-08-01-broad-r2
     # крупнейший «тренд» держал 2077 сюжетов из 8409 (24.7%) под именем
@@ -441,6 +471,15 @@ def compute_quality(
         "SELECT title, excerpt, provider, source_section FROM release_items WHERE release_id = ?",
         data_release_id,
     )
+    # Покрытие изданий по самому релизу, а не по дневному source_health: публикуется
+    # именно релиз, и вопрос «представителен ли он» решается его составом. Дневное
+    # покрытие остаётся операционным сигналом и релиз не блокирует.
+    from ..collector import expected_providers
+
+    expected = expected_providers()
+    present = {str(r["provider"]) for r in items if r["provider"]}
+    provider_share = round(100 * len(present & expected) / len(expected), 2) if expected else 0.0
+    missing_critical = sorted(CRITICAL_PROVIDERS - present)
     n = len(items)
     dom: Counter[str] = Counter()
     rub: Counter[str] = Counter()
@@ -494,6 +533,12 @@ def compute_quality(
         "taxonomy_empty_rubrics": empty_rubrics,
         "taxonomy_rubric_dist": dict(rub.most_common()),
         "trends_count": len(names),
+        "collection_provider_count": len(present & expected),
+        "collection_provider_expected": len(expected),
+        "collection_provider_share": provider_share,
+        "collection_missing_providers": sorted(expected - present),
+        "collection_critical_missing": len(missing_critical),
+        "collection_missing_critical_providers": missing_critical,
         "trends_bad_name_count": bad_names,
         "trends_bad_name_reasons": bad_name_reasons,
         "trends_bad_name_examples": bad_name_examples,

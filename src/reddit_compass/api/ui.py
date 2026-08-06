@@ -1946,6 +1946,7 @@ def runs_page(
     from .view_models import status_label
 
     source_health_by_run: dict[str, list[dict[str, object]]] = {}
+    publisher_health_by_run: dict[str, dict[str, dict[str, object]]] = {}
     if rows:
         run_ids = [str(row["run_id"]) for row in rows]
         placeholders = ", ".join("?" for _ in run_ids)
@@ -1961,6 +1962,19 @@ def runs_page(
             # Provider×section rows complement but do not replace the adapter
             # stage.  The latter is what determines collection completeness.
             if ":" in str(health["source_id"]):
+                # Но и выбрасывать их нельзя: `ladder` одной строкой «186 материалов»
+                # скрывает девять изданий, `rss` — двенадцать. Именно на этом уровне
+                # видно, что 2026-08-04 потерял `medium` и `verge`. Секции сворачиваем
+                # в издание: оператору важно, дало ли издание материал, а не сколько у
+                # него рубрик. Привязку издания к адаптеру не выдумываем — три издания
+                # обслуживаются обоими, и в строке health этого различия нет.
+                run_publishers = publisher_health_by_run.setdefault(str(health["run_id"]), {})
+                provider = str(health["source_id"]).split(":", 1)[0]
+                entry = run_publishers.setdefault(
+                    provider, {"provider": provider, "count": 0, "statuses": set()}
+                )
+                entry["count"] = int(entry["count"]) + int(health["count"] or 0)  # type: ignore[call-overload]
+                cast(set[str], entry["statuses"]).add(str(health["status"]))
                 continue
             source_health_by_run.setdefault(str(health["run_id"]), []).append(dict(health))
 
@@ -2156,6 +2170,27 @@ def runs_page(
         health = source_health_by_run.get(run_id, [])
         source_ready = sum(1 for source in health if source.get("status") in {"ok", "empty"})
         source_total = len(health)
+        from ..collector import expected_providers
+
+        expected_pubs = expected_providers()
+        seen_pubs = publisher_health_by_run.get(run_id, {})
+        publishers = sorted(
+            (
+                {
+                    "provider": provider,
+                    "count": entry["count"],
+                    "ok": bool(cast(set[str], entry["statuses"]) & {"ok", "empty"}),
+                }
+                for provider, entry in seen_pubs.items()
+            ),
+            key=lambda row: (-int(cast(int, row["count"])), str(row["provider"])),
+        )
+        # Издания, которых не было вовсе: их нет в health, поэтому без явного списка
+        # ожидаемых они бы просто отсутствовали — то есть остались бы незамеченными.
+        publishers += [
+            {"provider": provider, "count": 0, "ok": False}
+            for provider in sorted(expected_pubs - set(seen_pubs))
+        ]
         run_release = releases_by_run.get(run_id)
         story = cast(dict[str, object] | None, run_release.get("story")) if run_release else None
         trend = cast(dict[str, object] | None, run_release.get("trend")) if run_release else None
@@ -2252,6 +2287,9 @@ def runs_page(
                 "source_ready": source_ready,
                 "source_total": source_total,
                 "source_health": health,
+                "publishers": publishers,
+                "publishers_ok": sum(1 for row in publishers if row["ok"]),
+                "publishers_expected": len(expected_pubs),
                 "release": run_release,
                 "stages": stages,
             }

@@ -1786,3 +1786,53 @@ def test_runs_page_shows_the_calendar_coverage_strip(engine_client: TestClient) 
     assert "coverage-strip" in page.text
     # Разрез по источникам виден на каждом дне: «4 из 5» не говорит, что чинить.
     assert "coverage-day-sources" in page.text
+
+
+def test_runs_page_expands_publishers_behind_each_adapter(
+    engine_client: TestClient, tmp_path: Path
+) -> None:
+    """`ladder` одной строкой «186 материалов» скрывает девять изданий, `rss` — двенадцать.
+
+    Разрез по изданиям — это то место, где видно, что день потерял конкретное издание,
+    а адаптер при этом отчитался `ok`.
+    """
+    corpus = get_db(tmp_path / "compass.db")
+    upsert_run(
+        corpus,
+        run_id="2026-07-29:broad",
+        snapshot_date="2026-07-29",
+        profile="broad",
+        status="complete",
+        started_at="2026-07-29T07:00:00Z",
+        finished_at="2026-07-29T08:00:00Z",
+    )
+    save_source_health(
+        corpus,
+        "2026-07-29:broad",
+        [
+            SourceHealth(
+                source_id="ladder", provider="ladder", cluster="mainstream", status="ok", count=186
+            ),
+            SourceHealth(
+                source_id="wired:tech", provider="wired", cluster="tech", status="ok", count=21
+            ),
+            SourceHealth(
+                source_id="time:mainstream",
+                provider="time",
+                cluster="mainstream",
+                status="ok",
+                count=23,
+            ),
+        ],
+    )
+    corpus.commit()
+    corpus.close()
+
+    page = engine_client.get("/runs")
+
+    assert page.status_code == 200
+    assert "publisher-block" in page.text
+    # Издания, давшие материал, названы поимённо…
+    assert "wired" in page.text
+    # …и те, которых не было, тоже: иначе пропуск остался бы незамеченным.
+    assert "не дало материала" in page.text

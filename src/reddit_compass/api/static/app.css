@@ -2842,3 +2842,35 @@ a.story-card {
     font-weight: 600;
     opacity: 1;
 }
+
+/* Разрез по изданиям внутри прогона. Свёрнут по умолчанию: двадцать одна строка
+   вытеснила бы с экрана сам прогон, а нужны они при разборе, а не всегда. */
+.publisher-block {
+    margin-top: var(--space-3);
+}
+
+.publisher-block summary {
+    cursor: pointer;
+    font-size: var(--text-sm);
+}
+
+.publisher-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr));
+    gap: var(--space-1);
+    list-style: none;
+    margin: var(--space-2) 0 0;
+    padding: 0;
+}
+
+.publisher-row {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    font-size: var(--text-xs);
+}
+
+.publisher-row-bad {
+    color: var(--error);
+    font-weight: 600;
+}

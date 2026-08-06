@@ -65,6 +65,27 @@
                         {% else %}
                         <p class="section-note">Для этого legacy-run нет source health. Следующий запуск через <code>collect --from-snapshots</code> запишет её.</p>
                         {% endif %}
+
+                        {# Адаптеров пять, изданий двадцать одно: `ladder` одной строкой
+                           «186 материалов» скрывает девять изданий, `rss` — двенадцать.
+                           Именно здесь видно, что день потерял конкретное издание. #}
+                        {% if run.publishers %}
+                        <details class="publisher-block">
+                            <summary>
+                                Издания: <b>{{ run.publishers_ok }}/{{ run.publishers_expected }}</b>
+                                {%- if run.publishers_ok < run.publishers_expected %} · есть пропуски{% endif %}
+                            </summary>
+                            <ul class="publisher-list">
+                                {% for pub in run.publishers %}
+                                <li class="publisher-row publisher-row-{{ 'ok' if pub.ok else 'bad' }}">
+                                    <span aria-hidden="true">{{ '●' if pub.ok else '○' }}</span>
+                                    <strong>{{ pub.provider }}</strong>
+                                    <span>{% if pub.ok %}{{ pub.count }} материалов{% else %}не дало материала{% endif %}</span>
+                                </li>
+                                {% endfor %}
+                            </ul>
+                        </details>
+                        {% endif %}
                     </section>
 
                     <section>

@@ -132,6 +132,25 @@ def _insert_signal(conn, sid, signal_id, signal_type, gap):
     )
 
 
+def _items_across_publishers(titles: list[str]) -> list[tuple[str, str, str]]:
+    """Материалы, размазанные по изданиям так, как выглядит настоящий broad-релиз.
+
+    Пол `collection_provider_share` требует 70% от двадцати одного издания, то есть
+    пятнадцать. Берём шестнадцать, обязательно включая все критические: релиз без
+    reddit или без крупного новостного издания публиковать в broad нельзя, и фикстура
+    «чистого» релиза не должна это правило обходить.
+    """
+    from reddit_compass.collector import expected_providers
+    from reddit_compass.intelligence.quality import CRITICAL_PROVIDERS
+
+    rest = sorted(expected_providers() - CRITICAL_PROVIDERS)
+    publishers = sorted(CRITICAL_PROVIDERS) + rest[: 16 - len(CRITICAL_PROVIDERS)]
+    return [
+        (f"i{index}", titles[index % len(titles)], publisher)
+        for index, publisher in enumerate(publishers)
+    ]
+
+
 def _build(conn, dr, sr, tr, sig, items, stories, trends, signals, gap_available=True):
     for it in items:
         _insert_item(conn, dr, *it)
@@ -201,16 +220,23 @@ def test_compute_quality_clean_release_passes_floors(tmp_path) -> None:
         "SR",
         "TR",
         "SIG",
-        items=[
-            ("i1", "OpenAI GPT LLM release"),
-            ("i2", "surveillance camera facial recognition tracking privacy"),
-            ("i3", "layoff hiring salary career jobs"),
-            ("i4", "company earnings revenue merger acquisition"),
-            ("i5", "election senate congress government policy"),
-            ("i6", "war ukraine nato sanctions geopolitics"),
-            ("i7", "hollywood film music netflix celebrity"),
-            ("i8", "climate energy solar nuclear science research"),
-        ],
+        # Чистый релиз обязан и выглядеть чистым: раньше все восемь материалов шли от
+        # `reuters`, то есть от одного издания из двадцати одного. Пол покрытия такой
+        # релиз публиковать в broad не даст — и это правильно, поэтому фикстура
+        # приведена к виду настоящего broad-релиза: шестнадцать изданий, включая все
+        # шесть критических, по два материала на тему для баланса рубрик.
+        items=_items_across_publishers(
+            [
+                "OpenAI GPT LLM release",
+                "surveillance camera facial recognition tracking privacy",
+                "layoff hiring salary career jobs",
+                "company earnings revenue merger acquisition",
+                "election senate congress government policy",
+                "war ukraine nato sanctions geopolitics",
+                "hollywood film music netflix celebrity",
+                "climate energy solar nuclear science research",
+            ]
+        ),
         stories=[("s1", 2, 2), ("s2", 1, 1), ("s3", 2, 3)],
         trends=[
             ("t1", "OpenAI quantum agent platform"),
@@ -234,3 +260,41 @@ def test_compute_quality_clean_release_passes_floors(tmp_path) -> None:
     assert m["pulse_other_share"] == 0.0
     assert all(r.passed for r in evaluate_floors(m))
     conn.close()
+
+
+def test_release_with_missing_critical_publisher_fails_the_floor(tmp_path) -> None:
+    """Отсутствие reddit или крупного новостного издания блокирует broad.
+
+    Правило владельца: блокируют «условный reddit и 5-6 новостных сайтов», остальное —
+    предупреждение. Пятёрка выбрана по вкладу в боевой релиз
+    `2026-07-30_2026-08-05-broad-r2` (10 927 материалов): reddit 6875, nytimes 685,
+    guardian 392, reuters 358, washingtonpost 321, bbc 247 — дальше резкий обрыв
+    (ft 187), поэтому граница проведена по данным, а не на глаз.
+    """
+    from reddit_compass.intelligence.quality import CRITICAL_PROVIDERS, QUALITY_FLOORS
+
+    assert QUALITY_FLOORS["collection_critical_missing"]["value"] == 0
+    assert QUALITY_FLOORS["collection_provider_share"]["op"] == "min"
+    assert QUALITY_FLOORS["collection_provider_share"]["value"] == 70.0
+    # Reddit — крупнейший вклад, без него корпус теряет больше половины материалов.
+    assert "reddit" in CRITICAL_PROVIDERS
+    assert len(CRITICAL_PROVIDERS) == 6
+
+
+def test_provider_share_floor_matches_the_expected_publisher_set() -> None:
+    """70% считаются от 21 издания, а не от 5 адаптеров — иначе порог ничего не значит."""
+    from reddit_compass.collector import expected_providers
+    from reddit_compass.intelligence.quality import MIN_PROVIDER_SHARE
+
+    expected = expected_providers()
+    assert len(expected) == 21
+    # 70% от 21 — пятнадцать изданий: ниже этого кросс-source подтверждение,
+    # ради которого существует слой Stories, держится на нескольких источниках.
+    assert round(len(expected) * MIN_PROVIDER_SHARE / 100) == 15
+    assert CRITICAL_SUBSET_IS_EXPECTED(expected)
+
+
+def CRITICAL_SUBSET_IS_EXPECTED(expected: frozenset[str]) -> bool:
+    from reddit_compass.intelligence.quality import CRITICAL_PROVIDERS
+
+    return expected >= CRITICAL_PROVIDERS
