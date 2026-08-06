@@ -27,11 +27,14 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import math
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:  # pragma: no cover - только для аннотаций
     from .engine import FrozenItem, PairCandidate
+
+logger = logging.getLogger("reddit_compass")
 
 DEFAULT_CROSS_ENCODER_MODEL = "cross-encoder/ms-marco-MiniLM-L6-v2"
 DEFAULT_CROSS_ENCODER_THRESHOLD = 0.95
@@ -76,6 +79,39 @@ def is_adjudicable(candidate: PairCandidate) -> bool:
     return not any(bool(candidate.features.get(key)) for key in _HARD_CONFLICT_FEATURES)
 
 
+# Пар в одном проходе, между которыми пишется строка прогресса. 512 — примерно
+# полминуты работы на боевом хосте: достаточно редко, чтобы не засорять журнал, и
+# достаточно часто, чтобы зависание было видно в пределах минуты.
+_PROGRESS_CHUNK = 512
+
+
+def _predict_with_progress(
+    engine: _Scorer, pairs: list[tuple[str, str]], batch_size: int, label: str
+) -> list[float]:
+    """Скоринг кусками с отметками прогресса вместо одного молчаливого вызова.
+
+    Раньше здесь был один `predict` на весь массив с `show_progress_bar=False`, то есть
+    на боевом объёме (~6000 пар в каждую сторону) журнал молчал десятки минут. Когда
+    6 августа хост перестал отвечать посреди этой стадии, по логу нельзя было понять
+    ни где именно всё встало, ни двигался ли процесс вообще — последняя строка была
+    «загрузил модель».
+
+    Результат не меняется: те же пары в том же порядке, разбиение только по вызовам.
+    """
+    scores: list[float] = []
+    total = len(pairs)
+    for start in range(0, total, _PROGRESS_CHUNK):
+        chunk = pairs[start : start + _PROGRESS_CHUNK]
+        scores.extend(
+            float(value)
+            for value in engine.predict(chunk, batch_size=batch_size, show_progress_bar=False)
+        )
+        logger.info(
+            "cross-encoder %s: %d/%d пар", label, min(start + _PROGRESS_CHUNK, total), total
+        )
+    return scores
+
+
 def adjudicate_story_pairs(
     candidates: list[PairCandidate],
     items: list[FrozenItem],
@@ -111,8 +147,8 @@ def adjudicate_story_pairs(
     forward = [(texts[c.item_id_a], texts[c.item_id_b]) for c in targets]
     backward = [(right, left) for left, right in forward]
     engine = scorer if scorer is not None else load_scorer(model_id)
-    forward_scores = engine.predict(forward, batch_size=batch_size, show_progress_bar=False)
-    backward_scores = engine.predict(backward, batch_size=batch_size, show_progress_bar=False)
+    forward_scores = _predict_with_progress(engine, forward, batch_size, "прямой проход")
+    backward_scores = _predict_with_progress(engine, backward, batch_size, "обратный проход")
     scores = {
         candidate.item_id_a + "|" + candidate.item_id_b: (
             _sigmoid(float(left)) + _sigmoid(float(right))

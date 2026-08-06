@@ -2812,3 +2812,42 @@ def test_release_readiness_rejects_an_unknown_release(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="not found"):
         release_readiness(engine, data_release_id="no-such-release")
+
+
+def test_cross_encoder_chunking_does_not_change_the_result(caplog) -> None:
+    """Разбиение на куски добавляет только видимость прогресса, но не меняет скоры.
+
+    До 6 августа здесь был один `predict` на весь массив с `show_progress_bar=False`:
+    на боевом объёме (~6000 пар в каждую сторону) журнал молчал десятки минут. Когда
+    хост умер посреди этой стадии, по логу нельзя было понять ни где всё встало, ни
+    двигался ли процесс — последняя строка была «загрузил модель».
+
+    Тест держит границу: пары идут в том же порядке и получают те же значения, а
+    логирование не превращается в подмену скоринга.
+    """
+    import logging as _logging
+
+    from reddit_compass.intelligence.cross_encoder import _PROGRESS_CHUNK, _predict_with_progress
+
+    class _CountingScorer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def predict(self, pairs, **kwargs):
+            self.calls += 1
+            # Значение выводится из содержимого пары, поэтому перестановка или потеря
+            # порядка была бы видна сразу.
+            return [float(len(left)) for left, _right in pairs]
+
+    pairs = [(f"left-{index}", f"right-{index}") for index in range(_PROGRESS_CHUNK * 2 + 7)]
+    scorer = _CountingScorer()
+
+    with caplog.at_level(_logging.INFO):
+        scores = _predict_with_progress(scorer, pairs, 64, "прямой проход")
+
+    assert scores == [float(len(left)) for left, _ in pairs]
+    assert scorer.calls == 3
+    progress = [msg for msg in caplog.messages if "cross-encoder" in msg]
+    assert len(progress) == 3
+    # Последняя отметка называет полный объём, а не размер куска.
+    assert str(len(pairs)) in progress[-1]
