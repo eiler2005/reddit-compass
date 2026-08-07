@@ -556,22 +556,33 @@ def spend_guard_limit() -> float | None:
     return value if value >= 0 else None
 
 
-def check_spend_guard(model: str, *, since: datetime | None = None) -> None:
-    """Поднять ошибку, если накопленный расход уже перебрал потолок.
+def spend_window_days() -> int:
+    """Окно, за которое считается расход для потолка. По умолчанию 30 дней."""
+    value = _int_env("RC_QWEN_SPEND_WINDOW_DAYS", 30)
+    return 30 if value is None or value <= 0 else value
 
-    Проверка идёт до дорогого вызова и только для моделей с известной ценой: у Flash
-    расход на порядок ниже, и упереться в потолок на нём практически невозможно — а вот
-    Max-синтез способен съесть бюджет за один прогон. Потолок не задан — поведение
-    прежнее, никакого неявного лимита не появляется.
+
+def check_spend_guard(model: str, *, since: datetime | None = None) -> None:
+    """Поднять ошибку, если расход за окно перебрал потолок.
+
+    Окно скользящее, а не «вся история»: накопительный потолок срабатывает рано или
+    поздно при любом темпе, потому что сумма только растёт. Замер 7 августа показал это
+    прямо — за историю набежало 33 CNY, и потолок в 20 заблокировал бы работу немедленно,
+    хотя ночной прогон стоит 0.08 CNY. Осмысленный вопрос — «сколько потрачено за
+    последние N дней», и потолок отвечает именно на него.
+
+    Проверка идёт до дорогого вызова. Потолок не задан — поведение прежнее, никакого
+    неявного лимита не появляется.
     """
     limit = spend_guard_limit()
     if limit is None:
         return
-    spent = float(cost_report(since=since or payg_grant_start())["total_cny"])  # type: ignore[arg-type]
+    window_start = since or datetime.now(UTC) - timedelta(days=spend_window_days())
+    spent = float(cost_report(since=window_start)["total_cny"])  # type: ignore[arg-type]
     if spent < limit:
         return
     raise RuntimeError(
-        f"Расход Qwen по list price достиг {spent:.2f} CNY при потолке "
-        f"RC_QWEN_MAX_SPEND_CNY={limit:.2f}. Вызов {model} остановлен. "
-        f"Поднимите потолок осознанно либо разберите отчёт `reddit-compass qwen cost`."
+        f"Расход Qwen по list price за последние {spend_window_days()} дн. достиг "
+        f"{spent:.2f} CNY при потолке RC_QWEN_MAX_SPEND_CNY={limit:.2f}. Вызов {model} "
+        f"остановлен. Поднимите потолок осознанно либо разберите `reddit-compass qwen cost`."
     )

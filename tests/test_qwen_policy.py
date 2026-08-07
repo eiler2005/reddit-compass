@@ -379,6 +379,49 @@ def test_unlabelled_usage_is_reported_separately_not_dissolved(monkeypatch, tmp_
     assert stages == {"(не размечено)"}
 
 
+def test_spend_guard_counts_a_rolling_window_not_all_history(monkeypatch, tmp_path) -> None:
+    """Потолок отвечает на «сколько потрачено за N дней», а не «за всю историю».
+
+    Накопительный потолок срабатывает рано или поздно при любом темпе, потому что сумма
+    только растёт. Замер 7 августа: за историю набежало 33 CNY, и потолок в 20 заблокировал
+    бы работу немедленно — при том что ночной прогон стоит 0.08 CNY.
+    """
+    import sqlite3 as _sqlite3
+    from datetime import timedelta
+
+    monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
+    monkeypatch.delenv("RC_QWEN_PAYG_GRANT_START", raising=False)
+    monkeypatch.setenv("RC_QWEN_MAX_SPEND_CNY", "10")
+
+    # Старый крупный расход — за пределами окна.
+    qwen_policy.record_usage(
+        model="qwen3.8-max",
+        endpoint="payg",
+        prompt_tokens=2_000_000,
+        completion_tokens=2_000_000,
+        stage="synthesis",
+    )
+    old = (datetime.now(UTC) - timedelta(days=90)).isoformat()
+    conn = _sqlite3.connect(tmp_path / "ledger.db")
+    conn.execute("UPDATE qwen_usage SET created_at = ?", (old,))
+    conn.commit()
+    conn.close()
+
+    # За окно расхода почти нет — потолок не должен срабатывать.
+    qwen_policy.check_spend_guard("qwen3.7-flash")
+
+    # Свежий крупный расход внутри окна — срабатывает.
+    qwen_policy.record_usage(
+        model="qwen3.8-max",
+        endpoint="payg",
+        prompt_tokens=1_000_000,
+        completion_tokens=1_000_000,
+        stage="synthesis",
+    )
+    with pytest.raises(RuntimeError, match="за последние 30"):
+        qwen_policy.check_spend_guard("qwen3.8-max")
+
+
 def test_spend_guard_stops_the_call_before_it_is_paid_for(monkeypatch, tmp_path) -> None:
     """Потолок проверяется до вызова: смысл в том, чтобы не потратить."""
     monkeypatch.setenv("RC_QWEN_LEDGER_PATH", str(tmp_path / "ledger.db"))
