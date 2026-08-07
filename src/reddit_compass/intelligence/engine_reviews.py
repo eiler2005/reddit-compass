@@ -45,12 +45,12 @@ class TrendCoherenceReview(BaseModel):
     domains: list[str] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
 
-    @field_validator("evidence_story_ids")
-    @classmethod
-    def trend_evidence_is_not_empty(cls, value: list[str]) -> list[str]:
-        if not value:
-            raise ValueError("evidence_story_ids must not be empty")
-        return value
+    # Пустой evidence у `reject` — законный ответ, а не брак: отказ утверждает, что
+    # сквозного сюжета нет, и подтверждать ему нечего. Безусловное требование
+    # доказательств стоило 119 корректных отказов: они писались `valid=0`, а
+    # `apply_cached_trend_reviews` читает только `valid=1`, поэтому отвергнутый тренд
+    # не выбрасывался, а публиковался как `pending`. Требование к подтверждению живёт
+    # в `validate_trend_review` — оно знает про decision и строже (не меньше трёх).
 
 
 class GroupPartition(BaseModel):

@@ -34,6 +34,20 @@ def test_evaluate_floors_pass_and_fail() -> None:
     assert by_metric["trends_bad_name_count"].passed is False
 
 
+def test_collapsed_trend_layer_fails_a_floor() -> None:
+    """Релиз без трендов обязан упираться в пол.
+
+    Пока отказы трендового ревью терялись, пустой слой был недостижим и пола не
+    существовало: пятнадцать полов пропускали релиз с нулём трендов. Теперь отказ
+    выбрасывает тренд, поэтому обвал слоя стал возможным исходом сбоя промпта.
+    """
+    by_metric = {r.metric: r for r in evaluate_floors({"trends_count": 0})}
+    assert by_metric["trends_count"].passed is False
+    # Порог не подогнан под боевые 98–104: законно тихое окно проходит.
+    assert all(r.passed for r in evaluate_floors({"trends_count": 3}))
+    assert all(r.passed for r in evaluate_floors({"trends_count": 98}))
+
+
 def test_completeness_floors_separate_collapsed_from_working_releases() -> None:
     """Полы полноты обязаны лежать в зазоре между схлопыванием и рабочей полосой.
 

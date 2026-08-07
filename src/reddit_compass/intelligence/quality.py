@@ -346,6 +346,7 @@ CRITICAL_PROVIDERS = frozenset(
 # 15 изданий; при меньшем числе «срез мира» держится на нескольких источниках, и
 # кросс-source подтверждение, ради которого весь слой Stories и существует, слабеет.
 MIN_PROVIDER_SHARE = 70.0
+MIN_TRENDS_COUNT = 1
 
 # Абсолютный допустимый уровень качества. ``op`` = "max" (value <= floor) / "min".
 QUALITY_FLOORS: dict[str, dict[str, Any]] = {
@@ -381,6 +382,20 @@ QUALITY_FLOORS: dict[str, dict[str, Any]] = {
         "desc": "trends with single-token/bare-verb/generic/token-bag name",
     },
     "trends_duplicate_name_count": {"op": "max", "value": 0, "desc": "duplicate trend names"},
+    # Пол на обвал, а не на норму. Пока отказы ревью терялись, пустой трендовый слой был
+    # недостижим; теперь отказ выбрасывает тренд, и сбой промпта или модели способен
+    # снести весь слой — а прежние пятнадцать полов пропускали релиз с нулём трендов.
+    #
+    # Порог именно 1, а не «примерно как в проде». Значение, подогнанное под боевые
+    # 98–104, блокировало бы законно тихое окно: первая попытка с порогом 10 сразу
+    # уронила фикстуру чистого релиза. Ноль трендов — это не релиз при любом размере
+    # окна; всё остальное — предмет regression-проверки к baseline, а не абсолютного пола.
+    # Частичный обвал (98 → 5) этот пол не ловит, и это осознанный размен.
+    "trends_count": {
+        "op": "min",
+        "value": MIN_TRENDS_COUNT,
+        "desc": "trends in the release; guards against a collapsed trend layer",
+    },
     "collection_provider_share": {
         "op": "min",
         "value": MIN_PROVIDER_SHARE,
