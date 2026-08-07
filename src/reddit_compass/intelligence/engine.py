@@ -4901,6 +4901,7 @@ def create_trend_release(
         trends,
         history_status=history_status,
     )
+    review_drop_stats: dict[str, int] = {}
     trends = apply_cached_trend_reviews(
         conn,
         trends=trends,
@@ -4908,6 +4909,7 @@ def create_trend_release(
         model=str(params["review_model"]),
         prompt_version=str(params["review_prompt_version"]),
         min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
+        stats=review_drop_stats,
     )
     # Ревью могло удалить родителя и переименовать ребёнка — дерево чиним до записи.
     trends = _reconcile_trend_hierarchy(trends)
@@ -4941,6 +4943,9 @@ def create_trend_release(
         "actor_typed_share": round(100 * typed_grouped / max(len(grouped_ids), 1), 1),
         "trend_parent_count": parent_count,
         "trend_child_count": child_count,
+        # Сколько кандидатов ревью убрало и по какой причине. Без этой разбивки падение
+        # числа трендов читается как «стало хуже», хотя отсев мусора — цель ревью.
+        **review_drop_stats,
     }
     if method == "schema_v3":
         from .trend_schema_llm import load_schemas
@@ -5312,8 +5317,19 @@ def apply_cached_trend_reviews(
     model: str,
     prompt_version: str,
     min_distinct_actors: int = 2,
+    stats: dict[str, int] | None = None,
 ) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Применяет закэшированные вердикты ревью к кандидатам в тренды.
+
+    ``stats`` (если передан) заполняется счётчиками отброшенного по каждой причине.
+    Считать их порознь важно: до 2026-08-07 отказ ревью не доходил до применения, а
+    порог акторов появился днём раньше. Без разбивки в метриках видно «трендов стало
+    меньше», но не видно, ревью это отработало или тренды рассыпались на пороге.
+    """
     story_by_id = {str(story["story_id"]): story for story in stories}
+    counters = stats if stats is not None else {}
+    for key in ("rejected_trends", "thin_after_review_trends", "few_actors_after_review_trends"):
+        counters.setdefault(key, 0)
     resolved: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
     for trend, memberships in trends:
         story_ids = [story_id for story_id, _, _ in memberships]
@@ -5360,6 +5376,7 @@ def apply_cached_trend_reviews(
             )
             continue
         if review.decision == "reject":
+            counters["rejected_trends"] += 1
             continue
         # Ревью судит выборку, а не весь состав: выкидываем только те из показанных,
         # которые оно не назвало. Непоказанные остаются — модель о них не высказывалась,
@@ -5372,6 +5389,7 @@ def apply_cached_trend_reviews(
             if membership[0] not in shown_ids or membership[0] in accepted_ids
         ]
         if len(accepted_memberships) < 3:
+            counters["thin_after_review_trends"] += 1
             continue
         # Ревью отсеяло часть состава — значит все агрегаты тренда посчитаны по уже не
         # существующему множеству. Раньше пересчитывался только `story_count`, и тренд
@@ -5383,6 +5401,7 @@ def apply_cached_trend_reviews(
         surviving = _schema_trend_aggregates(trend, accepted_memberships, story_by_id)
         recomputed_actors = surviving.get("distinct_actors")
         if recomputed_actors is not None and len(recomputed_actors) < min_distinct_actors:
+            counters["few_actors_after_review_trends"] += 1
             continue
         resolved.append(
             (

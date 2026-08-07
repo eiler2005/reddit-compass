@@ -166,6 +166,7 @@ public sources
 | Story/trend algorithms, Golden Set, review, quality and rollback | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) |
 | Quality floors and regression gates | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) |
 | Qwen cost routing: pay-as-you-go models, confirmed grants, usage ledger | [`docs/QWEN_ROUTING.md`](docs/QWEN_ROUTING.md) |
+| Backups, data freshness in `/health`, nightly run verdict | [`docs/BACKUP.md`](docs/BACKUP.md) |
 | Architecture handoff and published 2026-08-05 release | [`docs/SESSION_2026-08-05_RELEASE.md`](docs/SESSION_2026-08-05_RELEASE.md) |
 | Prioritized post-release improvements | [`docs/NEXT_IMPROVEMENTS.md`](docs/NEXT_IMPROVEMENTS.md) |
 | Source capability registry and sections | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) |
@@ -491,6 +492,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 | [`docs/COLLECTOR_TO_TRENDS_FLOW.md`](docs/COLLECTOR_TO_TRENDS_FLOW.md) | Text diagrams from source collection to News, Stories, Trends and Radar |
 | [`docs/DATA_FLOW_DIAGRAMS.md`](docs/DATA_FLOW_DIAGRAMS.md) | Mermaid-схемы: Reddit → stories → trends → Reddit Pulse → публикации |
 | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) | Полы качества + регрессионный harness (`engine quality report/check/snapshot`) |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | Что копируется и почему не всё, восстановление, вердикт о ночном прогоне |
 | [`docs/ENGINE_REVIEW_V3.md`](docs/ENGINE_REVIEW_V3.md) | Ревью Engine v3 + план фаз 1–8 со статусом реализации |
 | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) | Canonical immutable Engine workflow, gates and rollback |
 | [`docs/archive/CLUSTER_LAB.md`](docs/archive/CLUSTER_LAB.md) | Deprecated Cluster Lab compatibility guide |

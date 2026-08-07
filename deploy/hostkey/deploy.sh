@@ -60,12 +60,16 @@ echo "📁 Создаю ${REMOTE_DIR} на VPS..."
 ssh "${VPS_USER}@${VPS_HOST}" "sudo mkdir -p ${REMOTE_DIR} && sudo chown ${VPS_USER}:${VPS_USER} ${REMOTE_DIR}"
 
 echo "📦 Копирую исходники + compose + Caddyfile + secrets..."
-ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/src ${REMOTE_DIR}/config"
+# `logs` и `backups` — bind-каталоги на хосте, вне тома `rc_data`. Крон пишет в них с
+# первой же ночи, поэтому они обязаны существовать до установки расписания.
+ssh "${VPS_USER}@${VPS_HOST}" "mkdir -p ${REMOTE_DIR}/src ${REMOTE_DIR}/config ${REMOTE_DIR}/logs ${REMOTE_DIR}/backups"
 scp "${SCRIPT_DIR}/docker-compose.yml" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/Caddyfile" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/Dockerfile.api" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/reddit-compass.cron" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
 scp "${SCRIPT_DIR}/install-cron.sh" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+scp "${SCRIPT_DIR}/selfcheck.sh" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/"
+ssh "${VPS_USER}@${VPS_HOST}" "chmod +x ${REMOTE_DIR}/selfcheck.sh"
 scp "${SECRETS_FILE}" "${VPS_USER}@${VPS_HOST}:${REMOTE_DIR}/.env"
 
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -114,6 +118,20 @@ ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose up -d api cadd
 
 echo "🔄 Рестарт Caddy (Docker DNS refresh)..."
 ssh "${VPS_USER}@${VPS_HOST}" "docker restart rc-caddy"
+
+# Каталог копий пишет контейнер, а создаёт его хостовый пользователь — их uid не
+# совпадают (1002 против 1000), и без этого шага бэкап падает `PermissionError` в
+# первую же ночь. UID спрашивается у самого образа, а не зашивается числом: сменится
+# пользователь в Dockerfile — деплой подстроится сам.
+# `logs` остаётся за хостом: туда пишет перенаправление в кроне и `selfcheck.sh`,
+# то есть хостовый пользователь, а не контейнер.
+echo "🔐 Выдаю контейнеру право писать в каталог копий..."
+CONTAINER_UID="$(ssh "${VPS_USER}@${VPS_HOST}" "cd ${REMOTE_DIR} && docker compose run --rm --entrypoint id reddit-compass -u" | tr -d '\r\n')"
+if [[ "${CONTAINER_UID}" =~ ^[0-9]+$ ]]; then
+    ssh "${VPS_USER}@${VPS_HOST}" "sudo chown -R ${CONTAINER_UID} ${REMOTE_DIR}/backups"
+else
+    echo "⚠️  Не удалось определить uid контейнера — бэкап может не получить прав на запись."
+fi
 
 # Только теперь контейнеры действительно работают на новом коде — можно записать,
 # что именно развёрнуто. Оборвавшийся выше деплой оставит прежний BUILD_INFO, и

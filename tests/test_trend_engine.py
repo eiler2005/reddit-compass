@@ -2476,22 +2476,28 @@ def _seeded_review_trend(
     *,
     actor_by_story: dict[str, str],
     accepted: int = 5,
+    decision: str = "coherent_trend",
 ) -> tuple[list[dict[str, Any]], list[tuple[str, float, str]], dict[str, Any]]:
-    """Общая заготовка: 25 сюжетов, ревью подтверждает `accepted` из показанных."""
+    """Общая заготовка: 25 сюжетов, ревью подтверждает `accepted` из показанных.
+
+    При ``decision="reject"`` состав не называется вовсе: отказ утверждает, что
+    сквозного сюжета нет, и подтверждать ему нечего.
+    """
     _seed_trend_review_release(engine, 25)
     jobs = prepare_trend_review_jobs(engine, "trends_review_test", limit=10)
     shown = jobs[0]["story_ids"]
+    rejected = decision == "reject"
     store_trend_review_response(
         engine,
         target_id="trend_root",
         input_hash=str(jobs[0]["input_hash"]),
         raw_response=json.dumps(
             {
-                "decision": "coherent_trend",
-                "trend_name_ru": "тестовый паттерн",
+                "decision": decision,
+                "trend_name_ru": "" if rejected else "тестовый паттерн",
                 "pattern": "повторяющийся паттерн",
-                "story_ids": shown[:accepted],
-                "evidence_story_ids": shown[:3],
+                "story_ids": [] if rejected else shown[:accepted],
+                "evidence_story_ids": [] if rejected else shown[:3],
                 "counterpoints": [],
                 "domains": [],
                 "confidence": 0.8,
@@ -2560,6 +2566,34 @@ def test_review_recomputes_actors_from_the_surviving_members(tmp_path: Path) -> 
     assert set(confirmed["distinct_actors"]) == {"Actor 0", "Actor 1"}
     assert confirmed["source_count"] == 2
     assert confirmed["story_count"] == len(accepted_memberships)
+
+
+def test_rejected_trend_is_dropped_and_counted(tmp_path: Path) -> None:
+    """Отказ убирает тренд из релиза, и это видно в счётчиках, а не только по разнице.
+
+    Счётчики нужны порознь: падение числа трендов само по себе читается как регрессия,
+    хотя отсев мусора — цель ревью. Без разбивки причину пришлось бы искать SQL-ом.
+    """
+    engine = engine_db(tmp_path / "trend_engine.db")
+    actor_by_story = {f"story_{index:02}": f"Actor {index}" for index in range(25)}
+    stories, memberships, trend = _seeded_review_trend(
+        engine, actor_by_story=actor_by_story, decision="reject"
+    )
+    stats: dict[str, int] = {}
+
+    resolved = apply_cached_trend_reviews(
+        engine,
+        trends=[(trend, memberships)],
+        stories=stories,
+        model="qwen3.7-flash",
+        prompt_version=TREND_REVIEW_PROMPT_VERSION,
+        stats=stats,
+    )
+
+    assert resolved == []
+    assert stats["rejected_trends"] == 1
+    assert stats["thin_after_review_trends"] == 0
+    assert stats["few_actors_after_review_trends"] == 0
 
 
 def test_source_scope_reads_provider_reach_not_the_set_of_counts() -> None:

@@ -33,27 +33,39 @@
 # older Data Release over a newer one.
 
 # Reddit first: Playwright + proxy takes ~50 min for 84 subreddits.
-0 13 * * * flock -n /tmp/rc-reddit.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --sources reddit --stealth --profile broad >> /tmp/rc-reddit.log 2>&1'
+0 13 * * * flock -n /tmp/rc-reddit.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --sources reddit --stealth --profile broad >> /opt/reddit-compass/logs/reddit.log 2>&1'
 
-0 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1'
-10 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1'
-20 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1'
-30 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1'
+0 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /opt/reddit-compass/logs/rss.log 2>&1'
+10 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /opt/reddit-compass/logs/hn.log 2>&1'
+20 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /opt/reddit-compass/logs/ladder.log 2>&1'
+30 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /opt/reddit-compass/logs/ph.log 2>&1'
 
 # Finalize: all JSONL artifacts should exist by now (Reddit from VPS, rest from VPS adapters).
-15 15 * * * flock -n /tmp/rc-finalize.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1'
+15 15 * * * flock -n /tmp/rc-finalize.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /opt/reddit-compass/logs/finalize.log 2>&1'
 
 # Frozen Engine workflow.  A partial run may be inspected, but cannot publish broad.
 # --cross-encoder разбирает серую зону Stories (~6000 пар за минуту на CPU). Без него
 # три пола полноты не берутся: 51.9 multi/1k при поле 65. --review-limit снижен с 80 до 20:
 # построчное LLM-ревью больше не несёт основную нагрузку, оно лишь копит метки.
-0 16 * * * flock -n /tmp/rc-engine.lock -c 'cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --trend-method schema_v3 --cross-encoder --review-limit 20 --trend-review-limit 30 --publish-channel shadow >> /tmp/rc-engine.log 2>&1'
+0 16 * * * flock -n /tmp/rc-engine.lock -c 'cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --trend-method schema_v3 --cross-encoder --review-limit 20 --trend-review-limit 30 --publish-channel shadow >> /opt/reddit-compass/logs/engine.log 2>&1'
 
-# Диск 38GB, и каждая пересборка образа оставляет предыдущий висячим плюс
+# Копия невосстановимого слоя. Ежедневно — сырые наблюдения (`compass.db`, ~66 МБ) и
+# леджер расхода; по понедельникам дополнительно оплаченные ответы модели. Целиком
+# `trend_engine.db` (2.9 ГБ) не копируется: почти весь его объём — производные таблицы
+# релизов, которые пересчитываются из этих двух слоёв. Копии лежат вне тома `rc_data`,
+# иначе одна `docker volume rm` унесла бы и базу, и её резерв.
+0 17 * * * flock -n /tmp/rc-backup.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass backup >> /opt/reddit-compass/logs/backup.log 2>&1'
+
+# Вердикт о прошедшем прогоне одной строкой. Ставится последним: Engine к 16:30 уже
+# закончил, бэкап в 17:00 тоже. Без этой строки отказ конвейера ничем себя не проявляет —
+# стадии пишут каждая в свой лог, и открывать их некому.
+15 17 * * * /opt/reddit-compass/selfcheck.sh >> /opt/reddit-compass/logs/selfcheck.log 2>&1
+
+# Диск 157GB (свободно ~114GB), и каждая пересборка образа оставляет предыдущий висячим плюс
 # несколько гигабайт кэша сборки: двух деплоёв хватает, чтобы упереться в 100%
 # и уронить сборку на середине. Чистится только заведомо ненужное — висячие
 # образы и кэш сверх 2GB. Ни `system prune`, ни `-a`, ни volumes: на этом
 # хосте работают и другие сервисы, их остановленные контейнеры и образы
 # трогать нельзя.
-30 3 * * * docker image prune -f >> /tmp/rc-docker-prune.log 2>&1 && docker builder prune -f --keep-storage 2GB >> /tmp/rc-docker-prune.log 2>&1
+30 3 * * * docker image prune -f >> /opt/reddit-compass/logs/docker-prune.log 2>&1 && docker builder prune -f --keep-storage 2GB >> /opt/reddit-compass/logs/docker-prune.log 2>&1
 # END reddit-compass managed pipeline

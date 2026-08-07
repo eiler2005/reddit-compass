@@ -111,8 +111,31 @@ def create_app() -> FastAPI:
     # ── Health ──────────────────────────────────────────────────────────────
 
     @app.get("/health", tags=["system"])
-    def health() -> dict[str, str]:
-        return {"status": "ok", "service": "reddit-compass"}
+    def health() -> dict[str, Any]:
+        """Жив ли сервис и не устарели ли данные.
+
+        `status` становится `degraded` при простое конвейера: иначе отказ ночного
+        расписания ничем себя не проявляет — контейнер отвечает `ok`, а UI показывает
+        вчерашний выпуск. Код ответа остаётся 200: сервис исправен и отдаёт последнее,
+        что у него есть; деградировали данные, а не он.
+        """
+        from ..intelligence.engine import DEFAULT_ENGINE_DB_PATH, open_engine_readonly
+        from .health import data_freshness
+
+        engine_path = Path(os.environ.get("RC_ENGINE_DB_PATH", str(DEFAULT_ENGINE_DB_PATH)))
+        engine_conn = None
+        try:
+            if engine_path.exists():
+                engine_conn = open_engine_readonly(engine_path)
+            freshness = data_freshness(engine_conn)
+        except sqlite3.Error:
+            # Диагностика свежести не имеет права уронить проверку живости.
+            freshness = data_freshness(None)
+        finally:
+            if engine_conn is not None:
+                engine_conn.close()
+        status = "degraded" if freshness["data_status"] == "stale" else "ok"
+        return {"status": status, "service": "reddit-compass", **freshness}
 
     @app.get("/version", tags=["system"])
     def version() -> dict[str, Any]:

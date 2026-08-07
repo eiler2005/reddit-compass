@@ -746,6 +746,18 @@ async def _review_trend_jobs(
     )
 
 
+async def _cmd_backup(args: argparse.Namespace) -> None:
+    """Резервная копия невосстановимого слоя (см. docs/BACKUP.md)."""
+    from .backup import run_backup
+
+    report = run_backup(
+        Path(args.data_dir),
+        Path(args.dest),
+        weekly=True if args.weekly else None,
+    )
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+
+
 async def _cmd_qwen(args: argparse.Namespace) -> None:
     """Леджер расхода Qwen и прозрачность роутера (см. docs/QWEN_ROUTING.md)."""
     from . import qwen_policy
@@ -2351,6 +2363,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     qwen_pick = qwen_sub.add_parser("pick", help="Какую модель роутер выбрал бы сейчас для задачи")
     qwen_pick.add_argument("--task", choices=["bulk", "synth"], default="bulk")
+    backup_p = sub.add_parser(
+        "backup",
+        parents=[common],
+        help="Копия невосстановимого слоя: сырые наблюдения ежедневно, кэши LLM еженедельно",
+    )
+    backup_p.add_argument("--data-dir", default="/data", help="Каталог с базами")
+    backup_p.add_argument("--dest", default="/backups", help="Куда класть копии")
+    backup_p.add_argument(
+        "--weekly",
+        action="store_true",
+        help="Снять кэши LLM независимо от дня недели (обычно только в понедельник)",
+    )
+
     sub.add_parser("radar", parents=[common], help="Trend radar: отчёт с ссылками (без LLM)")
     sub.add_parser("hn", parents=[common], help="Hacker News: AI-stories через Algolia API")
     sub.add_parser(
@@ -3160,6 +3185,7 @@ def main() -> None:
         "db": _cmd_db,
         "lab": _cmd_lab,
         "qwen": _cmd_qwen,
+        "backup": _cmd_backup,
     }
     handler = handlers.get(args.command)
     if handler is None:
