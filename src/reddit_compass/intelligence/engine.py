@@ -4522,6 +4522,7 @@ def _llm_schema_resolver(
     from .trend_schema import (
         _domain_label,
         _story_domains,
+        compose_trend_name,
         has_out_of_scope_domain,
         is_non_actor,
         is_out_of_scope,
@@ -4559,7 +4560,7 @@ def _llm_schema_resolver(
         domain = domains[0] if domains else ""
         domain_label = _domain_label(domain)
         key = f"{action_key}|{domain}" if domain else action_key
-        name = f"{label} {domain_label}".strip() if domain_label else label
+        name = compose_trend_name(label, domain_label)
         return key, name, actor
 
     return resolve

@@ -895,3 +895,46 @@ def test_bad_name_metric_reports_reasons_and_examples() -> None:
     assert sum(reasons.values()) == len(_BAD_TREND_NAMES)
     assert reasons["filler_word"] == 5
     assert reasons["token_bag"] == 4
+
+
+def test_residual_bucket_name_does_not_pretend_to_be_a_parent() -> None:
+    """«model releases» рядом с «model releases in AI» читается как родитель, а он сосед.
+
+    Имя без домена достаётся сюжетам, у которых домен пуст или не попал в словарь
+    меток. Замер 7 августа: 16 таких трендов из 98, и каждый выглядел обобщением своих
+    доменных соседей. Иерархии при этом нет — ключ схемы это пара (действие, домен),
+    поэтому сюжет попадает ровно в одну корзину: 956 связей на 956 различных сюжетов,
+    ноль пересечений. Чинить нужно имя, а не группировку.
+    """
+    from reddit_compass.intelligence.quality import trend_name_defect
+    from reddit_compass.intelligence.trend_schema import compose_trend_name
+
+    named = compose_trend_name("model releases", "in AI")
+    residual = compose_trend_name("model releases", "")
+
+    assert named == "model releases in AI"
+    assert residual == "model releases in other domains"
+    # Пометка не должна превращать нормальное имя в дефектное.
+    assert trend_name_defect(residual) == ""
+    assert trend_name_defect(named) == ""
+
+
+def test_both_schema_generations_name_the_residual_bucket_alike() -> None:
+    """v2 и v3 обязаны называть остаточную корзину одинаково.
+
+    Иначе сравнение поколений мерило бы ещё и разницу в именовании.
+    """
+    from reddit_compass.intelligence.trend_schema import story_schema
+
+    # Домена нет вовсе (`other` отфильтровывается) — имя достаётся без доменной части.
+    story = _story("s", "Anthropic launches a new reasoning model", "2026-08-01", "other")
+    result = story_schema(story)
+
+    assert result is not None
+    assert result[1].endswith("in other domains")
+
+    schemas = {title_key(story["title"]): {"is_event": True, "key": "launch", "actor": "Anthropic"}}
+    v3 = _llm_schema_resolver(schemas)(story)
+
+    assert v3 is not None
+    assert v3[1] == result[1]

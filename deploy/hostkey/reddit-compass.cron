@@ -2,13 +2,14 @@
 # All timestamps are UTC.  VPS is fully autonomous (scheme D).
 # Reddit collected via Playwright + residential proxy (REDDIT_COMPASS_ENGINE=playwright,
 # REDDIT_COMPASS_PROXIES from .env).  Mac fetch-and-sync.sh is fallback only.
-# PIPELINE ПОКА НЕ ВКЛЮЧЁН. Строки конвейера ниже закомментированы намеренно: даже
-# случайный запуск `install-cron.sh` не должен активировать ночные прогоны. Условие
-# владельца — два ручных цикла до включения; 6 августа прошёл первый.
+# PIPELINE ВКЛЮЧЁН 2026-08-07, ежедневно. Условие владельца выполнено: два ручных
+# цикла прошли чисто — 6 августа (3026 материалов) и 7 августа (3068), оба с покрытием
+# 21/21 изданий и пятнадцатью взятыми полами качества.
 #
-# Шаблон готов к ежедневному режиму: расписание, раздельные замки и параметры уже
-# выверены. Для включения снять `# ` со строк конвейера и запустить
-# `INSTALL_CRON=1 ./deploy/hostkey/deploy.sh`.
+# Публикуется только shadow. Broad не переключается автоматически ни при каких
+# условиях: это отдельная ручная команда после просмотра shadow глазами. Ровно эта
+# граница дважды спасла выпуск 6 августа, когда в shadow лежали мусорные имена трендов
+# и потерянная вдвое склейка.
 #
 # Замеры ручного цикла 6 августа, по которым выбрано расписание:
 #   Reddit через Playwright + proxy  ~58 мин (84 сабреддита)
@@ -32,21 +33,21 @@
 # older Data Release over a newer one.
 
 # Reddit first: Playwright + proxy takes ~50 min for 84 subreddits.
-# 0 13 * * * flock -n /tmp/rc-reddit.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --sources reddit --stealth --profile broad >> /tmp/rc-reddit.log 2>&1'
+0 13 * * * flock -n /tmp/rc-reddit.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --sources reddit --stealth --profile broad >> /tmp/rc-reddit.log 2>&1'
 
-# 0 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1'
-# 10 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1'
-# 20 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1'
-# 30 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1'
+0 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass rss >> /tmp/rc-rss.log 2>&1'
+10 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass hn >> /tmp/rc-hn.log 2>&1'
+20 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ladder >> /tmp/rc-ladder.log 2>&1'
+30 14 * * * flock -n /tmp/rc-adapters.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass ph >> /tmp/rc-ph.log 2>&1'
 
 # Finalize: all JSONL artifacts should exist by now (Reddit from VPS, rest from VPS adapters).
-# 15 15 * * * flock -n /tmp/rc-finalize.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1'
+15 15 * * * flock -n /tmp/rc-finalize.lock -c 'cd /opt/reddit-compass && docker compose run --rm reddit-compass collect --from-snapshots --profile broad --sources reddit,hn,rss,ladder,ph --date $(date -u +\%F) >> /tmp/rc-finalize.log 2>&1'
 
 # Frozen Engine workflow.  A partial run may be inspected, but cannot publish broad.
 # --cross-encoder разбирает серую зону Stories (~6000 пар за минуту на CPU). Без него
 # три пола полноты не берутся: 51.9 multi/1k при поле 65. --review-limit снижен с 80 до 20:
 # построчное LLM-ревью больше не несёт основную нагрузку, оно лишь копит метки.
-# 0 16 * * * flock -n /tmp/rc-engine.lock -c 'cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --trend-method schema_v3 --cross-encoder --review-limit 20 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1'
+0 16 * * * flock -n /tmp/rc-engine.lock -c 'cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --trend-method schema_v3 --cross-encoder --review-limit 20 --trend-review-limit 12 --publish-channel shadow >> /tmp/rc-engine.log 2>&1'
 
 # Диск 38GB, и каждая пересборка образа оставляет предыдущий висячим плюс
 # несколько гигабайт кэша сборки: двух деплоёв хватает, чтобы упереться в 100%

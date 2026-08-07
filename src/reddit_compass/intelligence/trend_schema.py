@@ -499,6 +499,30 @@ def _schema_domain(schema_key: str) -> str:
     return domain
 
 
+# Суффикс для корзины без домена. Читателю в списке рядом стоят «model releases» и
+# «model releases in AI», и он естественно решает, что первое включает второе — то есть
+# что это родитель и ребёнок. На деле они **соседи**: имя без домена достаётся сюжетам,
+# у которых домен пуст или не попал в словарь меток. Замер 7 августа: 16 таких трендов
+# из 98, и все выглядели обобщением своих доменных соседей.
+#
+# Иерархии здесь нет: ключ схемы — пара (действие, домен), поэтому сюжет попадает ровно
+# в одну корзину. Проверено на релизе: 956 связей на 956 различных сюжетов, ноль
+# пересечений. Чинить нужно имя, а не группировку.
+# Форма «in X» выбрана не для красоты: имя обязано пройти `trend_name_defect`. Вариант
+# «model releases (прочие домены)» тот отвергал как мешок токенов — четыре знаменательных
+# слова без единой связки, ровно тот признак, по которому ловятся имена embedding_v2.
+# Собственный классификатор, отвергающий наше же имя, — сигнал, что имя действительно
+# нетипичное, а не повод делать для него исключение.
+_UNMAPPED_DOMAIN_SUFFIX = "in other domains"
+
+
+def compose_trend_name(label: str, domain_label: str) -> str:
+    """Имя тренда из метки действия и метки домена."""
+    if domain_label:
+        return f"{label} {domain_label}".strip()
+    return f"{label} {_UNMAPPED_DOMAIN_SUFFIX}"
+
+
 def story_schema(story: dict[str, Any]) -> tuple[str, str, str] | None:
     """Схема сюжета: ``(ключ_схемы, метка, актор)``. ``None`` — схемы нет.
 
@@ -519,7 +543,7 @@ def story_schema(story: dict[str, Any]) -> tuple[str, str, str] | None:
     domain = domains[0] if domains else ""
     domain_label = _domain_label(domain)
     key = f"{action_key}|{domain}" if domain else action_key
-    name = f"{label} {domain_label}".strip() if domain_label else label
+    name = compose_trend_name(label, domain_label)
     return key, name, extract_actor(title)
 
 
