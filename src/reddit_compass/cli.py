@@ -1970,6 +1970,24 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                 if _engine_review_requested(args)
                 else None
             )
+            # Отдельный runner для извлечения схем: стадия зашита в лямбду, поэтому
+            # переиспользование `review_runner` помечало бы извлечение как ревью. Замер
+            # 7 августа: 156 вызовов за ночь, все с меткой `trend_review`, хотя 124 из
+            # них были извлечением — разбивка по стадиям, ради которой колонка `stage`
+            # и вводилась, теряла смысл.
+            schema_runner = (
+                (
+                    lambda prompt, model: call_qwen_json(
+                        prompt,
+                        model=model,
+                        endpoint=cycle_endpoint or None,
+                        think=False,
+                        stage="schema_extract",
+                    )
+                )
+                if _engine_review_requested(args)
+                else None
+            )
             try:
                 result = await run_engine_cycle(
                     corpus_conn,
@@ -1981,6 +1999,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     pack_by_subreddit=pack_by_subreddit,
                     trend_method=args.trend_method,
                     trend_depth=int(args.trend_depth),
+                    schema_runner=schema_runner,
                     embed_model=args.embed_model,
                     review_model=args.review_model,
                     review_limit=int(args.review_limit),

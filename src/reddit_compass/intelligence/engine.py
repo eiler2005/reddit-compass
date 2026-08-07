@@ -6879,6 +6879,10 @@ async def run_engine_cycle(
     trend_review_model: str = "qwen3.7-flash",
     trend_review_limit: int = 0,
     review_runner: Callable[[str, str], Awaitable[str]] | None = None,
+    # Отдельный runner для извлечения схем. Стадия зашита в лямбду вызывающего,
+    # поэтому переиспользование `review_runner` помечало извлечение как ревью и ломало
+    # разбивку расхода по стадиям. Пусто — используется `review_runner`, как раньше.
+    schema_runner: Callable[[str, str], Awaitable[str]] | None = None,
     publish_channel: str | None = None,
     allow_partial: bool = True,
     pulse: bool = True,
@@ -7029,7 +7033,7 @@ async def run_engine_cycle(
         schema_extract_stats = await _warm_schema_cache(
             conn,
             story_release_id=stories.story_release_id,
-            runner=review_runner,
+            runner=schema_runner or review_runner,
             model=review_model,
         )
     trends = create_trend_release(

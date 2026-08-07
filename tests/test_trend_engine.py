@@ -3056,3 +3056,51 @@ def test_merge_model_never_decides_the_gray_zone() -> None:
         assert candidate.decision == baseline.decision
         assert candidate.reason == baseline.reason
         assert "merge_model_score" not in candidate.features
+
+
+def test_schema_extraction_is_billed_to_its_own_stage(tmp_path: Path) -> None:
+    """Извлечение схем не должно списываться на стадию ревью.
+
+    Стадия зашита в лямбду вызывающего, поэтому переиспользование `review_runner`
+    помечало извлечение как `trend_review`. Замер 7 августа: 156 вызовов за ночь, все с
+    меткой ревью, хотя 124 из них были извлечением (1231 заголовок при батче 10).
+    Разбивка расхода по стадиям, ради которой колонка `stage` и вводилась, теряла смысл.
+    """
+    import asyncio
+
+    from reddit_compass.intelligence.engine import _warm_schema_cache
+
+    engine = engine_db(tmp_path / "trend_engine.db")
+    engine.execute(
+        """INSERT INTO story_releases
+           (story_release_id, facet_release_id, method, params_hash, status,
+            metrics_json, created_at)
+           VALUES ('SR', 'FR', 'hybrid_v2', 'p', 'evaluated', '{}', '2026-08-07T00:00:00Z')"""
+    )
+    engine.execute(
+        """INSERT INTO engine_stories (story_release_id, story_id, canonical_key, title)
+           VALUES ('SR', 's0', 'k0', 'OpenAI launches a model')"""
+    )
+    engine.commit()
+
+    used: list[str] = []
+
+    async def schema_only(prompt: str, model: str) -> str:
+        del model
+        used.append("schema")
+        return json.dumps(
+            {"results": [{"i": 1, "event": True, "actor": "X", "action": "did", "key": "launch"}]}
+        )
+
+    async def review_only(prompt: str, model: str) -> str:
+        del prompt, model
+        used.append("review")
+        return "{}"
+
+    asyncio.run(
+        _warm_schema_cache(engine, story_release_id="SR", runner=schema_only, model="qwen3.7-flash")
+    )
+
+    # Прогрев обращается к переданному ему runner, а не к тому, что размечен как ревью.
+    assert used == ["schema"]
+    assert "review" not in used
