@@ -165,6 +165,18 @@ def test_yesterday_artifacts_do_not_colour_today_green(tmp_path: Path) -> None:
     assert {s["key"]: s["state"] for s in report["stages"]}["freeze"] == STATE_PENDING
 
 
+def test_unreachable_source_is_a_problem_not_a_pending_stage() -> None:
+    """Сбой чтения не имеет права выглядеть как «ещё не начиналось».
+
+    Прежде и недоступная база, и не наступивший срок давали одно `pending`, то есть
+    поломка читалась как благополучие — тот же рисунок, что в `/health` и `selfcheck.sh`.
+    """
+    report = pipeline_status(None, None, now=BEFORE_ENGINE)
+    states = {stage["key"]: stage["state"] for stage in report["stages"]}
+    assert states["collect"] == STATE_LATE
+    assert states["trends"] == STATE_LATE
+
+
 def test_manual_broad_switch_is_stated_plainly(tmp_path: Path) -> None:
     report = pipeline_status(_engine_with(tmp_path), _corpus(tmp_path), now=MID_CYCLE)
     assert "вручную" in report["channel_note"]

@@ -640,6 +640,13 @@ REGRESSION_METRICS: dict[str, float] = {
     "taxonomy_other_share": 5,
     "trends_bad_name_count": 0,
     "trends_duplicate_name_count": 0,
+    # Пол `trends_count` стоит на единице и ловит только полный обвал. Частичный —
+    # 93 тренда против пяти — проходил все шестнадцать полов молча. Абсолютным порогом
+    # это не чинится: значение, подогнанное под боевые 87–104, блокировало бы законно
+    # тихое окно (первая попытка с порогом 10 сразу уронила фикстуру чистого релиза).
+    # Сравнение с baseline свободно от подгонки: допуск 40 переживает обычный разброс
+    # (за три дня 104 → 98 → 93), но падение вдвое остановит публикацию.
+    "trends_count": 40,
 }
 
 
@@ -648,7 +655,14 @@ def evaluate_regressions(metrics: dict[str, Any], baseline: dict[str, Any]) -> l
     для cross_source и per-1k полноты — падение сверх допуска."""
 
     _lower_is_regression = frozenset(
-        {"stories_cross_source", "stories_multi_per_1k", "stories_cross_source_per_1k"}
+        {
+            "stories_cross_source",
+            "stories_multi_per_1k",
+            "stories_cross_source_per_1k",
+            # Тренды: регрессия — это когда их стало меньше. Рост слоя ограничен другими
+            # полами (дефектные и дублирующиеся имена), поэтому сверху допуск не нужен.
+            "trends_count",
+        }
     )
     out: list[dict[str, Any]] = []
     for metric, tol in REGRESSION_METRICS.items():

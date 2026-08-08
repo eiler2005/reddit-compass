@@ -48,6 +48,23 @@ def test_collapsed_trend_layer_fails_a_floor() -> None:
     assert all(r.passed for r in evaluate_floors({"trends_count": 98}))
 
 
+def test_partial_trend_collapse_is_caught_by_regression_not_by_the_floor() -> None:
+    """Пол ловит только ноль; половину слоя обязана поймать регрессия к baseline.
+
+    Абсолютным порогом это не чинится: значение под боевые 87–104 блокировало бы законно
+    тихое окно. Сравнение с эталонным релизом от подгонки свободно.
+    """
+    baseline = {"trends_count": 93}
+    normal = {r["metric"]: r for r in evaluate_regressions({"trends_count": 87}, baseline)}
+    collapsed = {r["metric"]: r for r in evaluate_regressions({"trends_count": 5}, baseline)}
+
+    assert normal["trends_count"]["regressed"] is False
+    assert collapsed["trends_count"]["regressed"] is True
+    # Рост слоя регрессией не считается — его ограничивают полы на качество имён.
+    grown = {r["metric"]: r for r in evaluate_regressions({"trends_count": 140}, baseline)}
+    assert grown["trends_count"]["regressed"] is False
+
+
 def test_completeness_floors_separate_collapsed_from_working_releases() -> None:
     """Полы полноты обязаны лежать в зазоре между схлопыванием и рабочей полосой.
 

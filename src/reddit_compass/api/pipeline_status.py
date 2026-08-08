@@ -81,8 +81,11 @@ def _expected_state(now: datetime, deadline: time, grace: timedelta) -> str:
 
 
 def _collection_stage(corpus_conn: sqlite3.Connection | None, today: str, now: datetime) -> Stage:
+    # Сбой чтения — не «ещё не начиналось». Прежде и недоступная база, и не наступивший
+    # срок давали одно `pending`, то есть поломка выглядела благополучием — тот же
+    # рисунок, что в `/health` и в `selfcheck.sh`.
     if corpus_conn is None:
-        return Stage("collect", "Сбор источников", STATE_PENDING, "нет доступа к корпусу")
+        return Stage("collect", "Сбор источников", STATE_LATE, "нет доступа к корпусу")
     try:
         row = corpus_conn.execute(
             "SELECT run_id, status, started_at, finished_at FROM runs WHERE snapshot_date = ? "
@@ -90,7 +93,7 @@ def _collection_stage(corpus_conn: sqlite3.Connection | None, today: str, now: d
             (today,),
         ).fetchone()
     except sqlite3.Error:
-        return Stage("collect", "Сбор источников", STATE_PENDING, "журнал запусков недоступен")
+        return Stage("collect", "Сбор источников", STATE_LATE, "журнал запусков недоступен")
     if row is None:
         return Stage(
             "collect",
@@ -163,7 +166,7 @@ def pipeline_status(
             ("trends", "Тренды"),
             ("publish", "Публикация"),
         ):
-            stages.append(Stage(key, title, STATE_PENDING, "движок недоступен"))
+            stages.append(Stage(key, title, STATE_LATE, "движок недоступен"))
         return {"date": today, "stages": [s.as_dict() for s in stages], "channel_note": ""}
 
     data_row = _latest(
