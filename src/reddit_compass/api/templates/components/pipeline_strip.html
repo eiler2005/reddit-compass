@@ -1,0 +1,31 @@
+{# Состояние сегодняшнего конвейера. Страница показывала дату последнего выпуска и
+   молчала о том, почему она такая: открыв сайт в разгар прогона, читатель видел вчерашнее
+   число и не мог отличить «сегодняшнее ещё считается» от «сломалось неделю назад».
+
+   Состояний три, и «идёт прямо сейчас» среди них нет намеренно. Сделанной стадия
+   называется только по наблюдаемому артефакту с его временем; всё остальное —
+   ожидание либо задержка. Изнутри базы неотличимо, работает стадия или упала минуту
+   назад, и выдавать одно за другое нельзя. #}
+{% if pipeline and pipeline.stages %}
+<section class="pipeline-strip" aria-label="Состояние конвейера за {{ pipeline.date }}">
+    <h2 class="pipeline-strip-title">Конвейер · {{ pipeline.date }}</h2>
+    <ol class="pipeline-strip-list">
+        {% for stage in pipeline.stages %}
+        <li class="pipeline-strip-item pipeline-strip-{{ stage.state }}">
+            <span class="pipeline-strip-dot" aria-hidden="true"></span>
+            <div class="pipeline-strip-body">
+                <strong>{{ stage.title }}</strong>
+                <span class="pipeline-strip-detail">
+                    {%- if stage.state == 'done' %}{{ stage.at }} · {{ stage.detail }}
+                    {%- elif stage.state == 'late' %}задерживается — {{ stage.detail }}
+                    {%- else %}{{ stage.detail }}{% endif -%}
+                </span>
+            </div>
+        </li>
+        {% endfor %}
+    </ol>
+    {% if pipeline.channel_note %}
+    <p class="pipeline-strip-note">{{ pipeline.channel_note }}</p>
+    {% endif %}
+</section>
+{% endif %}

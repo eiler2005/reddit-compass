@@ -8,6 +8,8 @@
         <h1 class="date-title">Сегодня · {{ radar.date }}</h1>
     </div>
 
+    {% include "components/pipeline_strip.html" %}
+
     <div class="freshness-bar today-freshness">
         <span class="status-badge status-{{ radar.input_status }}">{{ radar.input_status }}</span>
         <span class="freshness-text">

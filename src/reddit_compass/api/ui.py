@@ -43,6 +43,7 @@ from ..intelligence.repository import (
 from ..intelligence.taxonomy import BROAD_DOMAINS
 from ..versioning import assets_version
 from .dates import display_date, sort_key
+from .pipeline_status import pipeline_status
 from .view_models import cluster_label
 
 router = APIRouter()
@@ -1061,13 +1062,20 @@ async def today_page(
     conn: sqlite3.Connection = Depends(_get_db),
 ) -> HTMLResponse:
     """Главная страница: briefing на сегодня."""
-    del conn
     selected_sort = _safe_today_sort(sort)
     engine_path = _engine_path()
+    pipeline_payload: dict[str, Any] = {}
     if engine_path.exists():
         engine_conn = open_engine_readonly(engine_path)
         try:
             published_radar = _load_today_engine_radar(engine_conn, date=date, profile=profile)
+            # Полоса конвейера отвечает на вопрос, который раньше страница оставляла без
+            # ответа: почему сегодня показана именно эта дата. Диагностика не имеет права
+            # уронить главную страницу, поэтому её отказ гасится в пустую полосу.
+            try:
+                pipeline_payload = pipeline_status(engine_conn, conn)
+            except sqlite3.Error:
+                pipeline_payload = {}
         finally:
             engine_conn.close()
 
@@ -1154,6 +1162,7 @@ async def today_page(
                     # превращало /today в /today?date=<тот день>. Читатель после этого
                     # оставался на нём и не видел следующую публикацию.
                     "requested_date": date or "",
+                    "pipeline": pipeline_payload,
                     "reddit_quotas": {
                         "per_type": _NEW_REDDIT_PER_TYPE,
                         "per_subreddit": _NEW_REDDIT_PER_SUBREDDIT,
