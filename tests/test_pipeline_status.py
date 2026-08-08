@@ -181,3 +181,38 @@ def test_promotion_rule_is_stated_plainly(tmp_path: Path) -> None:
     report = pipeline_status(_engine_with(tmp_path), _corpus(tmp_path), now=MID_CYCLE)
     assert "автоматически" in report["channel_note"]
     assert "полы качества" in report["channel_note"]
+
+
+def _publish(conn: object, channel: str, at: str) -> None:
+    conn.execute(  # type: ignore[attr-defined]
+        """INSERT INTO radar_publications
+           (publication_id, channel, data_release_id, story_release_id, trend_release_id,
+            input_status, created_at)
+           VALUES (?, ?, 'release_x', 'stories_x', 'trends_x', 'complete', ?)""",
+        (f"publication_{channel}", channel, at),
+    )
+    conn.commit()  # type: ignore[attr-defined]
+
+
+def test_release_refused_by_the_gate_is_visible(tmp_path: Path) -> None:
+    """Отклонённое продвижение обязано быть видно, иначе сайт замирает молча.
+
+    Гейт применяется только к `broad`; shadow публикуется всегда. Пока стадия мерилась
+    «любой публикацией», выпуск, не прошедший гейт, выглядел успехом: полоса писала
+    «Публикация ✓ канал shadow», возраст данных не дотягивал до порога `/health`, и
+    вердикт сообщал OK — при том что на сайте оставался вчерашний выпуск.
+    """
+    engine = _engine_with(tmp_path, stories=True, trends=True)
+    corpus = _corpus(tmp_path)
+    _publish(engine, "shadow", f"{TODAY}T16:21:00Z")
+
+    def publish_stage() -> dict[str, str]:
+        stages = pipeline_status(engine, corpus, now=LONG_AFTER)["stages"]
+        return {s["key"]: s for s in stages}["publish"]  # type: ignore[index,union-attr]
+
+    assert publish_stage()["state"] == STATE_LATE
+    assert "не прошёл гейт" in publish_stage()["detail"]
+
+    _publish(engine, "broad", f"{TODAY}T16:22:00Z")
+    assert publish_stage()["state"] == STATE_DONE
+    assert publish_stage()["detail"] == "выпуск на сайте"

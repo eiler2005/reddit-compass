@@ -212,24 +212,49 @@ def pipeline_status(
         else:
             stages.append(Stage(key, title, STATE_DONE, done_detail, _hhmm(str(row["created_at"]))))
 
-    if shadow_row is None:
+    # Стадию публикации меряем по каналу `broad`, а не по любому. Гейт применяется только
+    # к нему: shadow публикуется всегда, поэтому «есть какая-то публикация» ничего не
+    # говорит читателю. Выпуск, отклонённый гейтом, оставлял shadow свежим, broad
+    # вчерашним — и все три сигнала наблюдаемости отвечали «всё хорошо», пока сайт молча
+    # стоял: полоса показывала «Публикация ✓ канал shadow», возраст данных был под
+    # 36-часовым порогом, вердикт писал OK. Автоматическое продвижение сделало этот
+    # разрыв возможным, значит он обязан быть видимым.
+    broad_row = _latest(
+        engine_conn,
+        "SELECT publication_id, channel, created_at FROM radar_publications "
+        "WHERE created_at >= ? AND channel = 'broad' ORDER BY created_at DESC LIMIT 1",
+        since,
+    )
+    if broad_row is not None:
+        stages.append(
+            Stage(
+                "publish",
+                "Публикация",
+                STATE_DONE,
+                "выпуск на сайте",
+                _hhmm(str(broad_row["created_at"])),
+            )
+        )
+    elif shadow_row is not None:
+        # Выпуск построен и опубликован в служебный канал, но на сайт не пущен. Это не
+        # ожидание: конвейер свою работу закончил, решение уже принято и оно
+        # отрицательное.
+        stages.append(
+            Stage(
+                "publish",
+                "Публикация",
+                STATE_LATE,
+                "выпуск построен, но не прошёл гейт качества — на сайте прежний",
+                _hhmm(str(shadow_row["created_at"])),
+            )
+        )
+    else:
         stages.append(
             Stage(
                 "publish",
                 "Публикация",
                 _expected_state(moment, ENGINE_STARTS_AT, ENGINE_GRACE),
                 engine_expected,
-            )
-        )
-    else:
-        channel = str(shadow_row["channel"])
-        stages.append(
-            Stage(
-                "publish",
-                "Публикация",
-                STATE_DONE,
-                f"канал {channel}",
-                _hhmm(str(shadow_row["created_at"])),
             )
         )
 
