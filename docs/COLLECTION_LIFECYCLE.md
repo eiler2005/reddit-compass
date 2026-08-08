@@ -14,8 +14,11 @@
 
 1. **Collection complete** — все *запрошенные* адаптеры записали и успешно отдали
    snapshot-артефакты; raw-факты зафиксированы в `compass.db`.
-2. **Broad Radar published** — complete Data Release прошёл stories, trends, quality gate
-   и вручную опубликован в production-канал `broad`.
+2. **Broad Radar published** — complete Data Release прошёл stories, trends и quality gate,
+   после чего продвинут в production-канал `broad`. С 8 августа 2026 продвижение
+   автоматическое, но проходит через гейт из двух половин: абсолютные полы и регрессии
+   к эталонному выпуску. Человека здесь больше нет — он стоял на страже дефектов,
+   которые теперь ловятся автоматикой (см. `AUTOMATED_PIPELINE.md`).
 
 Первое не зависит от Qwen. Второе зависит от качества, но никогда не переписывает сырые данные.
 Если Qwen недоступен, collection всё равно может быть complete; Engine создаёт
@@ -290,9 +293,11 @@ Pipeline запускается **каждые 2 ночи** (нечётные д
 14:10 UTC  VPS Hacker News snapshot
 14:20 UTC  VPS Ladder snapshot
 14:30 UTC  VPS ProductHunt snapshot
-14:45 UTC  collect --from-snapshots: один raw broad run, без сети и LLM
+15:15 UTC  collect --from-snapshots: один raw broad run, без сети и LLM
 16:00 UTC  engine cycle: frozen release → stories → bounded Qwen → trends → quality → shadow
-manual      inspect `/runs`/`/engine`, then publish complete gated version to `broad`
+           → при пройденном гейте продвижение в broad тем же прогоном
+17:00 UTC  backup: копия невосстановимого слоя
+17:15 UTC  selfcheck: вердикт о прогоне одной строкой
 ```
 
 Cron-выражение: `*/2` в day-of-month (1, 3, 5, …, 29, 31). Настоящая host-cron
@@ -322,11 +327,15 @@ Cron-выражение: `*/2` в day-of-month (1, 3, 5, …, 29, 31). Наст�
 | | **Итого весь pipeline** | | **~20 мин** | **~40-90 мин** | |
 
 После этапа 10 GUI обновляется автоматически — все страницы (`/today`, `/news`, `/trends`,
-`/pulse`, `/radar`) читают immutable publication pointer. Ручная публикация в `broad`
-требует инспекции shadow-версии и явного `engine publish --channel broad`.
+`/pulse`, `/radar`) читают immutable publication pointer. Продвижение в `broad` тоже
+автоматическое и происходит в том же прогоне, если выпуск прошёл гейт; ручная команда
+`engine publish --channel broad` остаётся для внепланового выпуска, а `engine rollback` —
+для возврата указателя.
 
-**Почему VPS медленнее в 5-10 раз:** 1 CPU против 18 ядер, 1 GB RAM против 64 GB,
-сетевые вызовы через residential proxy (latency + ретраи на 429). Qwen review —
+**Почему VPS медленнее:** сетевые вызовы через residential proxy (latency + ретраи на 429)
+и вчетверо меньше ядер под cross-encoder. Прежняя формулировка «1 CPU против 18 ядер,
+1 GB RAM против 64 GB» относилась к первоначальному тарифу и устарела: на хосте 8 ядер и
+15 ГБ, контейнеру выдано 4 ядра и 4 ГБ. Qwen review —
 основной bottleneck на обеих платформах (зависит от API latency, не от CPU).
 
 ## 6. Работа на старых данных без сети
