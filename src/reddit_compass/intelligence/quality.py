@@ -684,6 +684,11 @@ def evaluate_regressions(metrics: dict[str, Any], baseline: dict[str, Any]) -> l
     return out
 
 
+# Единый путь эталона: раньше он был зашит строкой только в CLI, и гейт публикации
+# не мог его найти, не повторяя литерал.
+DEFAULT_BASELINE_PATH = Path("config/quality_baselines.json")
+
+
 def load_baseline(path: Path) -> dict[str, Any]:
     data: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
     return data

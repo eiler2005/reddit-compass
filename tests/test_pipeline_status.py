@@ -177,6 +177,7 @@ def test_unreachable_source_is_a_problem_not_a_pending_stage() -> None:
     assert states["trends"] == STATE_LATE
 
 
-def test_manual_broad_switch_is_stated_plainly(tmp_path: Path) -> None:
+def test_promotion_rule_is_stated_plainly(tmp_path: Path) -> None:
     report = pipeline_status(_engine_with(tmp_path), _corpus(tmp_path), now=MID_CYCLE)
-    assert "вручную" in report["channel_note"]
+    assert "автоматически" in report["channel_note"]
+    assert "полы качества" in report["channel_note"]

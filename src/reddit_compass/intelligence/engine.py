@@ -12,6 +12,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import random
 import re
 import sqlite3
@@ -5971,7 +5972,37 @@ def _release_passes_publication_gate(
         signal_release_id=signal_release_id,
     )
     floors = evaluate_floors(metrics)
-    return bool(floors) and all(floor.passed for floor in floors)
+    if not floors or not all(floor.passed for floor in floors):
+        return False
+    # Регрессии — вторая половина гейта, и без неё автоматическая публикация обесценивает
+    # часть защит. Полы абсолютны и по построению не знают, каким выпуск был вчера:
+    # падение слоя трендов с 93 до пяти проходит их молча, потому что пол стоит на
+    # единице. Ровно так же 6 августа склейку 944 → 390 поймали регрессии, а не полы.
+    #
+    # Отсутствие baseline не запрещает публикацию: у свежей установки его нет, и
+    # требовать сравнение не с чем. Это ослабление осознанное и узкое — полы работают
+    # всегда, регрессии добавляются, как только эталон записан.
+    return not _has_regression(metrics)
+
+
+def _has_regression(metrics: dict[str, Any]) -> bool:
+    """Есть ли просадка относительно записанного эталонного выпуска."""
+    from .quality import DEFAULT_BASELINE_PATH, evaluate_regressions, load_baseline
+
+    path = Path(os.environ.get("RC_QUALITY_BASELINE_PATH", str(DEFAULT_BASELINE_PATH)))
+    if not path.exists():
+        return False
+    try:
+        baseline = load_baseline(path)
+    except (OSError, ValueError):
+        # Битый или недоступный эталон — не повод считать выпуск испорченным; полы уже
+        # пройдены. Но и молчать нельзя: без этой строки подмена файла тихо отключила бы
+        # половину гейта.
+        logging.getLogger("reddit_compass").warning(
+            "baseline недоступен, регрессии не проверены: %s", path
+        )
+        return False
+    return any(item["regressed"] for item in evaluate_regressions(metrics, baseline))
 
 
 def publish_radar(
@@ -6904,6 +6935,7 @@ async def run_engine_cycle(
     # разбивку расхода по стадиям. Пусто — используется `review_runner`, как раньше.
     schema_runner: Callable[[str, str], Awaitable[str]] | None = None,
     publish_channel: str | None = None,
+    promote_channel: str | None = None,
     allow_partial: bool = True,
     pulse: bool = True,
     history_window_days: int = 7,
@@ -7145,6 +7177,7 @@ async def run_engine_cycle(
     quality_passed = bool(quality_report["passed"])
     publication_id = ""
     publication_blocked_reason = ""
+    promoted_publication_id = ""
     if publish_channel:
         # A partial corpus is useful for an explicitly opted-in shadow/preview
         # publication, but must never reach a production channel.  Keep this
@@ -7167,8 +7200,23 @@ async def run_engine_cycle(
                 signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
             )
             publication_id = publication.publication_id
+            if promote_channel and promote_channel != publish_channel:
+                # Продвижение — отдельная публикация, а не переименование канала: shadow
+                # остаётся записью «что построено», broad становится записью «что
+                # одобрено», и у отката есть куда возвращаться. Гейт проверяется заново
+                # и для broad строже: частичный корпус сюда не проходит ни при каких
+                # флагах.
+                promoted = publish_radar(
+                    conn,
+                    story_release_id=stories.story_release_id,
+                    trend_release_id=trends.trend_release_id,
+                    channel=promote_channel,
+                    signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
+                )
+                promoted_publication_id = promoted.publication_id
     return {
         "data_release_id": data.release_id,
+        "promoted_publication_id": promoted_publication_id,
         "facet_release_id": facets.facet_release_id,
         "story_release_id": stories.story_release_id,
         "trend_release_id": trends.trend_release_id,

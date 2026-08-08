@@ -6,10 +6,19 @@
 # цикла прошли чисто — 6 августа (3026 материалов) и 7 августа (3068), оба с покрытием
 # 21/21 изданий и пятнадцатью взятыми полами качества.
 #
-# Публикуется только shadow. Broad не переключается автоматически ни при каких
-# условиях: это отдельная ручная команда после просмотра shadow глазами. Ровно эта
-# граница дважды спасла выпуск 6 августа, когда в shadow лежали мусорные имена трендов
-# и потерянная вдвое склейка.
+# Broad переключается автоматически — но только через гейт, а не по расписанию.
+# Ручной шаг ввели 6 августа, когда он дважды поймал плохой выпуск: мусорные имена
+# трендов и вдвое потерянную склейку. Обе дыры с тех пор закрыты автоматикой:
+#   имена вида `job see point pay feel`  -> пол trends_bad_name_count = 0
+#   склейка 944 -> 390                   -> пол stories_multi_per_1k >= 65
+#   обвал слоя трендов 93 -> 5           -> регрессия trends_count к baseline
+# То есть человек стоял на страже дефектов, которые до него больше не доходят, а цена
+# ожидания реальна: сайт показывает вчерашние данные, пока никто не нажал кнопку.
+#
+# Гейт продвижения строже публикации в shadow: частичный корпус в broad не проходит ни
+# при каких флагах, и с 8 августа проверяются обе половины — полы и регрессии к эталону.
+# Shadow остаётся записью «что построено», broad — «что одобрено», откат возвращает
+# указатель на предыдущую публикацию.
 #
 # Замеры ручного цикла 6 августа, по которым выбрано расписание:
 #   Reddit через Playwright + proxy  ~58 мин (84 сабреддита)
@@ -17,9 +26,6 @@
 #   Engine cycle (Stories→Trends)   ~25 мин, из них cross-encoder ~14 мин
 #   прогрев кэша схем               секунды при тёплом кэше (99.9% переиспользуется)
 # Итого около полутора часов, поэтому стадии разнесены и не пересекаются.
-#
-# Публикуется только shadow. Broad не переключается автоматически ни при каких
-# условиях: это отдельная ручная команда после просмотра shadow глазами.
 #
 # LOCKING (required before any of these are re-enabled).  Every pipeline line runs under
 # `flock -n`: an Engine cycle takes 30-60 min, so a delayed job would
@@ -47,7 +53,7 @@
 # --cross-encoder разбирает серую зону Stories (~6000 пар за минуту на CPU). Без него
 # три пола полноты не берутся: 51.9 multi/1k при поле 65. --review-limit снижен с 80 до 20:
 # построчное LLM-ревью больше не несёт основную нагрузку, оно лишь копит метки.
-0 16 * * * flock -n /tmp/rc-engine.lock -c 'cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --trend-method schema_v3 --cross-encoder --review-limit 20 --trend-review-limit 30 --publish-channel shadow >> /opt/reddit-compass/logs/engine.log 2>&1'
+0 16 * * * flock -n /tmp/rc-engine.lock -c 'cd /opt/reddit-compass && docker compose run --rm -e HF_HOME=/data/.cache/hf reddit-compass engine cycle --profile broad --window 7 --trend-method schema_v3 --cross-encoder --review-limit 20 --trend-review-limit 30 --publish-channel shadow --promote-channel broad >> /opt/reddit-compass/logs/engine.log 2>&1'
 
 # Копия невосстановимого слоя. Ежедневно — сырые наблюдения (`compass.db`, ~66 МБ) и
 # леджер расхода; по понедельникам дополнительно оплаченные ответы модели. Целиком

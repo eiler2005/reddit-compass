@@ -2017,6 +2017,7 @@ async def _cmd_engine(args: argparse.Namespace) -> None:
                     review_limit=int(args.review_limit),
                     trend_review_model=args.trend_review_model,
                     trend_review_limit=int(args.trend_review_limit),
+                    promote_channel=args.promote_channel,
                     review_runner=review_runner,
                     publish_channel=args.publish_channel or None,
                     allow_partial=args.allow_partial,
@@ -3029,6 +3030,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--trend-review-model",
         default="qwen3.7-flash",
         help="Cost-efficient Qwen model for final bounded JSON trend review.",
+    )
+    engine_cycle.add_argument(
+        "--promote-channel",
+        default=None,
+        help=(
+            "После shadow опубликовать в этот канал, если гейт пройден "
+            "(полы + регрессии). Автоматическое продвижение выпуска."
+        ),
     )
     engine_cycle.add_argument(
         "--publish-channel",
