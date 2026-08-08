@@ -2445,6 +2445,43 @@ def _seed_trend_review_release(engine: sqlite3.Connection, membership_count: int
     engine.commit()
 
 
+def test_review_budget_goes_to_the_largest_trends_first(tmp_path: Path) -> None:
+    """Порядок отбора решает, что останется непроверенным.
+
+    Сортировка по `confidence` бросала этот выбор жребием: на боевом выпуске 8 августа
+    четырнадцать трендов имели ровно 1.00, при равенстве порядок определял хэш
+    `trend_id`, и крупнейший тренд выпуска (38 сюжетов) остался без проверки, пока
+    бюджет уходил на тренды из четырёх. Размер — прямая мера того, сколько читателей
+    увидит ошибку состава.
+    """
+    engine = engine_db(tmp_path / "trend_engine.db")
+    _seed_trend_review_release(engine, 6)
+    # Одинаковый confidence у всех: именно так выглядит боевой выпуск, и именно здесь
+    # прежний порядок вырождался в случайный.
+    # Имена подобраны так, чтобы алфавитный порядок был ОБРАТЕН порядку по размеру:
+    # иначе прежняя сортировка (`confidence`, затем `trend_id`) дала бы тот же ответ и
+    # тест ничего бы не проверял.
+    for trend_id, story_count in (("trend_zzz", 38), ("trend_aaa", 4), ("trend_mmm", 12)):
+        engine.execute(
+            """INSERT INTO engine_trends
+               (trend_release_id, trend_id, name_ru, pattern, confidence, story_count)
+               VALUES ('trends_review_test', ?, ?, 'p', 1.0, ?)""",
+            (trend_id, trend_id, story_count),
+        )
+        for index in range(3):
+            engine.execute(
+                """INSERT INTO engine_trend_stories
+                   (trend_release_id, trend_id, story_id, membership_score, reason)
+                   VALUES ('trends_review_test', ?, ?, 1.0, '')""",
+                (trend_id, f"story_{index:02}"),
+            )
+    engine.commit()
+
+    jobs = prepare_trend_review_jobs(engine, "trends_review_test", limit=2)
+
+    assert [job["target_id"] for job in jobs][:2] == ["trend_zzz", "trend_mmm"]
+
+
 def test_trend_review_jobs_cap_the_prompt_at_twenty_strongest(tmp_path: Path) -> None:
     """У корней бывают сотни членов: ревью видит топ-20 по score, иначе промпт несъедобен."""
     engine = engine_db(tmp_path / "trend_engine.db")
