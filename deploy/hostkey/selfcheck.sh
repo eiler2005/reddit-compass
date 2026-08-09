@@ -63,17 +63,26 @@ printf '%s\n' "${coverage_out}" >> "${LOG_DIR}/coverage.log"
 # поэтому конвейер выглядел успешным, возраст данных не дотягивал до 36-часового порога
 # `/health`, и вердикт писал OK — при том что на сайте оставался вчерашний выпуск.
 # Автоматическое продвижение сделало этот разрыв возможным, значит он обязан звучать.
+# Проверка идёт после Engine, поэтому к этому моменту на сайте обязан стоять СЕГОДНЯШНИЙ
+# выпуск. Сравнивать shadow с broad недостаточно: 9 августа цикл не опубликовал вообще
+# ничего (полы отклонили выпуск), даты обоих каналов остались вчерашними и равными — а
+# проверка на «shadow новее broad» промолчала. Вопрос надо задавать прямо.
 promo="$(cd "${REMOTE_DIR}" && docker compose run --rm --entrypoint python reddit-compass -c "
 import sqlite3
+from datetime import UTC, datetime
 c = sqlite3.connect('file:/data/trend_engine.db?mode=ro', uri=True)
-q = \"SELECT MAX(created_at) FROM radar_publications WHERE channel = ?\"
-shadow = c.execute(q, ('shadow',)).fetchone()[0] or ''
-broad = c.execute(q, ('broad',)).fetchone()[0] or ''
-print('behind' if shadow[:10] > broad[:10] else 'ok')
+row = c.execute(
+    \"SELECT MAX(created_at) FROM radar_publications WHERE channel = 'broad'\"
+).fetchone()
+latest = (row[0] or '')[:10]
+today = datetime.now(UTC).date().isoformat()
+print('ok' if latest == today else f'stale:{latest or \"нет публикаций\"}')
 " 2>/dev/null | tail -1)"
-if [[ "${promo}" == "behind" ]]; then
-  problems+=("выпуск построен, но не прошёл гейт — на сайте прежний")
-fi
+case "${promo}" in
+  ok) ;;
+  stale:*) problems+=("на сайте не сегодняшний выпуск (${promo#stale:}) — выпуск не прошёл гейт") ;;
+  *)  problems+=("не удалось проверить публикацию на сайте") ;;
+esac
 
 if [[ ${#problems[@]} -eq 0 ]]; then
   verdict="OK"

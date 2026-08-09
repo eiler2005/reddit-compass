@@ -329,3 +329,54 @@ def CRITICAL_SUBSET_IS_EXPECTED(expected: frozenset[str]) -> bool:
     from reddit_compass.intelligence.quality import CRITICAL_PROVIDERS
 
     return expected >= CRITICAL_PROVIDERS
+
+
+def test_provenance_merges_do_not_count_as_overmerge(tmp_path) -> None:
+    """Склейка по общему целевому URL не может быть переслиянием по построению.
+
+    Пол ловит гипотезу «много материалов одного провайдера в одном сюжете значит, что
+    склейка пошла вразнос». Она верна, пока склейка опирается на догадку — лексику,
+    эмбеддинги, ранжировщик. Общий canonical URL догадкой не является.
+
+    Замер 9 августа: весь ночной выпуск отклонён из-за одного сюжета, где пять постов
+    Reddit вели на один и тот же URL — люди разнесли новость по разным сабреддитам.
+    Склейка безупречна, а пол держал сайт на вчерашних данных.
+    """
+    conn = engine_db(tmp_path / "trend_engine.db")
+    _build(
+        conn,
+        "DR",
+        "SR",
+        "TR",
+        "SIG",
+        items=[("i1", "OpenAI GPT LLM release"), ("i2", "a quiet local note xyz")],
+        stories=[("s_url", 1, 5), ("s_guess", 1, 5)],
+        trends=[("t1", "product launches in AI")],
+        signals=[("g1", "pain", 0.5)],
+    )
+    for index in range(5):
+        conn.execute(
+            """INSERT INTO engine_story_items
+               (story_release_id, story_id, item_id, membership_score, membership_reason)
+               VALUES ('SR', 's_url', ?, 1.0, ?)""",
+            (f"u{index}", "story medoid" if index == 0 else "shared canonical/target URL"),
+        )
+        conn.execute(
+            """INSERT INTO engine_story_items
+               (story_release_id, story_id, item_id, membership_score, membership_reason)
+               VALUES ('SR', 's_guess', ?, 1.0, ?)""",
+            (f"g{index}", "story medoid" if index == 0 else "cross-encoder adjudication"),
+        )
+    conn.commit()
+
+    m = compute_quality(
+        conn,
+        data_release_id="DR",
+        story_release_id="SR",
+        trend_release_id="TR",
+        signal_release_id="SIG",
+    )
+
+    # Считается только тот сюжет, что собран догадкой; провенансный — нет.
+    assert m["stories_overmerge_ge5"] == 1
+    conn.close()

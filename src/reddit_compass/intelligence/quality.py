@@ -486,8 +486,51 @@ def compute_quality(
     single = sum(1 for s in stories if s["item_count"] == 1)
     multi = sum(1 for s in stories if s["item_count"] > 1)
     cross = sum(1 for s in stories if s["source_count"] > 1)
-    overmerge_ge5 = sum(1 for s in stories if s["source_count"] == 1 and s["item_count"] >= 5)
-    overmerge_ge8 = sum(1 for s in stories if s["source_count"] == 1 and s["item_count"] >= 8)
+    # Сюжеты, целиком собранные по общему целевому URL, из подсчёта переслияния
+    # исключаются. Пол ловит гипотезу «много материалов одного провайдера в одном сюжете
+    # означает, что склейка пошла вразнос», и она верна, пока склейка опирается на
+    # догадку — лексику, эмбеддинги, ранжировщик. Общий canonical URL догадкой не
+    # является: это provenance, материалы буквально указывают на одну статью.
+    #
+    # Замер 9 августа: весь ночной выпуск был отклонён из-за одного сюжета, где пять
+    # постов Reddit вели на один и тот же URL — люди разнесли одну новость по разным
+    # сабреддитам. Склейка безупречна, а пол считал её аварией и держал сайт на
+    # вчерашних данных.
+    provenance_only = {
+        str(row["story_id"])
+        for row in q(
+            """SELECT story_id
+               FROM engine_story_items
+               WHERE story_release_id = ?
+               GROUP BY story_id
+               HAVING SUM(
+                   CASE
+                       WHEN membership_reason IN (
+                           'story medoid', 'shared canonical/target URL'
+                       ) THEN 0 ELSE 1
+                   END
+               ) = 0""",
+            story_release_id,
+        )
+    }
+    inferential = q(
+        "SELECT story_id, source_count, item_count FROM engine_stories WHERE story_release_id = ?",
+        story_release_id,
+    )
+    overmerge_ge5 = sum(
+        1
+        for s in inferential
+        if s["source_count"] == 1
+        and s["item_count"] >= 5
+        and str(s["story_id"]) not in provenance_only
+    )
+    overmerge_ge8 = sum(
+        1
+        for s in inferential
+        if s["source_count"] == 1
+        and s["item_count"] >= 8
+        and str(s["story_id"]) not in provenance_only
+    )
 
     items = q(
         "SELECT title, excerpt, provider, source_section FROM release_items WHERE release_id = ?",
