@@ -118,3 +118,56 @@ def test_valid_fenced_story_review_is_accepted() -> None:
     assert errors == []
     assert review is not None
     assert review.decision == "same_story"
+
+
+def test_prose_counterpoints_do_not_discard_the_verdict() -> None:
+    """Строка вместо списка — форма ответа, а не ошибка суждения.
+
+    Замер 9 августа: 37 из 58 ответов отбрасывались как невалидные, потому что модель
+    писала `counterpoints` связным текстом. Вердикт при этом был осмысленным, и так
+    терялось 64 % бюджета ревью, а крупнейшие тренды оставались непроверенными.
+    """
+    raw = json.dumps(
+        {
+            "decision": "reject",
+            "trend_name_ru": "Разрозненные сделки",
+            "pattern": "Дублирование покрытия, а не кросс-событийный паттерн",
+            "story_ids": [],
+            "evidence_story_ids": [],
+            "counterpoints": "s1 и s2 описывают одно и то же событие",
+            "domains": "business",
+            "confidence": 0.2,
+        }
+    )
+
+    review, errors = validate_trend_review(raw, allowed_story_ids={"s1", "s2", "s3"})
+
+    assert errors == []
+    assert review is not None
+    assert review.counterpoints == ["s1 и s2 описывают одно и то же событие"]
+    assert review.domains == ["business"]
+
+
+def test_strictness_is_kept_where_it_carries_meaning() -> None:
+    """Послабление касается только пояснительных полей.
+
+    `decision`, `story_ids` и `confidence` решают судьбу тренда, поэтому разбираются
+    без снисхождения: иначе мягкость к форме превратится в мягкость к содержанию.
+    """
+    raw = json.dumps(
+        {
+            "decision": "reject",
+            "trend_name_ru": "",
+            "pattern": "",
+            "story_ids": "s1",
+            "evidence_story_ids": [],
+            "counterpoints": [],
+            "domains": [],
+            "confidence": 0.2,
+        }
+    )
+
+    review, errors = validate_trend_review(raw, allowed_story_ids={"s1"})
+
+    assert review is None
+    assert errors
