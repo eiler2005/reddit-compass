@@ -38,6 +38,7 @@ _FILE_MAP = {
     "rss": "rss.jsonl",
     "ladder": "ladder.jsonl",
     "producthunt": "producthunt.jsonl",
+    "linkedin": "linkedin.jsonl",
 }
 
 
@@ -911,4 +912,10 @@ async def _fetch_source_cards(
                 historical_date=historical_date,
             )
         )
+    if source_id == "linkedin":
+        from .sources.linkedin import fetch_linkedin_authors
+
+        # Исторические дат не поддерживаются: discovery идёт по живому
+        # поисковому индексу, а не по архиву LinkedIn.
+        return list(await fetch_linkedin_authors(snapshot_date=snapshot_date))
     return None

@@ -37,7 +37,7 @@ Collector не импортирует анализ, а Engine не запуск�
 
 Данные идут через шесть source clusters:
 
-- `voices`: Reddit, Medium.
+- `voices`: Reddit, Medium, LinkedIn (гостевой opt-in канал, см. `docs/LINKEDIN_ACCESS.md`).
 - `developers`: Hacker News.
 - `mainstream`: BBC, Guardian, NYT/WaPo/USA Today/Fox News via RSS/Ladder.
 - `business`: Reuters, FT, Fox Business, American Banker.
@@ -102,6 +102,15 @@ Default collection profile: `config/profiles/broad.json`.
 │  aiohttp + XML   │  │ Ladder proxy     │  │ GraphQL API          │
 │  6 фидов         │  │ 12 доменов       │  │ Developer Token      │
 └──────────────────┘  └──────────────────┘  └──────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────┐
+│                    sources/linkedin.py (opt-in)                     │
+│   Отдельный канал, не связанный с RedditEngine: голый aiohttp к    │
+│   публичным страницам постов (JSON-LD SocialMediaPosting, excerpt) │
+│   + discovery через Brave Search, свежесть по snowflake activity-id│
+│   Без браузера, без прокси, без логина. 4 автора.                  │
+│   Модель доступа и границы: docs/LINKEDIN_ACCESS.md                │
+└────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -409,6 +418,20 @@ class SignalCard:
 браузером — выигрыша над чистым Playwright нет. Для прогонов через
 ротационный proxy: `REDDIT_COMPASS_ENGINE=playwright`.
 
+### LinkedIn: гостевой доступ без логина (отдельный канал)
+
+У LinkedIn нет API/RSS для этого сценария; профили и ленты закрыты authwall'ом
+(проверено спайком 2026-08-10 с VPS и Mac: 999 → authwall, голый IP и прокси
+дают одинаковый результат). Канал использует только то, что LinkedIn отдаёт
+гостю: прямые URL постов `/posts/…` и статей `/pulse/…` (голый HTTP без JS,
+JSON-LD `SocialMediaPosting`/`Article`), discovery — внешний поисковик
+(Brave Search HTML), свежесть кандидатов — из snowflake activity-id без
+загрузки страниц. Прокси в канале не применяются: authwall — требование логина,
+а не репутация IP, и обходить блокировку ротацией запрещено политикой проекта.
+Полный текст постов гостю не отдаётся (`hasPart.isAccessibleForFree = False`) —
+канал честно работает в scope `excerpt`. Источник opt-in и не гейтует ночную
+сборку. Детали: [`docs/LINKEDIN_ACCESS.md`](docs/LINKEDIN_ACCESS.md).
+
 ---
 
 ## 8. CLI: все команды
@@ -426,6 +449,7 @@ reddit-compass hn                              Hacker News (Algolia)
 reddit-compass rss                             RSS (BBC, Guardian, Reuters, TC, Verge, Ars)
 reddit-compass ladder                          Ladder (NYT, WaPo, FT, Wired, Medium...)
 reddit-compass ph                              ProductHunt (GraphQL)
+reddit-compass linkedin                        LinkedIn: посты/статьи авторов (гостевой, opt-in)
 reddit-compass collect --profile broad         Только сбор в compass.db
 reddit-compass engine release create --run ID  Frozen Data Release
 reddit-compass engine facets --release ID      FacetRelease

@@ -116,6 +116,15 @@ class TestRegistryCompleteness:
         assert "producthunt" in SOURCES
         assert SOURCES["producthunt"].access == "api"
 
+    def test_linkedin(self):
+        source = SOURCES["linkedin"]
+        assert source.cluster == "voices"
+        assert source.access == "linkedin"
+        assert source.default_scope == "excerpt"
+        # Opt-in: гостевой доступ нестабилен, ночную сборку источник не gating'ует.
+        assert not source.enabled_by_default
+        assert source.expected_min_items == 0
+
     def test_nyt_api_requires_key(self):
         source = SOURCES["nytimes_api"]
         assert "NYT_API_KEY" in source.requires_env

@@ -329,6 +329,7 @@ async def _cmd_signals(args: argparse.Namespace) -> None:
         "rss.jsonl",
         "ladder.jsonl",
         "producthunt.jsonl",
+        "linkedin.jsonl",
     ]
     cards: list[PostCard] = []
     loaded_sources: list[str] = []
@@ -494,6 +495,42 @@ async def _cmd_ph(args: argparse.Namespace) -> None:
 
     write_posts_jsonl(cards, snap_dir / "producthunt.jsonl")
     print(f"✅ ProductHunt: {len(cards)} продуктов → {snap_dir / 'producthunt.jsonl'}")
+
+
+async def _cmd_linkedin(args: argparse.Namespace) -> None:
+    """LinkedIn: публичные посты/статьи авторов (гостевой доступ, без логина)."""
+    from .sources.linkedin import LINKEDIN_AUTHORS, fetch_linkedin_authors, render_linkedin_report
+
+    _load_config(args)
+    if getattr(args, "dry_run", False):
+        print("🔍 DRY RUN — сетевые запросы НЕ выполняются, данные НЕ пишутся")
+        print(f"{'=' * 60}")
+        print(f"Авторы ({len(LINKEDIN_AUTHORS)}):")
+        for author in LINKEDIN_AUTHORS:
+            print(f"  {author.name} — /in/{author.slug}")
+        print("Доступ: только гостевой; профили за authwall и не используются")
+        print("Discovery: Brave Search HTML (site:linkedin.com/posts <slug>)")
+        est_requests = len(LINKEDIN_AUTHORS) * 3 + len(LINKEDIN_AUTHORS) * 10
+        print(
+            f"Оценка: ≤{len(LINKEDIN_AUTHORS) * 3} поисковых запросов, "
+            f"≤{len(LINKEDIN_AUTHORS) * 10} страниц, пауза ≥4с, ~{est_requests * 5 / 60:.0f} мин"
+        )
+        print(f"{'=' * 60}")
+        return
+    snapshot_date = _today()
+
+    print(f"💼 LinkedIn: посты {len(LINKEDIN_AUTHORS)} авторов (гостевой доступ)...")
+    cards = await fetch_linkedin_authors(snapshot_date=snapshot_date)
+
+    snap_dir = _snapshots_dir(args) / snapshot_date
+    snap_dir.mkdir(parents=True, exist_ok=True)
+    from .export import write_posts_jsonl
+
+    write_posts_jsonl(cards, snap_dir / "linkedin.jsonl")
+    report_path = snap_dir / "linkedin-report.md"
+    report_path.write_text(render_linkedin_report(cards, snapshot_date), encoding="utf-8")
+    print(f"✅ LinkedIn: {len(cards)} постов/статей → {snap_dir / 'linkedin.jsonl'}")
+    print(f"   Дайджест: {report_path}")
 
 
 async def _execute_collection(args: argparse.Namespace) -> object:
@@ -2386,6 +2423,11 @@ def build_parser() -> argparse.ArgumentParser:
         "ladder", parents=[common], help="Ladder: NYT, WaPo, FT, Wired, Medium (paywall)"
     )
     sub.add_parser("ph", parents=[common], help="ProductHunt: топ продуктов (GraphQL API)")
+    sub.add_parser(
+        "linkedin",
+        parents=[common],
+        help="LinkedIn: посты/статьи авторов (гостевой доступ, без логина)",
+    )
 
     run_p = sub.add_parser(
         "run",
@@ -3186,6 +3228,7 @@ def main() -> None:
         "rss": _cmd_rss,
         "ladder": _cmd_ladder,
         "ph": _cmd_ph,
+        "linkedin": _cmd_linkedin,
         "collect": _cmd_collect,
         "run": _cmd_run,
         "engine": _cmd_engine,

@@ -35,6 +35,7 @@ _LEGACY_FILES = [
     "rss.jsonl",
     "ladder.jsonl",
     "producthunt.jsonl",
+    "linkedin.jsonl",
 ]
 
 

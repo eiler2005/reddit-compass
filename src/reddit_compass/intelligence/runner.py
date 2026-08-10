@@ -125,6 +125,7 @@ async def run_sources(
         "ladder": "ladder.jsonl",
         "producthunt": "producthunt.jsonl",
         "ph": "producthunt.jsonl",
+        "linkedin": "linkedin.jsonl",
     }
 
     for source_id in sources:
@@ -417,6 +418,19 @@ async def _run_single_source(
             write_posts_jsonl(cards, snap_dir / "producthunt.jsonl")
             return SourceResult(
                 source_id="producthunt",
+                status="ok" if cards else "empty",
+                count=len(cards),
+                duration_sec=round(time.time() - t0, 1),
+            )
+
+        if source_id == "linkedin":
+            from ..export import write_posts_jsonl
+            from ..sources.linkedin import fetch_linkedin_authors
+
+            cards = await fetch_linkedin_authors(snapshot_date=snapshot_date)
+            write_posts_jsonl(cards, snap_dir / "linkedin.jsonl")
+            return SourceResult(
+                source_id="linkedin",
                 status="ok" if cards else "empty",
                 count=len(cards),
                 duration_sec=round(time.time() - t0, 1),

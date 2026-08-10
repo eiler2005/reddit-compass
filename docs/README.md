@@ -19,6 +19,8 @@
 | [`NEWS_STORIES_TRENDS.md`](NEWS_STORIES_TRENDS.md) | Продуктовый контракт трёх слоёв: News — инбокс, Stories — события, Trends — паттерны |
 | [`QUALITY_GATES.md`](QUALITY_GATES.md) | Полы качества, регрессионная упряжка, текущий измеренный статус |
 | [`COLLECTION_LIFECYCLE.md`](COLLECTION_LIFECYCLE.md) | Operational contract сбора: статусы, handoff Mac→VPS, rollback |
+| [`REDDIT_ACCESS.md`](REDDIT_ACCESS.md) | Reddit-канал: browser engine, proxy, резервный Mac-маршрут |
+| [`LINKEDIN_ACCESS.md`](LINKEDIN_ACCESS.md) | LinkedIn-канал (отдельный от Reddit): гостевой доступ, discovery, границы |
 | [`COLLECTOR_TO_TRENDS_FLOW.md`](COLLECTOR_TO_TRENDS_FLOW.md) | Сквозной путь от адаптера источника до тренда |
 | [`DATA_FLOW_DIAGRAMS.md`](DATA_FLOW_DIAGRAMS.md) | Схемы потоков (mermaid): item → story → trend, Pulse, таксономия, обратная связь |
 | [`DATABASE_SCHEMA.md`](DATABASE_SCHEMA.md) | Таблицы `compass.db` и `trend_engine.db` |

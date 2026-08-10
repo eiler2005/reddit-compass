@@ -90,10 +90,22 @@ reddit-compass engine cycle --profile broad --window 7 \
 reddit-compass serve               # REST API + UI on :8900
 ```
 
-`fetch`, `hn`, `rss`, `ladder`, `ph`, `all` and `signals` remain compatibility commands for a
-single adapter or legacy artifacts. They are not the production publication path: current Radar
-is produced by `collect` and the versioned Engine. `db rebuild` is legacy recovery only, never a
-normal way to iterate on stories or trends.
+`fetch`, `hn`, `rss`, `ladder`, `ph`, `linkedin`, `all` and `signals` remain compatibility
+commands for a single adapter or legacy artifacts. They are not the production publication
+path: current Radar is produced by `collect` and the versioned Engine. `db rebuild` is legacy
+recovery only, never a normal way to iterate on stories or trends.
+
+`linkedin` is an experimental opt-in source and a **separate collection channel** from
+Reddit — different access model, different limits, no shared engine (see
+[`docs/LINKEDIN_ACCESS.md`](docs/LINKEDIN_ACCESS.md) vs
+[`docs/REDDIT_ACCESS.md`](docs/REDDIT_ACCESS.md)). Guest-only collection of public posts
+and articles by four tech authors (Andrew Ng, Fei-Fei Li, Allie K. Miller, Cassie Kozyrkov).
+Profiles and activity feeds sit behind LinkedIn's authwall, so the adapter only reads direct
+post URLs discovered via web search and served to guests over plain HTTP (JSON-LD excerpt:
+headline, ~260-char preview, exact date, reactions, first comments — the full text is gated
+by LinkedIn itself). No login, no authwall bypass, no proxy. `reddit-compass linkedin` writes
+`linkedin.jsonl` plus a readable `linkedin-report.md` digest; `collect --from-snapshots`
+ingests the JSONL like any other source.
 
 ### What it will NOT do — by design
 
@@ -214,6 +226,7 @@ climate/energy/infrastructure, security/privacy, and `other`.
 | **Business** | Reuters, FT, Fox Business, American Banker | RSS + Ladder fallback |
 | **Tech/Culture** | TechCrunch, Verge, Ars Technica, Wired, New Yorker, Vanity Fair | RSS + Ladder fallback |
 | **Voices** | Reddit broad packs, Medium | Public JSON/RSS + Ladder fallback |
+| **Voices (LinkedIn)** | Posts/articles of 4 tech authors (opt-in) | Guest-only HTTP + search discovery |
 | **Developers** | Hacker News | Algolia/search snapshots |
 | **Product pulse** | ProductHunt | GraphQL/feed |
 

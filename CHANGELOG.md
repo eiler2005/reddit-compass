@@ -7,6 +7,25 @@
 
 ### Added
 
+- **LinkedIn-источник (гостевой, opt-in).** Новый адаптер `sources/linkedin.py` собирает
+  публичные посты и статьи четырёх технологов (Andrew Ng, Fei-Fei Li, Allie K. Miller,
+  Cassie Kozyrkov) без логина. Профили и ленты закрыты authwall'ом и не используются:
+  прямые URL постов читаются голым HTTP — постовый JSON-LD (`SocialMediaPosting`,
+  для медиа-постов `VideoObject`/`ImageObject` с автором в `creator`) даёт заголовок,
+  превью ~260 символов (полный текст закрыт самим LinkedIn, `hasPart.isAccessibleForFree
+  = False`), точную дату публикации, реакции, число комментариев и первые комментарии.
+  Discovery — Brave Search HTML (`site:linkedin.com/posts <slug>`, запрос по имени —
+  только если слаговый пуст), свежесть кандидатов определяется из snowflake
+  activity-id (`id >> 22` = мс UTC) без загрузки страниц; статьи `/pulse/` берутся
+  только с совпадающим JSON-LD-автором. При деградации поиска канал опирается на
+  seed-URL (`SEED_POST_URLS`); окно свежести по умолчанию 180 дней — поисковый
+  индекс запаздывает на недели-месяцы. Команда
+  `reddit-compass linkedin` пишет `linkedin.jsonl` и дайджест `linkedin-report.md`,
+  ingest — через `collect --from-snapshots`. Источник opt-in
+  (`enabled_by_default=False`) и не гейтует ночную сборку. Границы: read-only, без
+  credentials, без обхода authwall, пауза ≥4с между запросами, на 429 — backoff без
+  наращивания давления. Доступ проверен спайком 2026-08-10 с VPS и Mac.
+
 - **Manual Release Runbook и gap recovery.** `docs/MANUAL_RELEASE_RUNBOOK.md` фиксирует
   полный ручной путь VPS: пять source adapters и factual finalizer, raw/source-health gate,
   Engine в shadow, Qwen `qwen3.7-flash` для bounded review и `qwen3.8-max` только для

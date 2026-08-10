@@ -147,6 +147,7 @@ _LEGACY_FILE_MAP: dict[str, tuple[str, SourceCluster]] = {
     "keyword-search.jsonl": ("reddit", "voices"),
     "hackernews.jsonl": ("hackernews", "developers"),
     "producthunt.jsonl": ("producthunt", "product_pulse"),
+    "linkedin.jsonl": ("linkedin", "voices"),
 }
 
 _RSS_LADDER_CLUSTER_MAP: dict[str, SourceCluster] = {
@@ -260,12 +261,23 @@ def postcard_to_content_item(
             "votes": float(card.score),
             "comments": float(card.num_comments),
         }
+    elif provider == "linkedin":
+        raw_engagement = {
+            "reactions": float(card.score),
+            "comments": float(card.num_comments),
+        }
 
     excerpt = ""
     content_scope: ContentScope = "headline"
     if provider == "reddit" and card.selftext:
         excerpt = card.selftext[:5000]
         content_scope = "excerpt"
+    elif legacy_file == "linkedin.jsonl":
+        # LinkedIn отдаёт гостю только превью поста (hasPart.isAccessibleForFree
+        # = False), поэтому scope честнее abstract'а.
+        if card.selftext:
+            excerpt = card.selftext[:5000]
+            content_scope = "excerpt"
     elif legacy_file in ("rss.jsonl", "ladder.jsonl"):
         if card.selftext:
             excerpt = card.selftext[:2000]
@@ -277,7 +289,8 @@ def postcard_to_content_item(
         content_scope = "abstract"
 
     source_section = card.subreddit
-    if legacy_file in ("rss.jsonl", "ladder.jsonl") and card.keyword:
+    # Для LinkedIn keyword — vanity-слаг автора: секция даёт разрезку по авторам.
+    if legacy_file in ("rss.jsonl", "ladder.jsonl", "linkedin.jsonl") and card.keyword:
         source_section = card.keyword
 
     domain_ids = classify_domains(

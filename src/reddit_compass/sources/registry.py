@@ -198,6 +198,18 @@ SOURCES: dict[str, SourceDefinition] = {
         access="api",
         default_scope="abstract",
     ),
+    # LinkedIn: публичные посты/статьи авторов, гостевой доступ без логина.
+    # Полный текст закрыт (excerpt); opt-in — в ночной сборке пока не участвует.
+    "linkedin": SourceDefinition(
+        source_id="linkedin",
+        provider="linkedin",
+        label="LinkedIn",
+        cluster="voices",
+        access="linkedin",
+        default_scope="excerpt",
+        expected_min_items=0,
+        enabled_by_default=False,
+    ),
     # NYT API (official)
     "nytimes_api": SourceDefinition(
         source_id="nytimes_api",
