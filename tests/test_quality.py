@@ -106,13 +106,20 @@ def test_completeness_floors_separate_collapsed_from_working_releases() -> None:
 def test_evaluate_regressions_detects_worsening() -> None:
     baseline = {
         "stories_overmerge_ge5": 0,
-        "stories_cross_source": 60,
+        "stories_cross_source_per_1k": 44,
         "taxonomy_ai_tech_share": 20,
     }
-    worse = {"stories_overmerge_ge5": 5, "stories_cross_source": 30, "taxonomy_ai_tech_share": 22}
+    worse = {
+        "stories_overmerge_ge5": 5,
+        "stories_cross_source_per_1k": 20,
+        "taxonomy_ai_tech_share": 22,
+    }
     reg = {r["metric"]: r for r in evaluate_regressions(worse, baseline)}
     assert reg["stories_overmerge_ge5"]["regressed"] is True  # 0 -> 5, tol 0
-    assert reg["stories_cross_source"]["regressed"] is True  # 60 -> 30, tol 10
+    # Просадка ловится долей, а не абсолютным счётчиком: последний убран из регрессий
+    # 11 августа как строгий к объёму корпуса и вдесятеро строже своей же доли.
+    assert reg["stories_cross_source_per_1k"]["regressed"] is True  # 44 -> 20, tol 10
+    assert "stories_cross_source" not in reg
     assert reg["taxonomy_ai_tech_share"]["regressed"] is False  # +2 within tol 5
     # без изменений регрессий нет
     assert all(not r["regressed"] for r in evaluate_regressions(baseline, baseline))

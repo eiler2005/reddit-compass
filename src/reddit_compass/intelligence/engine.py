@@ -7189,6 +7189,7 @@ async def run_engine_cycle(
     publication_id = ""
     publication_blocked_reason = ""
     promoted_publication_id = ""
+    promotion_refused_reason = ""
     if publish_channel:
         # A partial corpus is useful for an explicitly opted-in shadow/preview
         # publication, but must never reach a production channel.  Keep this
@@ -7217,17 +7218,32 @@ async def run_engine_cycle(
                 # одобрено», и у отката есть куда возвращаться. Гейт проверяется заново
                 # и для broad строже: частичный корпус сюда не проходит ни при каких
                 # флагах.
-                promoted = publish_radar(
-                    conn,
-                    story_release_id=stories.story_release_id,
-                    trend_release_id=trends.trend_release_id,
-                    channel=promote_channel,
-                    signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
-                )
-                promoted_publication_id = promoted.publication_id
+                #
+                # Отказ гейта — штатный исход продвижения, а не сбой прогона.
+                # `publish_radar` сообщает о нём исключением, и без перехвата оно роняло
+                # цикл целиком: 10 августа выпуск построился, shadow опубликовался, а
+                # дальше `ValueError` унёс запись итоговых метрик, и в журнале не осталось
+                # ни строки о том, что произошло. Отказ обязан быть записанным решением, а
+                # не потерянным прогоном.
+                try:
+                    promoted = publish_radar(
+                        conn,
+                        story_release_id=stories.story_release_id,
+                        trend_release_id=trends.trend_release_id,
+                        channel=promote_channel,
+                        signal_release_id=(pulse_result or {}).get("signal_release_id") or None,
+                    )
+                    promoted_publication_id = promoted.publication_id
+                except ValueError as exc:
+                    promotion_refused_reason = str(exc)
+                    logging.getLogger("reddit_compass").warning(
+                        "продвижение в %s отклонено гейтом: %s", promote_channel, exc
+                    )
     return {
         "data_release_id": data.release_id,
         "promoted_publication_id": promoted_publication_id,
+        # Пусто при успехе; текст отказа, когда гейт не пустил выпуск на сайт.
+        "promotion_refused_reason": promotion_refused_reason,
         "facet_release_id": facets.facet_release_id,
         "story_release_id": stories.story_release_id,
         "trend_release_id": trends.trend_release_id,
