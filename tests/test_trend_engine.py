@@ -1446,14 +1446,14 @@ def test_production_channel_refuses_a_release_that_regressed(
 
     monkeypatch.setattr(
         "reddit_compass.intelligence.quality.compute_quality",
-        lambda *_args, **_kwargs: {"trends_count": 5},
+        lambda *_args, **_kwargs: {"stories_multi_per_1k": 20},
     )
     monkeypatch.setattr(
         "reddit_compass.intelligence.quality.evaluate_floors",
         lambda _metrics: [PassingFloor()],
     )
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(json.dumps({"trends_count": 93}), encoding="utf-8")
+    baseline.write_text(json.dumps({"stories_multi_per_1k": 87}), encoding="utf-8")
     monkeypatch.setenv("RC_QUALITY_BASELINE_PATH", str(baseline))
 
     with pytest.raises(ValueError, match="publication gates"):
@@ -3230,3 +3230,21 @@ def test_schema_extraction_is_billed_to_its_own_stage(tmp_path: Path) -> None:
     # Прогрев обращается к переданному ему runner, а не к тому, что размечен как ревью.
     assert used == ["schema"]
     assert "review" not in used
+
+
+def test_cycle_never_shadows_the_logging_module() -> None:
+    """Локальный `import logging` делает имя локальным для всей функции.
+
+    11 августа это уронило цикл ровно на строке, которая должна была мягко записать
+    отказ гейта: `import logging` внутри одной ветки `except` превратил `logging` в
+    локальную переменную, и обращение к нему на любом другом пути дало
+    `UnboundLocalError`. Тесты этого не поймали — ни один не проходит по ветке отказа,
+    а сам импорт выглядит безобидно.
+
+    Проверка статическая и потому дешёвая: имя модуля не должно быть среди локальных
+    переменных функции.
+    """
+    code = run_engine_cycle.__code__
+    assert "logging" not in code.co_varnames, (
+        "локальный import logging затеняет модуль на всех путях функции"
+    )

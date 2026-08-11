@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from reddit_compass.api.pipeline_status import (
     STATE_LATE,
     STATE_PENDING,
     pipeline_status,
+    publication_gate_status,
 )
 from reddit_compass.db import get_db
 from reddit_compass.intelligence.engine import engine_db
@@ -216,3 +218,73 @@ def test_release_refused_by_the_gate_is_visible(tmp_path: Path) -> None:
     _publish(engine, "broad", f"{TODAY}T16:22:00Z")
     assert publish_stage()["state"] == STATE_DONE
     assert publish_stage()["detail"] == "выпуск на сайте"
+
+
+def _quality_report(conn: object, trend_release_id: str, metrics: dict, floors: list) -> None:
+    conn.execute(  # type: ignore[attr-defined]
+        """INSERT INTO engine_quality_reports
+           (data_release_id, story_release_id, trend_release_id, signal_release_id,
+            metrics_json, floors_json, passed, created_at)
+           VALUES ('release_x', 'stories_x', ?, '', ?, ?, ?, ?)""",
+        (
+            trend_release_id,
+            json.dumps(metrics),
+            json.dumps(floors),
+            int(all(f["passed"] for f in floors)),
+            f"{TODAY}T16:22:00Z",
+        ),
+    )
+    conn.commit()  # type: ignore[attr-defined]
+
+
+def test_gate_names_the_metric_that_blocked_publication(tmp_path: Path) -> None:
+    """Читателю нужна причина, а не только факт отказа.
+
+    Считать гейт на лету нельзя: `compute_quality` на боевом релизе занимает 2.3 с.
+    Поэтому берётся сохранённый отчёт, а регрессии выводятся из его же метрик —
+    сравнение чисел, без запросов к базе.
+    """
+    engine = _engine_with(tmp_path, stories=True, trends=True)
+    _publish(engine, "shadow", f"{TODAY}T16:21:00Z")
+    _quality_report(
+        engine,
+        "trends_x",
+        {"stories_multi_per_1k": 40},
+        [{"metric": "stories_overmerge_ge5", "passed": False, "value": 2, "floor": 0}],
+    )
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps({"stories_multi_per_1k": 87}), encoding="utf-8")
+
+    gate = publication_gate_status(engine, baseline_path=baseline)
+
+    assert gate["state"] == "refused"
+    kinds = {(r["kind"], r["metric"]) for r in gate["reasons"]}
+    assert ("пол", "stories_overmerge_ge5") in kinds
+    assert ("регрессия", "stories_multi_per_1k") in kinds
+
+
+def test_gate_reports_a_clean_release_as_ready_to_publish(tmp_path: Path) -> None:
+    engine = _engine_with(tmp_path, stories=True, trends=True)
+    _publish(engine, "shadow", f"{TODAY}T16:21:00Z")
+    _quality_report(
+        engine,
+        "trends_x",
+        {"stories_multi_per_1k": 85},
+        [{"metric": "stories_overmerge_ge5", "passed": True, "value": 0, "floor": 0}],
+    )
+    baseline = tmp_path / "baseline.json"
+    baseline.write_text(json.dumps({"stories_multi_per_1k": 87}), encoding="utf-8")
+
+    gate = publication_gate_status(engine, baseline_path=baseline)
+
+    assert gate["state"] == "ready"
+    assert gate["reasons"] == []
+    assert gate["trend_release_id"] == "trends_x"
+
+
+def test_gate_is_silent_once_the_release_is_on_the_site(tmp_path: Path) -> None:
+    engine = _engine_with(tmp_path, stories=True, trends=True)
+    _publish(engine, "shadow", f"{TODAY}T16:21:00Z")
+    _publish(engine, "broad", f"{TODAY}T16:22:00Z")
+
+    assert publication_gate_status(engine)["state"] == "published"

@@ -43,7 +43,7 @@ from ..intelligence.repository import (
 from ..intelligence.taxonomy import BROAD_DOMAINS
 from ..versioning import assets_version
 from .dates import display_date, sort_key
-from .pipeline_status import pipeline_status
+from .pipeline_status import pipeline_status, publication_gate_status
 from .view_models import cluster_label
 
 router = APIRouter()
@@ -1065,6 +1065,7 @@ async def today_page(
     selected_sort = _safe_today_sort(sort)
     engine_path = _engine_path()
     pipeline_payload: dict[str, Any] = {}
+    gate_payload: dict[str, Any] = {}
     if engine_path.exists():
         engine_conn = open_engine_readonly(engine_path)
         try:
@@ -1074,8 +1075,10 @@ async def today_page(
             # уронить главную страницу, поэтому её отказ гасится в пустую полосу.
             try:
                 pipeline_payload = pipeline_status(engine_conn, conn)
+                gate_payload = publication_gate_status(engine_conn)
             except sqlite3.Error:
                 pipeline_payload = {}
+                gate_payload = {}
         finally:
             engine_conn.close()
 
@@ -1163,6 +1166,8 @@ async def today_page(
                     # оставался на нём и не видел следующую публикацию.
                     "requested_date": date or "",
                     "pipeline": pipeline_payload,
+                    "gate": gate_payload,
+                    "csrf_token": _generate_csrf_token(),
                     "reddit_quotas": {
                         "per_type": _NEW_REDDIT_PER_TYPE,
                         "per_subreddit": _NEW_REDDIT_PER_SUBREDDIT,
@@ -2752,3 +2757,52 @@ async def radar_page(
             "message": "Опубликованного радара нет. Запустите `reddit-compass engine cycle`.",
         },
     )
+
+
+@router.post("/ui/publish")
+async def publish_to_site_endpoint(
+    story_release: str = Form(""),
+    trend_release: str = Form(""),
+    force: str = Form(""),
+    return_to: str = Form("/today"),
+    csrf_token: str = Form(""),
+) -> Response:
+    """Перевести выпуск из shadow на сайт по кнопке.
+
+    Ночной цикл продвигает выпуск сам, если тот прошёл гейт. Кнопка нужна для двух
+    случаев, которые уже случались на этой неделе: цикл упал после публикации в shadow
+    (10 августа) и выпуск был отклонён метрикой, оказавшейся плохо выбранной.
+
+    Обычное нажатие идёт **через тот же гейт**, что и автомат: кнопка ускоряет решение,
+    а не отменяет проверку. Отказ возвращается как есть — с названиями метрик.
+
+    `force` — отдельное осознанное действие с иным смыслом: «я видел причины отказа и
+    беру ответственность». Оно пишет `gate_bypassed` и отдельное событие
+    `publish_forced` в журнал публикаций, поэтому обход всегда остаётся различимым в
+    истории, а не растворяется среди обычных публикаций.
+    """
+    if not _validate_csrf_token(csrf_token):
+        return Response(status_code=403)
+    if not return_to.startswith("/"):
+        return_to = "/today"
+    if not story_release or not trend_release:
+        return RedirectResponse(url=return_to, status_code=303)
+
+    from ..intelligence.engine import publish_radar
+
+    engine_conn = engine_db(_engine_path())
+    try:
+        publish_radar(
+            engine_conn,
+            story_release_id=story_release,
+            trend_release_id=trend_release,
+            channel="broad",
+            force=force == "1",
+        )
+    except ValueError:
+        # Отказ гейта — штатный исход нажатия, а не ошибка сервера. Причины уже видны в
+        # панели гейта, она пересчитается при перезагрузке страницы.
+        return RedirectResponse(url=f"{return_to}?publish=refused", status_code=303)
+    finally:
+        engine_conn.close()
+    return RedirectResponse(url=f"{return_to}?publish=ok", status_code=303)

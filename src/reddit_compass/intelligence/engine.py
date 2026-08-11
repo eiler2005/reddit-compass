@@ -6982,8 +6982,11 @@ async def run_engine_cycle(
             cache_release_embeddings(conn, data_release_id=data.release_id, model_name=embed_model)
             embed_ok = True
         except Exception as exc:
-            import logging
-
+            # `import logging` здесь был локальным и делал имя `logging` локальным для
+            # всей функции: любое обращение к нему на путях, где этот except не
+            # выполнялся, падало `UnboundLocalError`. Ровно так 11 августа рухнул цикл —
+            # на строке, которая должна была мягко записать отказ гейта. Модуль
+            # импортирован сверху, повторный импорт не нужен.
             embedding_fallback = True
             logging.getLogger(__name__).warning(
                 "EMBEDDING FALLBACK: cache failed (%s); trend_method downgraded "

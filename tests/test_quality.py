@@ -6,6 +6,7 @@ import json
 
 from reddit_compass.intelligence.engine import engine_db
 from reddit_compass.intelligence.quality import (
+    REGRESSION_METRICS,
     compute_quality,
     evaluate_floors,
     evaluate_regressions,
@@ -48,21 +49,23 @@ def test_collapsed_trend_layer_fails_a_floor() -> None:
     assert all(r.passed for r in evaluate_floors({"trends_count": 98}))
 
 
-def test_partial_trend_collapse_is_caught_by_regression_not_by_the_floor() -> None:
-    """Пол ловит только ноль; половину слоя обязана поймать регрессия к baseline.
+def test_trend_volume_is_not_a_regression_metric() -> None:
+    """Число трендов охраной больше не считается — оно мерило объём, а не качество.
 
-    Абсолютным порогом это не чинится: значение под боевые 87–104 блокировало бы законно
-    тихое окно. Сравнение с эталонным релизом от подгонки свободно.
+    Замер по трём выпускам подряд: 82 тренда при 12.2 % подтверждённых, 58 при 27.6 %,
+    26 при 73.1 %. Слой втрое улучшился по проверенности и втрое ужался по счёту, а
+    охрана, глядящая на счёт, дважды за день заблокировала публикацию именно тогда,
+    когда качество росло. Подгонять порог бессмысленно: после каждой правки ревью он
+    снова ловил бы улучшение.
+
+    Качество охраняют полы на имена и само ревью, удаляющее отвергнутые тренды из
+    выпуска, то есть отбор идёт по каждому тренду отдельно.
     """
-    baseline = {"trends_count": 93}
-    normal = {r["metric"]: r for r in evaluate_regressions({"trends_count": 87}, baseline)}
-    collapsed = {r["metric"]: r for r in evaluate_regressions({"trends_count": 5}, baseline)}
-
-    assert normal["trends_count"]["regressed"] is False
-    assert collapsed["trends_count"]["regressed"] is True
-    # Рост слоя регрессией не считается — его ограничивают полы на качество имён.
-    grown = {r["metric"]: r for r in evaluate_regressions({"trends_count": 140}, baseline)}
-    assert grown["trends_count"]["regressed"] is False
+    assert "trends_count" not in REGRESSION_METRICS
+    # Полный обвал по-прежнему невозможен: пол требует хотя бы один тренд.
+    assert not evaluate_floors({"trends_count": 0})[0].passed or any(
+        not r.passed for r in evaluate_floors({"trends_count": 0})
+    )
 
 
 def test_completeness_floors_separate_collapsed_from_working_releases() -> None:

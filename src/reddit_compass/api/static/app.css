@@ -2951,3 +2951,64 @@ a.story-card {
     font-size: var(--text-xs);
     color: var(--text-muted);
 }
+
+/* Панель гейта публикации: почему выпуск на сайте или не на сайте, и кнопка. */
+.gate-panel {
+    margin: 0 0 var(--space-4);
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-left-width: var(--space-1);
+    border-radius: var(--radius);
+    background: var(--surface);
+}
+
+.gate-panel-published { border-left-color: var(--success); }
+.gate-panel-ready { border-left-color: var(--warning); }
+.gate-panel-refused { border-left-color: var(--error); }
+
+.gate-headline {
+    margin: 0;
+    font-size: var(--text-sm);
+}
+
+.gate-reasons {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-4);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}
+
+.gate-reason-kind {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--error);
+}
+
+.gate-reason-detail { color: var(--text-muted); }
+
+.gate-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
+}
+
+.gate-button {
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    color: var(--text);
+    font-size: var(--text-sm);
+    cursor: pointer;
+}
+
+.gate-button:hover { border-color: var(--text-muted); }
+
+/* Обход проверок выглядит иначе, чем обычная публикация: разница между
+   «проверь и опубликуй» и «опубликуй вопреки проверке» должна быть видна глазом. */
+.gate-button-force {
+    border-color: var(--error);
+    color: var(--error);
+    background: transparent;
+}

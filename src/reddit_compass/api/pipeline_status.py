@@ -28,10 +28,12 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from datetime import date as date_cls
+from pathlib import Path
 from typing import Any
 
 # Расписание в UTC — то же, что в `deploy/hostkey/reddit-compass.cron`. Здесь оно нужно
@@ -270,4 +272,92 @@ def pipeline_status(
             "переходит на сайт автоматически — но только если пройдены полы качества "
             "и нет просадки относительно эталонного выпуска."
         ),
+    }
+
+
+def publication_gate_status(
+    engine_conn: sqlite3.Connection | None,
+    *,
+    baseline_path: Path | None = None,
+) -> dict[str, Any]:
+    """Почему свежий выпуск на сайте или не на сайте — с названиями метрик.
+
+    Считать гейт по требованию нельзя: `compute_quality` на боевом релизе занимает 2.3 с,
+    и страница платила бы это на каждой загрузке. Поэтому берётся сохранённый отчёт
+    (`engine_quality_reports`), а регрессии выводятся из его же метрик — это сравнение
+    чисел со снимком, без единого запроса к базе.
+    """
+    empty: dict[str, Any] = {"state": "unknown", "reasons": [], "trend_release_id": ""}
+    if engine_conn is None:
+        return empty
+    try:
+        shadow = engine_conn.execute(
+            "SELECT story_release_id, trend_release_id, created_at FROM radar_publications "
+            "WHERE channel = 'shadow' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+        broad = engine_conn.execute(
+            "SELECT trend_release_id FROM radar_publications "
+            "WHERE channel = 'broad' ORDER BY created_at DESC LIMIT 1"
+        ).fetchone()
+    except sqlite3.Error:
+        return empty
+    if shadow is None:
+        return empty
+
+    trend_release_id = str(shadow["trend_release_id"])
+    story_release_id = str(shadow["story_release_id"])
+    if broad is not None and str(broad["trend_release_id"]) == trend_release_id:
+        return {
+            "state": "published",
+            "reasons": [],
+            "trend_release_id": trend_release_id,
+            "story_release_id": story_release_id,
+        }
+
+    from ..intelligence.quality import DEFAULT_BASELINE_PATH, evaluate_regressions, load_baseline
+
+    reasons: list[dict[str, str]] = []
+    try:
+        report = engine_conn.execute(
+            "SELECT metrics_json, floors_json, passed FROM engine_quality_reports "
+            "WHERE trend_release_id = ? ORDER BY created_at DESC LIMIT 1",
+            (trend_release_id,),
+        ).fetchone()
+    except sqlite3.Error:
+        report = None
+    if report is None:
+        return {**empty, "state": "unevaluated", "trend_release_id": trend_release_id}
+
+    for floor in json.loads(str(report["floors_json"]) or "[]"):
+        if not floor.get("passed", True):
+            reasons.append(
+                {
+                    "kind": "пол",
+                    "metric": str(floor.get("metric", "")),
+                    "detail": f"{floor.get('value')} при пороге {floor.get('floor')}",
+                }
+            )
+
+    metrics = json.loads(str(report["metrics_json"]) or "{}")
+    path = baseline_path or DEFAULT_BASELINE_PATH
+    if path.exists():
+        try:
+            baseline = load_baseline(path)
+        except (OSError, ValueError):
+            baseline = {}
+        for item in evaluate_regressions(metrics, baseline) if baseline else []:
+            if item["regressed"]:
+                reasons.append(
+                    {
+                        "kind": "регрессия",
+                        "metric": str(item["metric"]),
+                        "detail": f"{item['current']} против эталонных {item['baseline']}",
+                    }
+                )
+
+    return {
+        "state": "ready" if not reasons else "refused",
+        "reasons": reasons,
+        "trend_release_id": trend_release_id,
+        "story_release_id": story_release_id,
     }

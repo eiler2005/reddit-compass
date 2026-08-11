@@ -1,0 +1,64 @@
+{# Почему свежий выпуск на сайте или не на сайте — с названиями метрик и кнопкой.
+
+   Панель показывает уже посчитанный вердикт: `compute_quality` на боевом релизе занимает
+   2.3 с, и считать его на каждой загрузке страницы нельзя. Берётся сохранённый отчёт, а
+   регрессии выводятся из его же метрик — сравнение чисел, без запросов к базе. #}
+{% if gate and gate.state != 'unknown' %}
+<section class="gate-panel gate-panel-{{ gate.state }}" aria-label="Состояние публикации">
+    {% if gate.state == 'published' %}
+    <p class="gate-headline">Свежий выпуск на сайте.</p>
+
+    {% elif gate.state == 'unevaluated' %}
+    <p class="gate-headline">Выпуск построен, но качество ещё не оценено.</p>
+
+    {% else %}
+    <p class="gate-headline">
+        {% if gate.state == 'ready' %}
+        Выпуск построен и прошёл проверки, но на сайт ещё не переведён.
+        {% else %}
+        Выпуск построен, но не прошёл проверки — на сайте остаётся прежний.
+        {% endif %}
+    </p>
+
+    {% if gate.reasons %}
+    <ul class="gate-reasons">
+        {% for reason in gate.reasons %}
+        <li>
+            <span class="gate-reason-kind">{{ reason.kind }}</span>
+            <code>{{ reason.metric }}</code>
+            <span class="gate-reason-detail">{{ reason.detail }}</span>
+        </li>
+        {% endfor %}
+    </ul>
+    {% endif %}
+
+    <div class="gate-actions">
+        <form method="post" action="/ui/publish">
+            <input type="hidden" name="story_release" value="{{ gate.story_release_id }}">
+            <input type="hidden" name="trend_release" value="{{ gate.trend_release_id }}">
+            <input type="hidden" name="return_to" value="/today">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="gate-button">Опубликовать на сайт</button>
+        </form>
+
+        {# Обход гейта — отдельная форма с подтверждением, а не флажок рядом с обычной
+           кнопкой: разница между «проверь и опубликуй» и «опубликуй вопреки проверке»
+           должна стоить отдельного движения руки. Обход пишется в журнал как
+           `publish_forced` и остаётся различимым в истории. #}
+        {% if gate.state == 'refused' %}
+        <form method="post" action="/ui/publish"
+              onsubmit="return confirm('Опубликовать в обход проверок? Причины отказа перечислены выше. Обход будет записан в журнал.');">
+            <input type="hidden" name="story_release" value="{{ gate.story_release_id }}">
+            <input type="hidden" name="trend_release" value="{{ gate.trend_release_id }}">
+            <input type="hidden" name="force" value="1">
+            <input type="hidden" name="return_to" value="/today">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="gate-button gate-button-force">
+                Опубликовать вопреки отказу
+            </button>
+        </form>
+        {% endif %}
+    </div>
+    {% endif %}
+</section>
+{% endif %}
