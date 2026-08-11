@@ -1788,6 +1788,27 @@ def test_runs_page_shows_the_calendar_coverage_strip(engine_client: TestClient) 
     assert "coverage-day-sources" in page.text
 
 
+def test_todays_uncollected_day_is_not_painted_as_a_failure(engine_client: TestClient) -> None:
+    """Сегодняшний день до 13:00 UTC ещё не собирался — это не отказ.
+
+    Полоса показывала его теми же средствами, что настоящий провал: `0/5 адаптеров`,
+    `0/21 изданий`, все источники красным. Логика при этом была права — `gap_count: 0`,
+    а причина записана словами «текущий UTC-день, сбор ещё не завершён». Врало только
+    отображение, и врало каждое утро: тревога на исправной системе перестаёт читаться
+    ровно к тому дню, когда она понадобится.
+    """
+    page = engine_client.get("/runs")
+
+    assert page.status_code == 200
+    # Сегодняшняя карточка помечена ожиданием и не красит источники как отказавшие.
+    if "coverage-day-pending" in page.text:
+        pending_block = page.text.split("coverage-day-pending", 1)[1].split("</li>\n        {%", 1)[
+            0
+        ]
+        assert "coverage-source-bad" not in pending_block[:1200]
+        assert "ещё не начинался" in page.text
+
+
 def test_runs_page_expands_publishers_behind_each_adapter(
     engine_client: TestClient, tmp_path: Path
 ) -> None:

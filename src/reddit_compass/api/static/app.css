@@ -2832,6 +2832,13 @@ a.story-card {
     font-weight: 600;
 }
 
+/* Ожидание — не отказ. Источник сегодняшнего дня до 13:00 UTC просто ещё не
+   собирался, и красный кружок здесь означал бы аварию, которой нет. */
+.coverage-source-pending {
+    color: var(--text-muted);
+    opacity: 0.55;
+}
+
 .coverage-source-name {
     font-family: var(--font-mono);
 }

@@ -23,16 +23,28 @@
         {% for day in coverage.days %}
         <li class="coverage-day coverage-day-{{ day.state }}">
             <span class="coverage-day-label">{{ day.date[8:10] }}</span>
+            {# Нули у сегодняшнего дня — не «ничего не собралось», а «ещё не начинали».
+               Показывать их теми же цифрами, что и настоящий провал, значит каждое утро
+               рисовать аварию на исправной системе. #}
+            {% if day.state == 'pending' %}
+            <span class="coverage-day-count">сбор с 13:00 UTC</span>
+            <span class="coverage-day-count">ещё не начинался</span>
+            {% else %}
             <span class="coverage-day-count">{{ day.ok_count }}/{{ day.total_count }} адапт.</span>
             <span class="coverage-day-count{% if day.missing_providers %} coverage-day-thin{% endif %}"
                   title="{% if day.missing_providers %}Нет изданий: {{ day.missing_providers | join(', ') }}{% else %}Все издания дали материал{% endif %}">
                 {{ day.providers_ok }}/{{ day.providers_expected }} изд.</span>
+            {% endif %}
             {# Разрез виден и без наведения — на мобильном hover не существует. #}
+            {# У сегодняшнего дня источники не «отсутствуют», а «ещё не собирались»:
+               сбор идёт с 13:00 UTC, и до этого часа пустая карточка — норма, а не
+               отказ. Красить её как аварию значит показывать тревогу каждое утро; так
+               сигнал перестают читать ровно к тому дню, когда он понадобится. #}
             <ul class="coverage-day-sources">
                 {% for source in day.sources %}
-                <li class="coverage-source coverage-source-{{ 'ok' if source.ok else 'bad' }}"
-                    title="{{ source.source_id }}: health {{ source.state }}, артефакт {{ 'есть' if source.artifact else 'нет' }}">
-                    <span aria-hidden="true">{{ '●' if source.ok else '○' }}</span>
+                <li class="coverage-source coverage-source-{{ 'ok' if source.ok else ('pending' if day.state == 'pending' else 'bad') }}"
+                    title="{{ source.source_id }}: {% if day.state == 'pending' and not source.ok %}сбор ещё не начинался{% else %}health {{ source.state }}, артефакт {{ 'есть' if source.artifact else 'нет' }}{% endif %}">
+                    <span aria-hidden="true">{{ '●' if source.ok else ('·' if day.state == 'pending' else '○') }}</span>
                     <span class="coverage-source-name">{{ source.source_id }}</span>
                 </li>
                 {% endfor %}
