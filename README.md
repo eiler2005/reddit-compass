@@ -178,6 +178,7 @@ public sources
 | Story/trend algorithms, Golden Set, review, quality and rollback | [`docs/TREND_ENGINE.md`](docs/TREND_ENGINE.md) |
 | Quality floors and regression gates | [`docs/QUALITY_GATES.md`](docs/QUALITY_GATES.md) |
 | Qwen cost routing: pay-as-you-go models, confirmed grants, usage ledger | [`docs/QWEN_ROUTING.md`](docs/QWEN_ROUTING.md) |
+| LLM call inventory, credentials, migration and rollback rule | [`docs/LLM_PROVIDER_MAP.md`](docs/LLM_PROVIDER_MAP.md) |
 | Nightly schedule, publication gate, promotion to broad, observability | [`docs/AUTOMATED_PIPELINE.md`](docs/AUTOMATED_PIPELINE.md) |
 | Backups, data freshness in `/health`, nightly run verdict | [`docs/BACKUP.md`](docs/BACKUP.md) |
 | Architecture handoff and published 2026-08-05 release | [`docs/SESSION_2026-08-05_RELEASE.md`](docs/SESSION_2026-08-05_RELEASE.md) |
@@ -498,6 +499,7 @@ Full rules: [`AGENTS.md`](AGENTS.md)
 
 | Document | Topic |
 |---|---|
+| [docs/LLM_PROVIDER_MAP.md](docs/LLM_PROVIDER_MAP.md) | LLM workloads, key-variable map, cost controls, migration and rollback rules |
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Full system architecture with diagrams |
 | [`ROADMAP.md`](ROADMAP.md) | Phases 2–6, status |
 | [`docs/MULTI_SOURCE_PLAN.md`](docs/MULTI_SOURCE_PLAN.md) | Source capability registry and source-cluster plan |

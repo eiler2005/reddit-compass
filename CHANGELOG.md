@@ -7,6 +7,12 @@
 
 ### Added
 
+- **LLM Provider Map.** docs/LLM_PROVIDER_MAP.md now inventories each LLM
+  workload, Qwen credential/configuration names, ledger and cache boundaries,
+  and the required shadow, cost-control, and rollback process for future
+  provider migrations. DeepSeek is explicitly documented as not configured in
+  this runtime.
+
 - **LinkedIn-источник (гостевой, opt-in).** Новый адаптер `sources/linkedin.py` собирает
   публичные посты и статьи четырёх технологов (Andrew Ng, Fei-Fei Li, Allie K. Miller,
   Cassie Kozyrkov) без логина. Профили и ленты закрыты authwall'ом и не используются:
