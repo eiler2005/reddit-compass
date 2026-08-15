@@ -4442,12 +4442,20 @@ def _adapt_schema_trends(
     by_id = {str(story["story_id"]): story for story in stories}
     # Первый проход считает trend_id каждой записи, второй связывает детей с родителем:
     # id родителя известен только после того, как посчитан его собственный.
+    # Личность тренда — его схемный ключ, то есть пара «действие + домен». Состав в неё
+    # не входит: «product launches in AI» — одно и то же явление и с сорока сюжетами, и
+    # с пятьюдесятью одним. Состав это свойство, а не личность.
+    #
+    # Раньше в хэш шли ещё и все story_id, поэтому идентификатор менялся, стоило одному
+    # сюжету войти или выйти, — а окно семидневное и едет каждую ночь. Замер 15 августа:
+    # между соседними опубликованными выпусками совпадало 22–26 % идентификаторов, хотя
+    # «product launches in AI» присутствует каждый день. Для системы это было каждый раз
+    # новое явление, и жизненный цикл (`new`/`growing`/`fading`) не мог отследить ничего.
+    #
+    # Коллизий смена не создаёт: словарь и так ключуется одним `schema_key`, то есть его
+    # уникальность внутри выпуска уже предполагалась.
     id_by_schema_key = {
-        str(trend["schema_key"]): _stable_id(
-            "trend",
-            str(trend["schema_key"]),
-            *sorted(str(story_id) for story_id in trend["story_ids"]),
-        )
+        str(trend["schema_key"]): _stable_id("trend", str(trend["schema_key"]))
         for trend in raw_trends
     }
     adapted: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
@@ -5466,14 +5474,24 @@ def _apply_trend_lifecycle_history(
     resolved = []
     for trend, memberships in trends:
         lifecycle = "insufficient_history"
+        # Сравнение идёт с последним **опубликованным** выпуском, а не с любым.
+        #
+        # Прежний запрос брал самый свежий релиз с таким же trend_id и ничего не
+        # исключал. Но цикл строит два релиза подряд — провизорный и финальный, с
+        # разницей в минуту, — поэтому финальный находил провизорный и заключал, что
+        # ничего не изменилось. Замер 15 августа: все 68 трендов выпуска оказались
+        # `stable`, ни одного `new`, `growing` или `fading` за пять ночей.
+        #
+        # Правильная точка отсчёта — то, что читатель видел вчера. Промежуточный
+        # артефакт своего же цикла точкой отсчёта быть не может.
         previous = conn.execute(
             """
-            SELECT t.*, r.created_at
+            SELECT t.*, p.created_at
             FROM engine_trends AS t
-            JOIN trend_releases AS r
-              ON r.trend_release_id = t.trend_release_id
-            WHERE t.trend_id = ?
-            ORDER BY r.created_at DESC
+            JOIN radar_publications AS p
+              ON p.trend_release_id = t.trend_release_id
+            WHERE t.trend_id = ? AND p.channel = 'broad'
+            ORDER BY p.created_at DESC
             LIMIT 1
             """,
             (trend["trend_id"],),

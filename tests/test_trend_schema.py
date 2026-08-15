@@ -938,3 +938,51 @@ def test_both_schema_generations_name_the_residual_bucket_alike() -> None:
 
     assert v3 is not None
     assert v3[1] == result[1]
+
+
+def test_trend_identity_survives_a_changing_member_list() -> None:
+    """Личность тренда — его схемный ключ, состав в неё не входит.
+
+    Раньше в хэш шли все `story_id`, поэтому идентификатор менялся, стоило одному сюжету
+    войти или выйти. Окно семидневное и едет каждую ночь, так что менялся он всегда:
+    замер 15 августа показал совпадение 22–26 % идентификаторов между соседними
+    опубликованными выпусками, хотя «product launches in AI» присутствует каждый день.
+    Жизненный цикл отследить такое не мог — сравнивать было не с чем.
+    """
+    from reddit_compass.intelligence.engine import _adapt_schema_trends
+
+    def build(story_ids: list[str]) -> str:
+        stories = [
+            {
+                "story_id": sid,
+                "title": f"t{sid}",
+                "summary_ru": "",
+                "domain_ids": '["ai_technology"]',
+                "theme_ids": "[]",
+                "first_seen": "2026-08-10",
+                "last_seen": "2026-08-15",
+                "source_count": 2,
+            }
+            for sid in story_ids
+        ]
+        # Поля ровно те, что читает адаптер: name_ru, pattern, schema_key, story_ids,
+        # distinct_actors, first_seen, last_seen.
+        raw = [
+            {
+                "schema_key": "launch|ai_technology",
+                "name_ru": "product launches in AI",
+                "pattern": "повторяющиеся запуски продуктов",
+                "story_ids": story_ids,
+                "distinct_actors": ["OpenAI", "Anthropic"],
+                "actor_by_story": dict.fromkeys(story_ids, "OpenAI"),
+                "first_seen": "2026-08-10",
+                "last_seen": "2026-08-15",
+            }
+        ]
+        adapted = _adapt_schema_trends(raw, stories)
+        return str(adapted[0][0]["trend_id"])
+
+    # Вчера три сюжета, сегодня четыре — то же явление, тот же идентификатор.
+    assert build(["s1", "s2", "s3"]) == build(["s1", "s2", "s3", "s4"])
+    # Совсем другой состав, но тот же схемный ключ — по-прежнему тот же тренд.
+    assert build(["s1", "s2", "s3"]) == build(["s7", "s8"])

@@ -1249,7 +1249,22 @@ def _engine_trends(
         SELECT *
         FROM engine_trends
         WHERE trend_release_id = ?
-        ORDER BY confidence DESC, source_count DESC, story_count DESC, last_seen DESC, trend_id
+        -- Подтверждённость ревью — первый ключ, свежесть — второй.
+        --
+        -- Прежний порядок начинался с `confidence`, а он почти не различает: в выпуске
+        -- 15 августа семь трендов имели ровно 1.00, и решали ничью остальные ключи.
+        -- Свежесть при этом стояла четвёртой, поэтому тренд двухдневной давности
+        -- обгонял сегодняшний, если у него было больше источников.
+        --
+        -- Главное же: в первой шестёрке не было ни одного подтверждённого. Мы тратим
+        -- бюджет Qwen на проверку состава трендов, и до этой правки проверка никак не
+        -- влияла на то, что читатель видит первым.
+        ORDER BY (review_status = 'confirmed') DESC,
+                 last_seen DESC,
+                 confidence DESC,
+                 source_count DESC,
+                 story_count DESC,
+                 trend_id
         """,
         (trend_release.trend_release_id,),
     ).fetchall()
