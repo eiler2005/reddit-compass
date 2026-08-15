@@ -54,6 +54,24 @@ from .query_service import (
 router = APIRouter(prefix="/api/v2", tags=["v2"])
 
 
+def _has_column(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    """Есть ли колонка в базе, которую мы читаем.
+
+    API открывает движковую базу **только на чтение**, а колонки добавляет миграция при
+    записи, то есть ночной цикл. Между выкаткой кода и первым прогоном схема на диске
+    старше кода, и запрос, упомянувший новую колонку, падает `OperationalError` — вся
+    страница отдаёт пятисотку.
+
+    16 августа это едва не случилось на бою: колонку `strength` спас только порядок шагов
+    деплоя (`version --record` открывает базу на запись и попутно мигрирует). Полагаться
+    на такую случайность нельзя — читатель обязан переживать схему старше своего кода.
+    """
+    try:
+        return any(str(row[1]) == column for row in conn.execute(f"PRAGMA table_info({table})"))
+    except sqlite3.Error:
+        return False
+
+
 def _get_db() -> Generator[sqlite3.Connection, None, None]:
     db_path = Path(os.environ.get("RC_DB_PATH", "data/compass.db"))
     if os.access(db_path, os.W_OK):
@@ -1244,8 +1262,11 @@ def _engine_trends(
         channel=channel,
         publication_id=publication_id,
     )
+    # Сила ранжирует, если она есть в схеме. База на диске может быть старше кода:
+    # колонки добавляет миграция при записи, то есть ночной цикл, а API читает.
+    strength_key = "strength DESC," if _has_column(conn, "engine_trends", "strength") else ""
     rows = conn.execute(
-        """
+        f"""
         SELECT *
         FROM engine_trends
         WHERE trend_release_id = ?
@@ -1259,7 +1280,8 @@ def _engine_trends(
         -- Главное же: в первой шестёрке не было ни одного подтверждённого. Мы тратим
         -- бюджет Qwen на проверку состава трендов, и до этой правки проверка никак не
         -- влияла на то, что читатель видит первым.
-        ORDER BY (review_status = 'confirmed') DESC,
+        ORDER BY {strength_key}
+                 (review_status = 'confirmed') DESC,
                  last_seen DESC,
                  confidence DESC,
                  source_count DESC,

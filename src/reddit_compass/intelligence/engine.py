@@ -67,6 +67,7 @@ from .models import ContentItem
 from .reddit_pulse import build_reddit_pulse_signals, perspective_gap_available_counts
 from .story_scoring import auto_label_pair, extract_feature_vector, train_merge_model
 from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
+from .trend_ranking import trend_strength
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
 ENGINE_SCHEMA_VERSION = 7
@@ -284,6 +285,7 @@ CREATE TABLE IF NOT EXISTS engine_trends (
     counterpoints      TEXT NOT NULL DEFAULT '[]',
     review_status      TEXT NOT NULL DEFAULT 'pending',
     review_id          TEXT NOT NULL DEFAULT '',
+    strength           REAL NOT NULL DEFAULT 0.0,
     PRIMARY KEY (trend_release_id, trend_id)
 );
 
@@ -756,6 +758,9 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
     # Воспроизводимость требует не отпечатка параметров, а самих параметров.
     _ensure_engine_column(conn, "story_releases", "params_json", "TEXT NOT NULL DEFAULT '{}'")
     _ensure_engine_column(conn, "trend_releases", "params_json", "TEXT NOT NULL DEFAULT '{}'")
+    # Сила тренда появилась 16 августа; существующие базы получают колонку миграцией,
+    # а старые выпуски остаются с нулём — их порядок уже зафиксирован публикацией.
+    _ensure_engine_column(conn, "engine_trends", "strength", "REAL NOT NULL DEFAULT 0.0")
     _ensure_engine_column(
         conn,
         "radar_publications",
@@ -4998,8 +5003,8 @@ def create_trend_release(
                     confidence, lifecycle, source_scope, first_seen, last_seen,
                     story_count, source_count, project_scores, evidence_story_ids,
                     counterpoints, review_status, review_id, parent_trend_id,
-                    distinct_actors, review_name_ru)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    distinct_actors, review_name_ru, strength)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     trend_release_id,
                     trend["trend_id"],
@@ -5021,6 +5026,16 @@ def create_trend_release(
                     trend.get("parent_trend_id", ""),
                     _json(trend.get("distinct_actors", [])),
                     trend.get("review_name_ru", ""),
+                    # Сила считается на дату выпуска и замораживается вместе с ним:
+                    # выпуск immutable, и его порядок не должен меняться от того, когда
+                    # его открыли. Пересчёт происходит на следующем прогоне.
+                    trend_strength(
+                        story_count=int(trend.get("story_count") or 0),
+                        distinct_actors=len(trend.get("distinct_actors") or []),
+                        confirmed=trend.get("review_status") == "confirmed",
+                        last_seen=str(trend.get("last_seen") or ""),
+                        today=datetime.now(UTC).date(),
+                    ),
                 ),
             )
             conn.executemany(
