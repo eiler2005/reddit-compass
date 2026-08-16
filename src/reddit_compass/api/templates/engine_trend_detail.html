@@ -93,10 +93,23 @@
 
     <section class="section">
         <h2>Stories inside trend</h2>
+        {# Затухающий тренд перенесён из прежнего выпуска: его материал остался там, и в
+           текущем релизе сюжетов у него нет. Показывать пустой список без объяснения
+           значит выдавать нормальное состояние за поломку — читатель видит тренд без
+           единого материала и не понимает, почему. #}
+        {% if not trend.stories and trend.lifecycle == 'fading' %}
+        <p class="section-note">
+            Тренд затухает: свежих материалов нет с {{ trend.last_seen }}.
+            Сюжеты остались в выпуске, где он был живым — найти их можно
+            <a href="/stories?{{ analysis_query }}&amp;q={{ trend.name_ru | urlencode }}">поиском по названию</a>.
+            Пока сила тренда держится выше порога, он остаётся на странице; затем уходит.
+        </p>
+        {% else %}
         <p class="section-note">
             Показано {{ trend.stories|length }} из {{ trend.story_count }} stories.
             Полный список открывайте через <a href="/stories?{{ analysis_query }}">Stories workspace</a>.
         </p>
+        {% endif %}
         <div class="shelf-grid">
             {% for story in trend.stories %}
             <article class="story-card">
