@@ -171,3 +171,41 @@ def test_strictness_is_kept_where_it_carries_meaning() -> None:
 
     assert review is None
     assert errors
+
+
+def test_structured_counterpoints_do_not_discard_the_verdict() -> None:
+    """Модель привязывает возражение к сюжету — и это не повод терять подтверждение.
+
+    Замер 16 августа: все восемь крупнейших трендов выпуска получили `valid=0`, потому
+    что `counterpoints` пришли списком объектов `{story_id, text}`. Вердикт при этом был
+    полноценным — `coherent_trend` с семью доказательствами.
+
+    Отсюда и корреляция с размером: чем крупнее тренд, тем богаче материал и тем
+    структурнее модель пишет возражения. Строгость к форме наказывала ровно те тренды,
+    которые читатель видит первыми.
+    """
+    raw = json.dumps(
+        {
+            "decision": "coherent_trend",
+            "trend_name_ru": "Волна релизов моделей",
+            "pattern": "повторяющиеся выпуски моделей у разных вендоров",
+            "story_ids": ["s1", "s2", "s3"],
+            "evidence_story_ids": ["s1", "s2", "s3"],
+            "counterpoints": [
+                {"story_id": "s1", "text": "часть новостей — локальные анонсы"},
+                {"story_id": "s2", "note": "дублирование покрытия"},
+            ],
+            "domains": ["ai_technology"],
+            "confidence": 0.8,
+        }
+    )
+
+    review, errors = validate_trend_review(raw, allowed_story_ids={"s1", "s2", "s3"})
+
+    assert errors == []
+    assert review is not None
+    assert review.decision == "coherent_trend"
+    assert review.counterpoints == [
+        "часть новостей — локальные анонсы",
+        "дублирование покрытия",
+    ]
