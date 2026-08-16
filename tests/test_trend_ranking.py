@@ -102,3 +102,104 @@ def test_reader_survives_a_schema_older_than_its_code(tmp_path) -> None:
     assert _has_column(conn, "engine_trends", "review_status") is True
     # Несуществующая таблица тоже не роняет читателя.
     assert _has_column(conn, "no_such_table", "strength") is False
+
+
+def test_fading_trend_survives_the_window_then_goes_quiet(tmp_path) -> None:
+    """Тренд, выпавший из окна, доживает на странице и уходит сам.
+
+    До этого он исчезал в тот день, когда переставал попадать в семидневное окно, —
+    читатель видел обрыв вместо затухания. Решает не счётчик выпусков, а сила: она
+    падает сама, и тренд тонет в выдаче задолго до того, как пропасть.
+    """
+    from datetime import date as _date
+
+    from reddit_compass.intelligence.engine import (
+        carry_over_fading_trends,
+        engine_db,
+        record_trend_history,
+    )
+
+    conn = engine_db(tmp_path / "trend_engine.db")
+    live = [
+        (
+            {
+                "trend_id": "trend_launch_ai",
+                "name_ru": "product launches in AI",
+                "pattern": "p",
+                "domain_ids": ["ai_technology"],
+                "first_seen": "2026-08-10",
+                "last_seen": "2026-08-12",
+                "story_count": 30,
+                "source_count": 6,
+                "distinct_actors": ["OpenAI", "Anthropic", "Google", "Meta", "Mistral"],
+                "review_status": "confirmed",
+            },
+            [],
+        )
+    ]
+    record_trend_history(conn, live, story_release_id="stories_old", now="2026-08-12T16:00:00Z")
+
+    # Через двое суток тренда нет в свежем выпуске — но он ещё заметен и переносится.
+    carried = carry_over_fading_trends(conn, [], today=_date(2026, 8, 14))
+    assert [t["trend_id"] for t, _ in carried] == ["trend_launch_ai"]
+    faded = carried[0][0]
+    assert faded["lifecycle"] == "fading"
+    assert faded["carried_from_release"] == "stories_old"
+    # Материал остался в прежнем выпуске: сюжетов у перенесённого нет.
+    assert carried[0][1] == []
+
+    # Через две недели он уже не переносится — угас.
+    assert carry_over_fading_trends(conn, [], today=_date(2026, 8, 26)) == []
+
+    # Пока тренд жив в сегодняшнем выпуске, дубля переносом не возникает.
+    same_day = carry_over_fading_trends(conn, live, today=_date(2026, 8, 14))
+    assert len(same_day) == 1
+
+
+def test_fading_trends_are_capped_so_they_cannot_crowd_out_fresh(tmp_path) -> None:
+    """За окном живёт длинный хвост слабых трендов — числом, а не силой.
+
+    Замер 16 августа: порог 0.15 переносил 28 трендов из 59 спустя неделю, то есть
+    архив рядом со свежим; порог 1.0 не переносил ни одного. Одним порогом это не
+    разводится, потому что тренд покидает семидневное окно уже на 9 % от базы.
+    Ограничение по числу отвечает на другой вопрос — сколько места затухающее вправе
+    занимать рядом со свежим.
+    """
+    from datetime import date as _date
+
+    from reddit_compass.intelligence.engine import (
+        carry_over_fading_trends,
+        engine_db,
+        record_trend_history,
+    )
+    from reddit_compass.intelligence.trend_ranking import MAX_CARRIED_TRENDS
+
+    conn = engine_db(tmp_path / "trend_engine.db")
+    many = [
+        (
+            {
+                "trend_id": f"trend_{index:03}",
+                "name_ru": f"trend {index}",
+                "pattern": "p",
+                "domain_ids": ["business"],
+                "first_seen": "2026-08-10",
+                "last_seen": "2026-08-12",
+                # Размер убывает — значит и сила, и порядок переноса предсказуемы.
+                "story_count": 60 - index,
+                "source_count": 4,
+                "distinct_actors": ["a", "b", "c", "d", "e"],
+                "review_status": "pending",
+            },
+            [],
+        )
+        for index in range(30)
+    ]
+    record_trend_history(conn, many, story_release_id="stories_old", now="2026-08-12T16:00:00Z")
+
+    carried = carry_over_fading_trends(conn, [], today=_date(2026, 8, 13))
+
+    assert len(carried) == MAX_CARRIED_TRENDS
+    # Переносятся именно сильнейшие, а не первые попавшиеся.
+    assert [t["trend_id"] for t, _ in carried] == [
+        f"trend_{i:03}" for i in range(MAX_CARRIED_TRENDS)
+    ]

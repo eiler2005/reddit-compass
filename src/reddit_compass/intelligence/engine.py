@@ -67,7 +67,7 @@ from .models import ContentItem
 from .reddit_pulse import build_reddit_pulse_signals, perspective_gap_available_counts
 from .story_scoring import auto_label_pair, extract_feature_vector, train_merge_model
 from .taxonomy import compute_project_scores, is_routine_beat, normalize_domain_ids
-from .trend_ranking import trend_strength
+from .trend_ranking import MAX_CARRIED_TRENDS, carry_over_state, trend_strength
 
 DEFAULT_ENGINE_DB_PATH = DEFAULT_DATA_DIR / "trend_engine.db"
 ENGINE_SCHEMA_VERSION = 7
@@ -287,6 +287,31 @@ CREATE TABLE IF NOT EXISTS engine_trends (
     review_id          TEXT NOT NULL DEFAULT '',
     strength           REAL NOT NULL DEFAULT 0.0,
     PRIMARY KEY (trend_release_id, trend_id)
+);
+
+-- Память о трендах между выпусками: без неё тренд, выпавший из семидневного окна,
+-- исчезает со страницы без предупреждения. Здесь хранится последнее известное
+-- состояние каждого тренда, чтобы затухающий мог дожить на странице до того, как
+-- его сила упадёт ниже порога.
+--
+-- Ключ — устойчивый `trend_id` (пара «действие + домен»), поэтому запись переживает
+-- смену состава: она и есть личность тренда.
+CREATE TABLE IF NOT EXISTS trend_history (
+    trend_id          TEXT PRIMARY KEY,
+    name_ru           TEXT NOT NULL,
+    pattern           TEXT NOT NULL DEFAULT '',
+    domain_ids        TEXT NOT NULL DEFAULT '[]',
+    first_seen        TEXT NOT NULL DEFAULT '',
+    last_seen         TEXT NOT NULL DEFAULT '',
+    story_count       INTEGER NOT NULL DEFAULT 0,
+    source_count      INTEGER NOT NULL DEFAULT 0,
+    distinct_actors   TEXT NOT NULL DEFAULT '[]',
+    review_status     TEXT NOT NULL DEFAULT 'pending',
+    peak_story_count  INTEGER NOT NULL DEFAULT 0,
+    -- Откуда брать материал, если тренд уже вне текущего выпуска: страница детали
+    -- честно ссылается на выпуск, где он в последний раз был живым.
+    source_release_id TEXT NOT NULL DEFAULT '',
+    updated_at        TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS engine_trend_stories (
@@ -4927,6 +4952,16 @@ def create_trend_release(
     )
     # Ревью могло удалить родителя и переименовать ребёнка — дерево чиним до записи.
     trends = _reconcile_trend_hierarchy(trends)
+    # Память о трендах пишется по сегодняшнему составу, а перенос затухающих делается
+    # после неё — иначе перенесённый тренд тут же переписал бы свою же историю сегодняшней
+    # датой и никогда не угас.
+    record_trend_history(
+        conn,
+        trends,
+        story_release_id=story_release_id,
+        now=datetime.now(UTC).isoformat(),
+    )
+    trends = carry_over_fading_trends(conn, trends, today=datetime.now(UTC).date())
     confirmed_trend_count = sum(1 for trend, _ in trends if trend["review_status"] == "confirmed")
     child_count = sum(1 for trend, _ in trends if trend.get("parent_trend_id"))
     parent_count = len(
@@ -5029,7 +5064,8 @@ def create_trend_release(
                     # Сила считается на дату выпуска и замораживается вместе с ним:
                     # выпуск immutable, и его порядок не должен меняться от того, когда
                     # его открыли. Пересчёт происходит на следующем прогоне.
-                    trend_strength(
+                    trend.get("strength_override")
+                    or trend_strength(
                         story_count=int(trend.get("story_count") or 0),
                         distinct_actors=len(trend.get("distinct_actors") or []),
                         confirmed=trend.get("review_status") == "confirmed",
@@ -5478,6 +5514,139 @@ def _trend_review_payload(
         for story_id in sorted(story_ids)
         if story_id in stories
     ]
+
+
+def record_trend_history(
+    conn: sqlite3.Connection,
+    trends: list[tuple[dict[str, Any], list[tuple[str, float, str]]]],
+    *,
+    story_release_id: str,
+    now: str,
+) -> None:
+    """Запоминает последнее живое состояние каждого тренда выпуска.
+
+    Без этой памяти тренд, выпавший из семидневного окна, исчезает со страницы без
+    предупреждения — читатель видит обрыв вместо затухания. Ключ — устойчивый
+    `trend_id`, то есть пара «действие + домен»: запись переживает смену состава,
+    потому что состав это свойство тренда, а не его личность.
+
+    `peak_story_count` накапливается максимумом: он говорит, насколько крупным тренд
+    был в лучший свой день, и это единственное, что нельзя восстановить из текущего
+    выпуска.
+    """
+    for trend, _ in trends:
+        conn.execute(
+            """
+            INSERT INTO trend_history (
+                trend_id, name_ru, pattern, domain_ids, first_seen, last_seen,
+                story_count, source_count, distinct_actors, review_status,
+                peak_story_count, source_release_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(trend_id) DO UPDATE SET
+                name_ru = excluded.name_ru,
+                pattern = excluded.pattern,
+                domain_ids = excluded.domain_ids,
+                first_seen = MIN(trend_history.first_seen, excluded.first_seen),
+                last_seen = excluded.last_seen,
+                story_count = excluded.story_count,
+                source_count = excluded.source_count,
+                distinct_actors = excluded.distinct_actors,
+                review_status = excluded.review_status,
+                peak_story_count = MAX(trend_history.peak_story_count, excluded.story_count),
+                source_release_id = excluded.source_release_id,
+                updated_at = excluded.updated_at
+            """,
+            (
+                trend["trend_id"],
+                trend["name_ru"],
+                trend.get("pattern", ""),
+                _json(trend.get("domain_ids", [])),
+                trend.get("first_seen", ""),
+                trend.get("last_seen", ""),
+                int(trend.get("story_count") or 0),
+                int(trend.get("source_count") or 0),
+                _json(trend.get("distinct_actors", [])),
+                trend.get("review_status", "pending"),
+                int(trend.get("story_count") or 0),
+                story_release_id,
+                now,
+            ),
+        )
+    conn.commit()
+
+
+def carry_over_fading_trends(
+    conn: sqlite3.Connection,
+    trends: list[tuple[dict[str, Any], list[tuple[str, float, str]]]],
+    *,
+    today: date,
+) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
+    """Добавляет к выпуску тренды, выпавшие из окна, но ещё не угасшие.
+
+    Смысл в том, чтобы читатель видел дугу, а не обрыв: тренд, о котором три дня нет
+    новостей, ещё интересен как затухающий, а через неделю — уже нет. Решает это не
+    счётчик выпусков, а сила: она падает сама, и тренд тонет в выдаче задолго до того,
+    как исчезнет.
+
+    Перенесённый тренд приходит **без сюжетов**: их материал остался в прежнем выпуске,
+    и делать вид, что он свежий, нельзя. Страница детали честно говорит, что новых
+    материалов нет с такой-то даты, и ссылается на выпуск, где они были.
+    """
+    present = {str(trend["trend_id"]) for trend, _ in trends}
+    try:
+        rows = conn.execute("SELECT * FROM trend_history").fetchall()
+    except sqlite3.Error:
+        return trends
+
+    carried: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
+    for row in rows:
+        trend_id = str(row["trend_id"])
+        if trend_id in present:
+            continue
+        actors = _json_list(row["distinct_actors"])
+        strength, keep = carry_over_state(
+            history_last_seen=str(row["last_seen"] or ""),
+            history_story_count=int(row["story_count"] or 0),
+            history_actors=len(actors),
+            confirmed=str(row["review_status"]) == "confirmed",
+            today=today,
+        )
+        if not keep:
+            continue
+        carried.append(
+            (
+                {
+                    "trend_id": trend_id,
+                    "name_ru": str(row["name_ru"]),
+                    "pattern": str(row["pattern"] or ""),
+                    "domain_ids": _json_list(row["domain_ids"]),
+                    "confidence": 0.0,
+                    "lifecycle": "fading",
+                    "source_scope": (
+                        "cross_source" if int(row["source_count"] or 0) > 1 else "single_source"
+                    ),
+                    "first_seen": str(row["first_seen"] or ""),
+                    "last_seen": str(row["last_seen"] or ""),
+                    "story_count": int(row["story_count"] or 0),
+                    "source_count": int(row["source_count"] or 0),
+                    "project_scores": {},
+                    "evidence_story_ids": [],
+                    "counterpoints": [],
+                    # Статус ревью переносится как есть: подтверждение, полученное три
+                    # дня назад, остаётся правдой о том составе, который тогда был.
+                    "review_status": str(row["review_status"] or "pending"),
+                    "review_id": "",
+                    "distinct_actors": actors,
+                    "carried_from_release": str(row["source_release_id"] or ""),
+                    "strength_override": strength,
+                },
+                [],
+            )
+        )
+    # Сильнейшие вперёд и не больше отведённого числа: за окном живёт длинный хвост
+    # слабых трендов, и без ограничения он занял бы страницу рядом со свежим.
+    carried.sort(key=lambda item: -float(item[0]["strength_override"]))
+    return trends + carried[:MAX_CARRIED_TRENDS]
 
 
 def _apply_trend_lifecycle_history(
