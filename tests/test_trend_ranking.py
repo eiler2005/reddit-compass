@@ -203,3 +203,47 @@ def test_fading_trends_are_capped_so_they_cannot_crowd_out_fresh(tmp_path) -> No
     assert [t["trend_id"] for t, _ in carried] == [
         f"trend_{i:03}" for i in range(MAX_CARRIED_TRENDS)
     ]
+
+
+def test_rejected_trend_is_not_resurrected_as_fading(tmp_path) -> None:
+    """Отказ ревью — утверждение о связности, а не о свежести: затухать нечему.
+
+    Замер 17 августа: все десять «затухающих» в выпуске оказались ровно теми трендами,
+    которые ревью выбросило минутой раньше. Перенос молча отменял его работу — и делал
+    это тем заметнее, чем крупнее был отвергнутый тренд, потому что сила ставила его
+    высоко в выдаче.
+    """
+    from datetime import date as _date
+
+    from reddit_compass.intelligence.engine import (
+        carry_over_fading_trends,
+        engine_db,
+        record_trend_history,
+    )
+
+    conn = engine_db(tmp_path / "trend_engine.db")
+    history = [
+        (
+            {
+                "trend_id": tid,
+                "name_ru": tid,
+                "pattern": "p",
+                "domain_ids": ["business"],
+                "first_seen": "2026-08-10",
+                "last_seen": "2026-08-15",
+                "story_count": 40,
+                "source_count": 5,
+                "distinct_actors": ["a", "b", "c", "d", "e"],
+                "review_status": "pending",
+            },
+            [],
+        )
+        for tid in ("trend_kept", "trend_rejected")
+    ]
+    record_trend_history(conn, history, story_release_id="stories_old", now="2026-08-15T16:00:00Z")
+
+    carried = carry_over_fading_trends(
+        conn, [], today=_date(2026, 8, 16), rejected_ids={"trend_rejected"}
+    )
+
+    assert [t["trend_id"] for t, _ in carried] == ["trend_kept"]

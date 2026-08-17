@@ -4785,8 +4785,15 @@ def create_trend_release(
     params: dict[str, Any] | None = None,
     verified_only: bool = False,
     signal_release_id: str | None = None,
+    carry_history: bool = False,
 ) -> TrendRelease:
-    """Discover recurring patterns over distinct stories, never raw duplicates."""
+    """Discover recurring patterns over distinct stories, never raw duplicates.
+
+    ``carry_history`` включается только для финального релиза цикла. Провизорный
+    строится до применения ревью, и если позволить ему писать историю, туда попадут
+    тренды, которые ревью через минуту отвергнет, — а перенос затухающих потом вернёт
+    их в выпуск. Замер 17 августа: все десять «затухающих» оказались отвергнутыми.
+    """
     story_release = get_story_release(conn, story_release_id)
     if story_release is None or story_release.status not in {"evaluated", "published"}:
         raise ValueError(f"Story release is not evaluated: {story_release_id}")
@@ -4941,6 +4948,7 @@ def create_trend_release(
         history_status=history_status,
     )
     review_drop_stats: dict[str, int] = {}
+    rejected_trend_ids: set[str] = set()
     trends = apply_cached_trend_reviews(
         conn,
         trends=trends,
@@ -4949,19 +4957,26 @@ def create_trend_release(
         prompt_version=str(params["review_prompt_version"]),
         min_distinct_actors=int(params.get("trend_min_distinct_actors", 2)),
         stats=review_drop_stats,
+        rejected_ids=rejected_trend_ids,
     )
     # Ревью могло удалить родителя и переименовать ребёнка — дерево чиним до записи.
     trends = _reconcile_trend_hierarchy(trends)
     # Память о трендах пишется по сегодняшнему составу, а перенос затухающих делается
     # после неё — иначе перенесённый тренд тут же переписал бы свою же историю сегодняшней
     # датой и никогда не угас.
-    record_trend_history(
-        conn,
-        trends,
-        story_release_id=story_release_id,
-        now=datetime.now(UTC).isoformat(),
-    )
-    trends = carry_over_fading_trends(conn, trends, today=datetime.now(UTC).date())
+    if carry_history:
+        record_trend_history(
+            conn,
+            trends,
+            story_release_id=story_release_id,
+            now=datetime.now(UTC).isoformat(),
+        )
+        trends = carry_over_fading_trends(
+            conn,
+            trends,
+            today=datetime.now(UTC).date(),
+            rejected_ids=rejected_trend_ids,
+        )
     confirmed_trend_count = sum(1 for trend, _ in trends if trend["review_status"] == "confirmed")
     child_count = sum(1 for trend, _ in trends if trend.get("parent_trend_id"))
     parent_count = len(
@@ -5389,6 +5404,7 @@ def apply_cached_trend_reviews(
     prompt_version: str,
     min_distinct_actors: int = 2,
     stats: dict[str, int] | None = None,
+    rejected_ids: set[str] | None = None,
 ) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
     """Применяет закэшированные вердикты ревью к кандидатам в тренды.
 
@@ -5401,6 +5417,9 @@ def apply_cached_trend_reviews(
     counters = stats if stats is not None else {}
     for key in ("rejected_trends", "thin_after_review_trends", "few_actors_after_review_trends"):
         counters.setdefault(key, 0)
+    # Идентификаторы отвергнутых собираются отдельно от счётчиков: они нужны переносу,
+    # без них затухание воскрешает ровно то, что ревью только что выбросило.
+    dropped = rejected_ids if rejected_ids is not None else set()
     resolved: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
     for trend, memberships in trends:
         story_ids = [story_id for story_id, _, _ in memberships]
@@ -5448,6 +5467,7 @@ def apply_cached_trend_reviews(
             continue
         if review.decision == "reject":
             counters["rejected_trends"] += 1
+            dropped.add(str(trend["trend_id"]))
             continue
         # Ревью судит выборку, а не весь состав: выкидываем только те из показанных,
         # которые оно не назвало. Непоказанные остаются — модель о них не высказывалась,
@@ -5580,6 +5600,7 @@ def carry_over_fading_trends(
     trends: list[tuple[dict[str, Any], list[tuple[str, float, str]]]],
     *,
     today: date,
+    rejected_ids: set[str] | None = None,
 ) -> list[tuple[dict[str, Any], list[tuple[str, float, str]]]]:
     """Добавляет к выпуску тренды, выпавшие из окна, но ещё не угасшие.
 
@@ -5592,7 +5613,12 @@ def carry_over_fading_trends(
     и делать вид, что он свежий, нельзя. Страница детали честно говорит, что новых
     материалов нет с такой-то даты, и ссылается на выпуск, где они были.
     """
-    present = {str(trend["trend_id"]) for trend, _ in trends}
+    # Отвергнутое ревью не воскресает. Отказ говорит «эти сюжеты не образуют сквозного
+    # паттерна», и это утверждение о связности, а не о свежести: затухать нечему.
+    # Замер 17 августа: без этой проверки все десять «затухающих» в выпуске оказались
+    # ровно теми трендами, которые ревью выбросило минутой раньше, — перенос молча
+    # отменял его работу.
+    present = {str(trend["trend_id"]) for trend, _ in trends} | (rejected_ids or set())
     try:
         rows = conn.execute("SELECT * FROM trend_history").fetchall()
     except sqlite3.Error:
@@ -7345,6 +7371,7 @@ async def run_engine_cycle(
                 story_release_id=stories.story_release_id,
                 method=use_trend_method,
                 params=trend_params,
+                carry_history=True,
             )
     pulse_result: dict[str, Any] | None = None
     if pulse:
