@@ -101,7 +101,7 @@
         <p class="section-note">
             Тренд затухает: свежих материалов нет с {{ trend.last_seen }}.
             Сюжеты остались в выпуске, где он был живым — найти их можно
-            <a href="/stories?{{ analysis_query }}&amp;q={{ trend.name_ru | urlencode }}">поиском по названию</a>.
+            <a href="/stories?{{ analysis_query }}&amp;q={{ trend.title | urlencode }}">поиском по названию</a>.
             Пока сила тренда держится выше порога, он остаётся на странице; затем уходит.
         </p>
         {% else %}
