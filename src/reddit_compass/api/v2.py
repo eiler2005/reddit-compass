@@ -316,6 +316,9 @@ class TrendOut(BaseModel):
     source_clusters: dict[str, int] = Field(default_factory=dict)
     project_scores: dict[str, int] = Field(default_factory=dict)
     evidence_story_ids: list[str] = Field(default_factory=list)
+    # Снимок доказательств затухающего тренда: его материал вне текущего выпуска,
+    # и обычные карточки сюжетов пусты.
+    fading_evidence: list[dict[str, str]] = Field(default_factory=list)
     counterpoints: list[str] = Field(default_factory=list)
     review_status: str = "pending"
     # Иерархия theme → key event: пустой parent_trend_id — корень. Дети приезжают вместе
@@ -1147,6 +1150,7 @@ def _trend_out(
     stories: list[PublishedStoryOut] | None = None,
     source_clusters: dict[str, int] | None = None,
     children: list[TrendOut] | None = None,
+    fading_evidence: list[dict[str, str]] | None = None,
 ) -> TrendOut:
     return TrendOut(
         trend_id=str(row["trend_id"]),
@@ -1163,6 +1167,7 @@ def _trend_out(
         source_count=int(row["source_count"] or 0),
         project_scores=_json_int_dict(row["project_scores"]),
         evidence_story_ids=_json_list(row["evidence_story_ids"]),
+        fading_evidence=fading_evidence or [],
         counterpoints=_json_list(row["counterpoints"]),
         review_status=str(_row_value(row, "review_status", "pending") or "pending"),
         # Только через `_row_value`: `open_engine_readonly` не мигрирует, поэтому колонки
@@ -1174,6 +1179,37 @@ def _trend_out(
         source_clusters=source_clusters or {},
         stories=stories or [],
     )
+
+
+def _fading_trend_evidence(conn: sqlite3.Connection, trend_id: str) -> list[dict[str, str]]:
+    """Снимок доказательств затухающего тренда из истории.
+
+    Материал перенесённого тренда остался в прежнем выпуске, поэтому обычный JOIN с
+    сюжетами текущего релиза ничего не даёт. Снимок — заголовки и даты нескольких
+    сильнейших сюжетов — позволяет показать, о чём тренд был, не выдавая старый материал
+    за сегодняшний: карточки помечены датами и ведут в поиск, а не в текущий выпуск.
+    """
+    if not _has_column(conn, "trend_history", "evidence_json"):
+        return []
+    try:
+        row = conn.execute(
+            "SELECT evidence_json FROM trend_history WHERE trend_id = ?", (trend_id,)
+        ).fetchone()
+    except sqlite3.Error:
+        return []
+    if row is None:
+        return []
+    try:
+        items = json.loads(str(row["evidence_json"]) or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(items, list):
+        return []
+    return [
+        {str(key): str(value) for key, value in item.items()}
+        for item in items
+        if isinstance(item, dict)
+    ]
 
 
 def _trend_stories(
@@ -1358,10 +1394,18 @@ def _engine_trends(
             if include_stories
             else []
         )
+        # Затухающему тренду карточки берём из снимка истории: его сюжеты остались в
+        # прежнем выпуске, и обычный JOIN даёт пустоту.
+        fading_evidence = (
+            _fading_trend_evidence(conn, str(row["trend_id"]))
+            if not stories and str(_row_value(row, "lifecycle", "")) == "fading"
+            else []
+        )
         trends.append(
             _trend_out(
                 row,
                 stories=stories,
+                fading_evidence=fading_evidence,
                 source_clusters=clusters_by_trend.get(str(row["trend_id"]), {}),
                 children=[
                     _trend_out(child) for child in children_by_parent.get(str(row["trend_id"]), [])

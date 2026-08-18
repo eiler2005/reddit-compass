@@ -247,3 +247,55 @@ def test_rejected_trend_is_not_resurrected_as_fading(tmp_path) -> None:
     )
 
     assert [t["trend_id"] for t, _ in carried] == ["trend_kept"]
+
+
+def test_fading_trend_keeps_an_evidence_snapshot(tmp_path) -> None:
+    """У затухающего тренда есть чем себя показать, хотя его сюжеты вне выпуска.
+
+    Обычный JOIN с сюжетами текущего релиза даёт пустоту: материал остался в прежнем.
+    Без снимка страница показывала бы тренд без единой карточки, и читатель принимал бы
+    нормальное состояние за поломку.
+    """
+    from datetime import date as _date
+
+    from reddit_compass.intelligence.engine import (
+        carry_over_fading_trends,
+        engine_db,
+        record_trend_history,
+    )
+
+    conn = engine_db(tmp_path / "trend_engine.db")
+    conn.execute(
+        """INSERT INTO engine_stories
+           (story_release_id, story_id, canonical_key, title, source_count, item_count,
+            first_seen, last_seen)
+           VALUES ('stories_old', 'story_a', 'k', 'OpenAI выпустила модель', 3, 4,
+                   '2026-08-12', '2026-08-14')"""
+    )
+    conn.commit()
+    live = [
+        (
+            {
+                "trend_id": "trend_launch_ai",
+                "name_ru": "product launches in AI",
+                "pattern": "p",
+                "domain_ids": ["ai_technology"],
+                "first_seen": "2026-08-10",
+                "last_seen": "2026-08-14",
+                "story_count": 20,
+                "source_count": 5,
+                "distinct_actors": ["a", "b", "c", "d", "e"],
+                "review_status": "confirmed",
+            },
+            [("story_a", 1.0, "")],
+        )
+    ]
+    record_trend_history(conn, live, story_release_id="stories_old", now="2026-08-14T16:00:00Z")
+
+    carried = carry_over_fading_trends(conn, [], today=_date(2026, 8, 16))
+
+    assert len(carried) == 1
+    evidence = carried[0][0]["carried_evidence"]
+    assert [item["title"] for item in evidence] == ["OpenAI выпустила модель"]
+    # Дата снимка сохранена: старый материал не должен выглядеть сегодняшним.
+    assert evidence[0]["last_seen"] == "2026-08-14"

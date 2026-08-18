@@ -311,6 +311,10 @@ CREATE TABLE IF NOT EXISTS trend_history (
     -- Откуда брать материал, если тренд уже вне текущего выпуска: страница детали
     -- честно ссылается на выпуск, где он в последний раз был живым.
     source_release_id TEXT NOT NULL DEFAULT '',
+    -- Снимок доказательств: заголовки и даты нескольких сильнейших сюжетов. Нужен
+    -- затухающему тренду, чей материал остался в прежнем выпуске: без снимка страница
+    -- показывала бы тренд без единой карточки, и читатель принимал бы это за поломку.
+    evidence_json     TEXT NOT NULL DEFAULT '[]',
     updated_at        TEXT NOT NULL DEFAULT ''
 );
 
@@ -786,6 +790,7 @@ def migrate_engine(conn: sqlite3.Connection) -> None:
     # Сила тренда появилась 16 августа; существующие базы получают колонку миграцией,
     # а старые выпуски остаются с нулём — их порядок уже зафиксирован публикацией.
     _ensure_engine_column(conn, "engine_trends", "strength", "REAL NOT NULL DEFAULT 0.0")
+    _ensure_engine_column(conn, "trend_history", "evidence_json", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_engine_column(
         conn,
         "radar_publications",
@@ -5536,6 +5541,21 @@ def _trend_review_payload(
     ]
 
 
+def _json_dict_list(raw: object) -> list[dict[str, str]]:
+    """Список объектов из JSON-поля. Мусор превращается в пустой список, а не в отказ."""
+    try:
+        items = json.loads(str(raw) or "[]")
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(items, list):
+        return []
+    return [
+        {str(key): str(value) for key, value in item.items()}
+        for item in items
+        if isinstance(item, dict)
+    ]
+
+
 def record_trend_history(
     conn: sqlite3.Connection,
     trends: list[tuple[dict[str, Any], list[tuple[str, float, str]]]],
@@ -5554,14 +5574,34 @@ def record_trend_history(
     был в лучший свой день, и это единственное, что нельзя восстановить из текущего
     выпуска.
     """
-    for trend, _ in trends:
+    for trend, memberships in trends:
+        # Снимок нескольких сильнейших сюжетов: заголовок и даты. Именно он даёт
+        # затухающему тренду карточки, когда его материал уже вне выпуска.
+        top_ids = [story_id for story_id, _, _ in memberships[:6]]
+        evidence: list[dict[str, str]] = []
+        if top_ids:
+            placeholders = ",".join("?" * len(top_ids))
+            for row in conn.execute(
+                f"""SELECT story_id, title, first_seen, last_seen
+                    FROM engine_stories
+                    WHERE story_release_id = ? AND story_id IN ({placeholders})""",
+                (story_release_id, *top_ids),
+            ):
+                evidence.append(
+                    {
+                        "story_id": str(row["story_id"]),
+                        "title": str(row["title"]),
+                        "first_seen": str(row["first_seen"] or ""),
+                        "last_seen": str(row["last_seen"] or ""),
+                    }
+                )
         conn.execute(
             """
             INSERT INTO trend_history (
                 trend_id, name_ru, pattern, domain_ids, first_seen, last_seen,
                 story_count, source_count, distinct_actors, review_status,
-                peak_story_count, source_release_id, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                peak_story_count, source_release_id, evidence_json, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(trend_id) DO UPDATE SET
                 name_ru = excluded.name_ru,
                 pattern = excluded.pattern,
@@ -5574,6 +5614,12 @@ def record_trend_history(
                 review_status = excluded.review_status,
                 peak_story_count = MAX(trend_history.peak_story_count, excluded.story_count),
                 source_release_id = excluded.source_release_id,
+                -- Снимок обновляем только когда он непустой: у тренда без сюжетов
+                -- в этом прогоне прежние доказательства ценнее пустоты.
+                evidence_json = CASE
+                    WHEN excluded.evidence_json = '[]' THEN trend_history.evidence_json
+                    ELSE excluded.evidence_json
+                END,
                 updated_at = excluded.updated_at
             """,
             (
@@ -5589,6 +5635,7 @@ def record_trend_history(
                 trend.get("review_status", "pending"),
                 int(trend.get("story_count") or 0),
                 story_release_id,
+                _json(evidence),
                 now,
             ),
         )
@@ -5624,6 +5671,9 @@ def carry_over_fading_trends(
     except sqlite3.Error:
         return trends
 
+    # Колонка снимка появилась позже самой таблицы: база на диске может быть старше
+    # кода, и обращение к отсутствующему полю уронило бы весь цикл.
+    has_evidence_column = bool(rows) and "evidence_json" in set(rows[0].keys())
     carried: list[tuple[dict[str, Any], list[tuple[str, float, str]]]] = []
     for row in rows:
         trend_id = str(row["trend_id"])
@@ -5664,6 +5714,11 @@ def carry_over_fading_trends(
                     "review_id": "",
                     "distinct_actors": actors,
                     "carried_from_release": str(row["source_release_id"] or ""),
+                    # `_json_list` приводит элементы к строкам — он для списков
+                    # идентификаторов. Снимок это объекты, поэтому разбираем сами.
+                    "carried_evidence": (
+                        _json_dict_list(row["evidence_json"]) if has_evidence_column else []
+                    ),
                     "strength_override": strength,
                 },
                 [],

@@ -100,10 +100,28 @@
         {% if not trend.stories and trend.lifecycle == 'fading' %}
         <p class="section-note">
             Тренд затухает: свежих материалов нет с {{ trend.last_seen }}.
+            Пока сила держится выше порога, он остаётся на странице; затем уходит.
+            {% if not trend.fading_evidence %}
             Сюжеты остались в выпуске, где он был живым — найти их можно
             <a href="/stories?{{ analysis_query }}&amp;q={{ trend.title | urlencode }}">поиском по названию</a>.
-            Пока сила тренда держится выше порога, он остаётся на странице; затем уходит.
+            {% endif %}
         </p>
+        {# Снимок из истории: заголовки и даты того материала, на котором тренд стоял.
+           Даты показаны явно, чтобы старое не выглядело сегодняшним, и ссылки ведут в
+           поиск, а не в текущий выпуск, где этих сюжетов уже нет. #}
+        {% if trend.fading_evidence %}
+        <ul class="fading-evidence">
+            {% for item in trend.fading_evidence %}
+            <li>
+                <span class="fading-evidence-date">{{ item.last_seen }}</span>
+                <a href="/stories?{{ analysis_query }}&amp;q={{ item.title | urlencode }}">{{ item.title }}</a>
+            </li>
+            {% endfor %}
+        </ul>
+        <p class="section-note">
+            Материал из выпуска, где тренд был живым; в текущем его нет.
+        </p>
+        {% endif %}
         {% else %}
         <p class="section-note">
             Показано {{ trend.stories|length }} из {{ trend.story_count }} stories.

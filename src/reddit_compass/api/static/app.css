@@ -3019,3 +3019,18 @@ a.story-card {
     color: var(--error);
     background: transparent;
 }
+
+/* Снимок доказательств затухающего тренда: старый материал с явными датами, чтобы он
+   не выглядел сегодняшним. */
+.fading-evidence {
+    margin: var(--space-2) 0 0;
+    padding-left: var(--space-4);
+    font-size: var(--text-sm);
+}
+
+.fading-evidence-date {
+    margin-right: var(--space-2);
+    font-family: var(--font-mono);
+    font-size: var(--text-xs);
+    color: var(--text-muted);
+}

@@ -5,10 +5,13 @@ Jinja2 templates с autoescape. Security headers.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import secrets
 import sqlite3
+import time
 from collections.abc import Generator
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -86,12 +89,55 @@ def _engine_path() -> Path:
     return Path(os.environ.get("RC_ENGINE_DB_PATH", str(DEFAULT_ENGINE_DB_PATH)))
 
 
+# Срок жизни CSRF-токена. Час — столько, сколько человек может держать открытой
+# страницу перед нажатием кнопки; больше не нужно, а меньше начнёт отвергать
+# добросовестные действия.
+_CSRF_TTL_SECONDS = 3600
+
+
+def _csrf_secret() -> bytes:
+    """Тот же секрет, что подписывает JWT: отдельный ключ добавил бы ещё одну
+    настройку, которую забудут задать на проде, и защита деградировала бы молча."""
+    from .auth import _get_secret
+
+    return _get_secret().encode("utf-8")
+
+
 def _generate_csrf_token() -> str:
-    return secrets.token_hex(32)
+    """Подписанный токен: случайная часть, время выпуска и HMAC от них.
+
+    Прежняя проверка сравнивала только длину строки — то есть годился любой набор из
+    шестидесяти четырёх символов, и защиты не было вовсе. Пока UI только читал, цена
+    была нулевой; с появлением кнопки публикации в нём появилось действие, меняющее то,
+    что видят все, поэтому проверка обязана быть настоящей.
+
+    Подпись без состояния на сервере: несколько воркеров uvicorn не делят память, и
+    хранить выданные токены значило бы либо ломаться при масштабировании, либо тащить
+    общее хранилище ради одного пользователя.
+    """
+    nonce = secrets.token_hex(16)
+    issued = str(int(time.time()))
+    payload = f"{nonce}.{issued}"
+    signature = hmac.new(_csrf_secret(), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    return f"{payload}.{signature}"
 
 
 def _validate_csrf_token(token: str) -> bool:
-    return len(token) == 64
+    """Проверяет подпись и срок. Любая неполнота — отказ."""
+    parts = (token or "").split(".")
+    if len(parts) != 3:
+        return False
+    nonce, issued, signature = parts
+    expected = hmac.new(_csrf_secret(), f"{nonce}.{issued}".encode(), hashlib.sha256).hexdigest()
+    # `compare_digest` вместо `==`: сравнение строк выходит на первом различии и по
+    # времени ответа выдаёт, сколько символов подписи угадано.
+    if not hmac.compare_digest(signature, expected):
+        return False
+    try:
+        age = time.time() - int(issued)
+    except ValueError:
+        return False
+    return 0 <= age <= _CSRF_TTL_SECONDS
 
 
 def _safe_url(url: str) -> str:
