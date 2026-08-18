@@ -17,7 +17,14 @@
             <input type="search" name="q" value="{{ filters.q }}" placeholder="Поиск по трендам">
             <input type="text" name="domain" value="{{ filters.domain }}" placeholder="domain_id">
             <input type="text" name="lifecycle" value="{{ filters.lifecycle }}" placeholder="new, growing, fading">
-            <input type="text" name="review_status" value="{{ filters.review_status }}" placeholder="pending или confirmed">
+            {# Галочка вместо поля со словом `confirmed`: фильтр должен быть доступен
+               тому, кто не помнит внутренних названий статусов. По умолчанию показываем
+               всё — скрывать непроверенное молча значит снова решать за читателя. #}
+            <label class="filter-check">
+                <input type="checkbox" name="review_status" value="confirmed"
+                       {% if filters.review_status == "confirmed" %}checked{% endif %}>
+                только проверенные
+            </label>
             <input type="text" name="project_id" value="{{ filters.project_id }}" placeholder="book или rbc">
             <select name="sort" aria-label="Сортировка Trends">
                 <option value="strength"{% if filters.sort == "strength" %} selected{% endif %}>По уверенности</option>
@@ -35,6 +42,11 @@
     <section class="section">
         <div class="row-list">
             {% for trend in trends["items"] %}
+            {# Проверен состав или нет — первое, что читателю нужно знать: имя у корзины
+               и у настоящего тренда одинаково приличное, его строит один и тот же
+               композитор, а различает их только вердикт ревью. Раньше это лежало
+               техническим токеном `pending` четвёртым в строке мета, где читается как
+               «в процессе», а не «никто не смотрел». #}
             {% with
                 row_url="/trends/" ~ trend.trend_id ~ "?" ~ analysis_query,
                 row_title=trend.title,
@@ -42,13 +54,13 @@
                 row_summary=trend.pattern,
                 row_weight=trend.source_count,
                 row_badges=[
+                    ("review-badge review-badge-" ~ trend.review_status,
+                     "состав проверен" if trend.review_status == "confirmed" else "состав не проверен"),
                     ("direction-badge", trend.lifecycle),
-                    ("confidence-badge", "%.0f"|format(trend.confidence * 100) ~ "% confidence")
                 ],
                 row_meta=[
                     trend.story_count ~ " событий",
                     trend.source_count ~ " акторов",
-                    trend.review_status,
                     "даты: " ~ trend.first_seen ~ " → " ~ trend.last_seen
                 ],
                 row_children=trend.children,

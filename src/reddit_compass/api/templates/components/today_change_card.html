@@ -9,7 +9,9 @@
         {% if trend.source_scope_label %}
         <span class="scope-badge scope-{{ trend.source_scope }}">{{ trend.source_scope_label }}</span>
         {% endif %}
-        <span>{{ trend.review_label }}</span>
+        {# Метка проверки — не рядовое поле мета: это единственное, что отличает
+           подтверждённое явление от совпадения по формальному признаку. #}
+        <span class="review-badge review-badge-{{ trend.review_status }}">{{ trend.review_label }}</span>
         <span>{{ trend.confidence_pct }}%</span>
     </div>
     <h3>{{ trend.title }}</h3>

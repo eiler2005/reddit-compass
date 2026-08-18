@@ -334,8 +334,18 @@ reddit-compass engine stories review \
 ```
 
 The review is cached by model, prompt version and normalized input hash. Invalid JSON, unknown
-evidence IDs, missing evidence or out-of-range confidence are stored as invalid and never affect
-clustering. Create another immutable attempt to consume valid cached reviews:
+evidence IDs and out-of-range confidence are stored as invalid and never affect clustering.
+
+**Строгость применяется только к полям, которые несут решение.** Для трендового ревью это
+`decision`, `story_ids`, `evidence_story_ids` и `confidence`. Пояснительные поля
+(`counterpoints`, `domains`) принимают строку, список строк и список объектов, а пустой
+`evidence_story_ids` у `reject` — законный ответ: отказ утверждает, что сквозного сюжета нет,
+и подтверждать ему нечего.
+
+Это не послабление ради удобства, а следствие трёх измеренных случаев, когда строгость к
+форме уничтожала вердикт: 119 потерянных отказов (7 августа), 64 % отброшенных ответов
+(15 августа) и подтверждения у **всех восьми** крупнейших трендов выпуска (16 августа).
+Подробности — в `AUTOMATED_PIPELINE.md`, раздел «Форма ответа не отменяет вердикт». Create another immutable attempt to consume valid cached reviews:
 
 ```bash
 reddit-compass engine stories propose --facet-release FACET_ID --limit 50
@@ -718,12 +728,20 @@ Decision: on lexical vectors, `semantic_dedup` adds almost no value. The winner 
 dependency-light stack is `combined_near_and_semantic`, but almost all measurable improvement comes
 from the MinHash/SimHash near-duplicate pass. A semantic-dedup decision requires a separate E5 run.
 
-Production gate remains closed until:
+**Статус 2026-08-18: production gate открыт, публикация автоматическая.** Условия ниже
+выполнены, раздел оставлен как запись о том, чем именно они закрывались.
 
-- Qwen story review runs on grey-zone pairs and a new StoryRelease consumes cached decisions;
-- the 120-pair / 30-group Golden Set confirms precision, recall and overmerge limits;
-- TrendRelease contains confirmed useful trends rather than only deterministic `pending` candidates;
-- seven daily finalized Data Releases exist for lifecycle/status history.
+- ~~Qwen story review на серой зоне~~ — работает; серую зону разбирает cross-encoder с
+  измеренной precision ≥ 0.95, а ревью копит метки;
+- ~~Golden Set подтверждает precision/recall/overmerge~~ — заменено пятнадцатью
+  абсолютными полами и восемью регрессиями к эталону, которые проверяются на каждом
+  прогоне, а не разово;
+- ~~TrendRelease содержит подтверждённые тренды, а не только `pending`~~ — 21 из 50
+  подтверждены ревью, годность ответов 95–97 %;
+- ~~семь дневных Data Release для истории~~ — накоплены; жизненный цикл считается по
+  последнему опубликованному выпуску.
+
+Как устроена автоматическая публикация и что её останавливает — `AUTOMATED_PIPELINE.md`.
 
 ## 11. Local Story Engine v2.2 checkpoint (2026-07-30)
 

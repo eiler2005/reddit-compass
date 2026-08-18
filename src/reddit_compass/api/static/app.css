@@ -3034,3 +3034,25 @@ a.story-card {
     font-size: var(--text-xs);
     color: var(--text-muted);
 }
+
+/* Метка проверки состава. Единственное, что отличает подтверждённое явление от
+   совпадения по формальному признаку: имя у обоих строит один и тот же композитор. */
+.review-badge {
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid currentColor;
+    border-radius: var(--radius);
+    font-size: var(--text-xs);
+    white-space: nowrap;
+}
+
+.review-badge-confirmed { color: var(--success); }
+.review-badge-pending { color: var(--text-muted); }
+.review-badge-rejected { color: var(--error); }
+
+.filter-check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    white-space: nowrap;
+}

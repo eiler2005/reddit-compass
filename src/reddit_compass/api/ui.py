@@ -241,9 +241,13 @@ _SCOPE_LABELS = {
     "mainstream_only": "только СМИ",
 }
 
+# Метка говорит про **состав**, а не про тренд вообще. «Машинный кандидат» не сообщал
+# главного: имя у настоящего тренда и у корзины вроде «rulings and verdicts in other
+# domains» одинаково приличное — его строит детерминированный композитор и охраняет пол
+# качества. Различает их только вердикт ревью о том, об одном ли явлении сюжеты.
 _REVIEW_LABELS = {
-    "confirmed": "проверено",
-    "pending": "машинный кандидат",
+    "confirmed": "состав проверен",
+    "pending": "состав не проверен",
     "rejected": "отклонено",
     "legacy": "legacy",
 }
@@ -973,6 +977,9 @@ def _today_change_candidates(
                 "source_scope_label": str(decorated.get("source_scope_label") or ""),
                 "source_scope": str(decorated.get("source_scope") or ""),
                 "review_label": str(decorated.get("review_label") or ""),
+                # Нужен шаблону, чтобы отличить метку проверенного от непроверенного
+                # цветом, а не только словом.
+                "review_status": str(decorated.get("review_status") or ""),
                 "confidence_pct": _as_int(decorated.get("confidence_pct")),
                 "source_count": _as_int(decorated.get("source_count")),
                 "story_count": _as_int(decorated.get("story_count")),

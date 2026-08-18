@@ -32,7 +32,7 @@ pay-as-you-go**. Эксклюзивом подписки остался толь
 | нормализация акторов | ~41 | «Linkedin» → «LinkedIn» | bulk | `qwen3.7-flash` |
 | классификация Pulse | батчами | pain points, релевантность | bulk | `qwen3.7-flash` |
 | ревью пары сюжетов | 629 | «это одно событие?» | bounded JSON | `qwen3.7-flash` |
-| трендовое ревью | 171 | когерентность 20 сюжетов | bounded JSON | `qwen3.7-flash` |
+| трендовое ревью | 60/ночь | когерентность 20 сюжетов | bounded JSON | `qwen3.7-flash` |
 | синтез | единицы | темы, сдвиги нарратива | synth | `qwen3.8-max` |
 
 Текущие list prices Model Studio для Singapore/international (проверены 5 августа 2026),
